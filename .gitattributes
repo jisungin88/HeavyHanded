@@ -1,0 +1,103 @@
+# =============================================================================
+# HEAVY HANDED — Git LFS / 줄바꿈 설정
+#
+# 언리얼의 .uasset / .umap 은 바이너리다. LFS 없이 커밋하면
+#   - 저장소가 수 GB로 불어나고
+#   - clone 이 몇십 분씩 걸리며
+#   - 되돌릴 방법이 사실상 없다.
+# 반드시 첫 커밋 전에 `git lfs install` 을 실행할 것.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 기본: 텍스트는 자동 판별, 줄바꿈은 저장소에 LF로 통일
+# -----------------------------------------------------------------------------
+* text=auto
+
+# -----------------------------------------------------------------------------
+# 언리얼 코어 바이너리 — LFS 필수
+# -----------------------------------------------------------------------------
+*.uasset  filter=lfs diff=lfs merge=lfs -text
+*.umap    filter=lfs diff=lfs merge=lfs -text
+*.ubulk   filter=lfs diff=lfs merge=lfs -text
+*.uexp    filter=lfs diff=lfs merge=lfs -text
+*.upack   filter=lfs diff=lfs merge=lfs -text
+*.udk     filter=lfs diff=lfs merge=lfs -text
+*.uptnl   filter=lfs diff=lfs merge=lfs -text
+
+# -----------------------------------------------------------------------------
+# 3D / 애니메이션
+# -----------------------------------------------------------------------------
+*.fbx     filter=lfs diff=lfs merge=lfs -text
+*.obj     filter=lfs diff=lfs merge=lfs -text
+*.abc     filter=lfs diff=lfs merge=lfs -text
+*.gltf    filter=lfs diff=lfs merge=lfs -text
+*.glb     filter=lfs diff=lfs merge=lfs -text
+*.blend   filter=lfs diff=lfs merge=lfs -text
+
+# -----------------------------------------------------------------------------
+# 텍스처 / 이미지
+# -----------------------------------------------------------------------------
+*.png     filter=lfs diff=lfs merge=lfs -text
+*.jpg     filter=lfs diff=lfs merge=lfs -text
+*.jpeg    filter=lfs diff=lfs merge=lfs -text
+*.tga     filter=lfs diff=lfs merge=lfs -text
+*.bmp     filter=lfs diff=lfs merge=lfs -text
+*.tif     filter=lfs diff=lfs merge=lfs -text
+*.tiff    filter=lfs diff=lfs merge=lfs -text
+*.exr     filter=lfs diff=lfs merge=lfs -text
+*.hdr     filter=lfs diff=lfs merge=lfs -text
+*.psd     filter=lfs diff=lfs merge=lfs -text
+*.psb     filter=lfs diff=lfs merge=lfs -text
+
+# -----------------------------------------------------------------------------
+# 오디오 — 이 게임은 사운드가 기능이다. 초반부터 임시본이라도 들어온다.
+# -----------------------------------------------------------------------------
+*.wav     filter=lfs diff=lfs merge=lfs -text
+*.mp3     filter=lfs diff=lfs merge=lfs -text
+*.ogg     filter=lfs diff=lfs merge=lfs -text
+*.flac    filter=lfs diff=lfs merge=lfs -text
+*.aif     filter=lfs diff=lfs merge=lfs -text
+*.aiff    filter=lfs diff=lfs merge=lfs -text
+
+# -----------------------------------------------------------------------------
+# 폰트 / 영상 / 압축
+# -----------------------------------------------------------------------------
+*.ttf     filter=lfs diff=lfs merge=lfs -text
+*.otf     filter=lfs diff=lfs merge=lfs -text
+*.mp4     filter=lfs diff=lfs merge=lfs -text
+*.mov     filter=lfs diff=lfs merge=lfs -text
+*.avi     filter=lfs diff=lfs merge=lfs -text
+*.zip     filter=lfs diff=lfs merge=lfs -text
+*.7z      filter=lfs diff=lfs merge=lfs -text
+*.rar     filter=lfs diff=lfs merge=lfs -text
+
+# -----------------------------------------------------------------------------
+# 텍스트 파일: 줄바꿈 명시 (CRLF/LF 혼재로 인한 가짜 diff 방지)
+# -----------------------------------------------------------------------------
+*.cpp     text eol=lf
+*.h       text eol=lf
+*.cs      text eol=lf
+*.ini     text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.uproject   text eol=lf
+*.uplugin    text eol=lf
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
+*.sh      text eol=lf
+
+# =============================================================================
+# [선택] 파일 락(lock) — 바이너리 동시 편집 사고를 원천 차단하고 싶을 때
+#
+# 아래 주석을 해제하면 .uasset/.umap 이 기본 "읽기 전용"이 되고,
+#   git lfs lock   Content/.../BP_Foo.uasset   → 잠그고 편집
+#   git lfs unlock Content/.../BP_Foo.uasset   → 푸시 후 해제
+# 를 거쳐야만 수정할 수 있다.
+#
+# 장점: 두 명이 같은 블루프린트를 고쳐서 한쪽 작업이 날아가는 사고가 사라진다.
+# 단점: 락을 모르는 팀원이 "에디터에서 저장이 안 돼요" 상태에 빠진다.
+#       → 팀 전원이 락 절차를 숙지한 뒤에 켤 것. (권장: 2주차 이후 도입)
+#
+# *.uasset filter=lfs diff=lfs merge=lfs -text lockable
+# *.umap   filter=lfs diff=lfs merge=lfs -text lockable
+# =============================================================================
