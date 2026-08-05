@@ -8,7 +8,12 @@ public class HeavyHanded : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
+		PublicDependencyModuleNames.AddRange(new string[] 
+		{
+			"Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
+			"GameplayTags", "PhysicsCore", "AIModule",
+			"DeveloperSettings"
+		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 
