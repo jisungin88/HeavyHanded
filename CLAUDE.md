@@ -168,6 +168,6 @@ git merge origin/develop
 
 **남의 파일을 수정하지 않고 호출만 한다. 남의 클래스를 고치는 대신 컴포넌트를 준다.**
 
-### 진행 중인 작업 문서
+### 시스템 문서
 
-- [Docs/NoiseSystem_Handoff.md](Docs/NoiseSystem_Handoff.md) — 소음 · 경계도 시스템 인수인계 및 단계별 계획
+- [Docs/NoiseSystem.md](Docs/NoiseSystem.md) — 소음 · 경계도 시스템. 팀 API, 확정된 설계 결정, 디버그 명령, 열린 항목
