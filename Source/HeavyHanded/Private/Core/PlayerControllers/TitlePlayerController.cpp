@@ -273,8 +273,35 @@ void ATitlePlayerController::TitleFindSessions()
 }
 
 void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
+//void ATitlePlayerController::TitleJoinSession(int32 SearchIndex, const FOnlineSessionSearchResult& Result)
 {
+    /*
+    if (!SessionInterface.IsValid())
+    {
+        return;
+    }
 
+
+    JoinHandle =
+        SessionInterface->AddOnJoinSessionCompleteDelegate_Handle(
+            FOnJoinSessionCompleteDelegate::CreateUObject(
+                this,
+                &ATitlePlayerController::TitleOnJoinSessionComplete)
+        );
+
+
+    bool bStarted =
+        SessionInterface->JoinSession(
+            0,
+            NAME_GameSession,
+            Result
+        );
+
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("JoinSession Started = %d"),
+        bStarted);
+        */
 }
 
 
@@ -441,6 +468,7 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
         NewRoom.MaxPlayers =
             Result.Session.SessionSettings.NumPublicConnections;
 
+        NewRoom.SessionResult = Result;
 
         RoomList.Add(NewRoom);
 
@@ -456,6 +484,51 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 
 void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
 {
+    if (SessionInterface.IsValid())
+    {
+        SessionInterface->ClearOnJoinSessionCompleteDelegate_Handle(
+            JoinHandle);
+    }
+
+
+    if (Result != EOnJoinSessionCompleteResult::Success)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("Join Failed : %d"),
+            (int32)Result);
+
+        return;
+    }
+
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Join Success"));
+
+
+    FString ConnectString;
+
+
+    if (!SessionInterface->GetResolvedConnectString(
+        SessionName,
+        ConnectString))
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("Get Connect String Failed"));
+        return;
+    }
+
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Connect String : %s"),
+        *ConnectString);
+
+
+    ClientTravel(
+        ConnectString,
+        TRAVEL_Absolute
+    );
+
+
 }
 
 FString ATitlePlayerController::GenerateRoomCode()

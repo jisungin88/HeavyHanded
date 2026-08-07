@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "OnlineSessionSettings.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "TitlePlayerController.generated.h"
 
@@ -24,6 +25,10 @@ struct FRoomListData
 
     UPROPERTY(BlueprintReadOnly)
     int32 MaxPlayers;
+
+
+    FOnlineSessionSearchResult SessionResult;
+
 };
 
 
@@ -67,6 +72,8 @@ public:
 
     UFUNCTION(BlueprintCallable)
     void TitleJoinSession(int32 SearchIndex);
+    //void TitleJoinSession(int32 SearchIndex, const FOnlineSessionSearchResult& Result);
+    //void TitleJoinSession(const FOnlineSessionSearchResult& Result)
 
 
 private:
