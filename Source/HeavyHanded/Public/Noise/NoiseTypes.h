@@ -18,14 +18,14 @@ enum class ENoiseGrade : uint8
 	Huge
 };
 
-// 경계도 4단계. 기획서 3장.
+// 경계도 4단계. 기획서 3장. 이름은 팀 컨벤션 2-2 예시(EAlertLevel)를 따른다.
 UENUM(BlueprintType)
-enum class EAlertStage : uint8
+enum class EAlertLevel : uint8
 {
-	Calm,        // 평온   0~33%
-	Suspicious,  // 의심  34~66%
-	Alerted,     // 경계  67~99%
-	Alarm        // 경보    100%
+	Calm        UMETA(DisplayName = "평온"),        // 0~33%
+	Suspicious  UMETA(DisplayName = "의심"),        // 34~66%
+	Alerted     UMETA(DisplayName = "경계"),        // 67~99%
+	Alarm       UMETA(DisplayName = "경보")         // 100%
 };
 
 // DT_NoiseProfiles 한 행. RowName == 게임플레이 태그 이름 (예: Noise.Loot.Throw)

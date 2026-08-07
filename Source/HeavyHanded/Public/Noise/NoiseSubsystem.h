@@ -10,6 +10,17 @@ class AActor;
 class INoiseListener;
 class UDataTable;
 
+/**
+ * 감쇄가 적용되기 전의 소음 1건. 저택 전체가 공유하는 정보라 청취자 위치 개념이 없다.
+ *
+ * 경계도(UAlertComponent)와 "최다 소음 유발자" 집계처럼 위치가 없는 구독자가 여기에 붙는다.
+ * 경비처럼 위치에 따라 다르게 들려야 하는 쪽은 INoiseListener 를 쓸 것.
+ *
+ * BP 노출이 필요 없는 C++ 전용 훅이라 다이내믹 델리게이트로 두지 않았다.
+ */
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnNoiseReported,
+	const FNoiseEvent& /*Event*/, const FNoiseProfileRow& /*Profile*/, AActor* /*Instigator*/);
+
 /** 지속형 소음 1건 (대형 금고 절단 등). 핸들로 시작/정지한다 */
 USTRUCT()
 struct FContinuousNoise
@@ -71,6 +82,12 @@ public:
 
 	/** 태그로 프로파일 조회. 정확히 일치하는 행이 없으면 부모 태그로 거슬러 올라간다 */
 	const FNoiseProfileRow* FindProfile(FGameplayTag Tag);
+
+	// ── 구독 ──
+
+	/** 감쇄 전 이벤트. Propagate 직전에 서버에서만 브로드캐스트된다 */
+	FOnNoiseReported OnNoiseReported;
+
 private:
 	bool HasNoiseAuthority() const;
 

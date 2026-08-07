@@ -166,6 +166,10 @@ void UNoiseSubsystem::ReportNoise(FGameplayTag Tag, FVector Location, float Loud
 	Event.Radius = Row->Radius * FMath::Lerp(0.6f, 1.0f, Loudness);
 	Event.InstigatorActor = Instigator;
 
+	// 감쇄 전 구독자(경계도 · 소음 유발자 집계)에게 먼저 알린다.
+	// 청취자 반응이 소음을 재발행하더라도 경계도는 한 번만 오르게 하려는 순서다
+	OnNoiseReported.Broadcast(Event, *Row, Instigator);
+
 	Propagate(Event, Row->Grade, Row->bGlobal);
 }
 
