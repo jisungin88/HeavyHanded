@@ -12,6 +12,9 @@
 #include "Noise/NoiseListener.h"
 #include "Noise/NoiseSettings.h"
 
+#include "GameFramework/GameStateBase.h"
+#include "Alert/AlertComponent.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogNoise, Log, All);
 
 namespace
@@ -59,16 +62,46 @@ void UNoiseSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	Listeners.Reset();
 	ContinuousNoises.Reset();
+	
+	// 경계도 컴포넌트를 GameState 에 자동 부착한다.
+	// GameMode/GameState 클래스를 건드리지 않으려는 것 — 머지 충돌 회피
+	if (UWorld* World = GetWorld())
+	{
+		if (AGameStateBase* ExistingGameState = World->GetGameState())
+		{
+			HandleGameStateSet(ExistingGameState);   // 서브시스템이 늦게 만들어진 경우
+		}
+
+		GameStateSetHandle =
+				World->GameStateSetEvent.AddUObject(this, &UNoiseSubsystem::HandleGameStateSet);
+	}
 }
 
 void UNoiseSubsystem::Deinitialize()
 {
+	if (GameStateSetHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+		}
+		GameStateSetHandle.Reset();
+	}
+
 	Listeners.Reset();
 	ContinuousNoises.Reset();
 	CachedProfileTable = nullptr;
 	bProfileTableResolved = false;
 
 	Super::Deinitialize();
+}
+
+void UNoiseSubsystem::HandleGameStateSet(AGameStateBase* GameState)
+{
+	if (HasNoiseAuthority())
+	{
+		UAlertComponent::EnsureOnGameState(GameState);
+	}
 }
 
 TStatId UNoiseSubsystem::GetStatId() const

@@ -110,4 +110,9 @@ private:
 	TArray<TWeakObjectPtr<UObject>> Listeners;
 
 	TMap<FGuid, FContinuousNoise> ContinuousNoises;
+	
+	/** GameState 가 준비되면 경계도 컴포넌트를 붙인다. 서버 전용 */
+	void HandleGameStateSet(AGameStateBase* GameState);
+
+	FDelegateHandle GameStateSetHandle;
 };
