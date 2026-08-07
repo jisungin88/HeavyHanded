@@ -28,7 +28,8 @@ struct FRoomListData
 
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSessionCreated, bool, bSuccess);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRoomListUpdated);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomListUpdated, bool, bSuccess);
+//DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRoomListUpdated);
 
 /**
  * 
@@ -43,6 +44,8 @@ public:
     UPROPERTY(BlueprintReadOnly)
     TArray<FRoomListData> RoomList;
 
+    // ------------------------------------------------
+
     UPROPERTY(BlueprintAssignable, Category = "Session")
     FOnSessionCreated OnSessionCreated;
 
@@ -52,6 +55,8 @@ public:
     // -------------------------------------------------
 
     virtual void BeginPlay() override;
+    
+    // -------------------------------------------------
 
     UFUNCTION(BlueprintCallable)
     void TitleCreateSession
@@ -63,18 +68,21 @@ public:
     UFUNCTION(BlueprintCallable)
     void TitleJoinSession(int32 SearchIndex);
 
+
 private:
 
     IOnlineSessionPtr SessionInterface;
     
     TSharedPtr<FOnlineSessionSearch> SessionSearch;
     
+
     void TitleOnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
     
     void TitleOnFindSessionsComplete(bool bWasSuccessful);
     
     void TitleOnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
     
+
     FDelegateHandle CreateHandle;
     FDelegateHandle FindHandle;
     FDelegateHandle JoinHandle;

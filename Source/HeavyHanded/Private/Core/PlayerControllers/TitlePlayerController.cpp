@@ -20,13 +20,40 @@ void ATitlePlayerController::BeginPlay()
 void ATitlePlayerController::TitleCreateSession
     (const FString& RoomName, int maxPlayer, bool isPublic)
 {
+    IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
+
+    if (OSS)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("OSS = %s"),
+            *OSS->GetSubsystemName().ToString());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("OSS NULL"));
+    }
+
+
     if (!SessionInterface.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
         return;
+    }
+
 
     if (SessionInterface->GetNamedSession(NAME_GameSession))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Existing Session Found"));
         SessionInterface->DestroySession(NAME_GameSession);
     }
+
+    // if (SessionInterface->GetNamedSession(NAME_GameSession))
+    // {
+    //     return;
+    // 
+    //     //SessionInterface->DestroySession(NAME_GameSession);
+    // }
 
     CreateHandle =
         SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(
@@ -34,18 +61,24 @@ void ATitlePlayerController::TitleCreateSession
                 this,
                 &ATitlePlayerController::TitleOnCreateSessionComplete));
 
+    UE_LOG(LogTemp, Warning, TEXT("Create Delegate Added"));
+
+
+
     FOnlineSessionSettings Settings;
 
     Settings.bIsLANMatch = true;
     Settings.NumPublicConnections = maxPlayer;
     Settings.bShouldAdvertise = true;
-    Settings.bAllowJoinInProgress = false;
-    Settings.bUsesPresence = true;
+    Settings.bAllowJoinInProgress = true;
+    Settings.bUsesPresence = false;
 
 
+    /*
     Settings.Set(
         FName(TEXT("ROOM_NAME")),
         RoomName,
+        //EOnlineDataAdvertisementType::ViaPing
         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
     );
 
@@ -60,27 +93,54 @@ void ATitlePlayerController::TitleCreateSession
             EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
         );
     }
+    */
 
-    SessionInterface->CreateSession(
+
+    bool bCreateStarted = SessionInterface->CreateSession(
         0,
         NAME_GameSession,
         Settings);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("CreateSession Called = %d"),
+        bCreateStarted);
 
 }
 
 void ATitlePlayerController::TitleFindSessions()
 {
-    FindHandle =
-        SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(
-            FOnFindSessionsCompleteDelegate::CreateUObject(
-                this,
-                &ATitlePlayerController::TitleOnFindSessionsComplete
-            )
-        );
+    if (!SessionInterface.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
+        return;
+    }
+
+    SessionSearch = MakeShared<FOnlineSessionSearch>();
+    SessionSearch->bIsLanQuery = true;
+    SessionSearch->MaxSearchResults = 100;
+
+    SessionSearch->QuerySettings.Set(
+        FName(TEXT("PRESENCE")),
+        false,
+        EOnlineComparisonOp::Equals
+    );
+
+    FindHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(
+        FOnFindSessionsCompleteDelegate::CreateUObject(
+            this,
+            &ATitlePlayerController::TitleOnFindSessionsComplete
+        )
+    );
+
+    SessionInterface->FindSessions(
+        0,
+        SessionSearch.ToSharedRef()
+    );
 }
 
 void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
 {
+
 }
 
 
@@ -94,16 +154,47 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
     }
 
 
-    if (bWasSuccessful)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Session Created"));
-    }
-    else
+    if (!bWasSuccessful)
     {
         UE_LOG(LogTemp, Error, TEXT("Session Create Failed"));
+        return;
     }
 
+    UE_LOG(LogTemp, Log, TEXT("Session Created"));
+
+
+
+    FNamedOnlineSession* Session =
+        SessionInterface->GetNamedSession(NAME_GameSession);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Session Exists = %s"),
+        Session ? TEXT("YES") : TEXT("NO"));
+
+    if (Session)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("Session State = %d"),
+            (int32)Session->SessionState);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("Advertise = %d"),
+            Session->SessionSettings.bShouldAdvertise);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("LAN = %d"),
+            Session->SessionSettings.bIsLANMatch);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("Connections = %d"),
+            Session->SessionSettings.NumPublicConnections);
+
+    }
+
+
+    SessionInterface->StartSession(NAME_GameSession);
     OnSessionCreated.Broadcast(bWasSuccessful);
+
 }
 
 
@@ -124,9 +215,11 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
     }
 
 
-    UE_LOG(LogTemp, Log,
-        TEXT("Found Sessions : %d"),
-        SessionSearch->SearchResults.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Find Success = %d"), bWasSuccessful);
+    UE_LOG(LogTemp, Warning, TEXT("Results = %d"), SessionSearch->SearchResults.Num());
+
+    //RoomList.Empty();
+    RoomList.Reset();
 
 
     for (const FOnlineSessionSearchResult& Result : SessionSearch->SearchResults)
@@ -180,7 +273,7 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 
 
     // 검색 완료 후 UI 갱신 알림
-    OnRoomListUpdated.Broadcast();
+    OnRoomListUpdated.Broadcast(bWasSuccessful);
 
 }
 
