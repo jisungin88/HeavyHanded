@@ -487,3 +487,47 @@ static FAutoConsoleCommandWithWorldAndArgs GAlertDumpCommand(
 	  TEXT("hh.Alert.Dump"),
 	  TEXT("hh.Alert.Dump [퍼센트] — 임계값과 입력값을 원시 비트까지 찍는다. 기본 67"),
 	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AlertDumpCommand));
+
+// 기획서 8장 "최다 소음 유발자" 집계 확인.
+// Instigator 가 제대로 심어져 있지 않으면 이 목록이 비어 있다
+static void AlertContributorsCommand(UWorld* World)
+{
+	if (!World)
+	{
+		return;
+	}
+
+	const UAlertComponent* Alert = UAlertComponent::Get(World);
+	if (!Alert)
+	{
+		UE_LOG(LogAlert, Warning, TEXT("GameState 에 AlertComponent 가 없습니다."));
+		return;
+	}
+
+	const TMap<TObjectPtr<APlayerState>, float>& Contribution = Alert->GetNoiseContribution();
+	if (Contribution.IsEmpty())
+	{
+		UE_LOG(LogAlert, Warning,
+				TEXT("소음 유발자 집계가 비어 있습니다. 소음원 액터에 Instigator 가 설정돼 있는지 확인하세요."));
+		return;
+	}
+
+	UE_LOG(LogAlert, Log, TEXT("── 소음 유발자 집계 (누적 경계도 기여량) ──"));
+	for (const TPair<TObjectPtr<APlayerState>, float>& Pair : Contribution)
+	{
+		UE_LOG(LogAlert, Log, TEXT("  %s : %.1f%%"),
+				IsValid(Pair.Key) ? *Pair.Key->GetPlayerName() : TEXT("(사라진 플레이어)"),
+				Pair.Value * 100.f);
+	}
+
+	float Top = 0.f;
+	if (const APlayerState* Noisiest = Alert->GetNoisiestPlayer(Top))
+	{
+		UE_LOG(LogAlert, Log, TEXT("최다 소음 유발자: %s (%.1f%%)"), *Noisiest->GetPlayerName(), Top * 100.f);
+	}
+}
+
+static FAutoConsoleCommandWithWorld GAlertContributorsCommand(
+	  TEXT("hh.Alert.Contributors"),
+	  TEXT("플레이어별 누적 소음 기여량과 최다 소음 유발자를 출력한다"),
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&AlertContributorsCommand));

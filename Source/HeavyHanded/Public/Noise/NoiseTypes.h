@@ -122,3 +122,27 @@ struct FNoiseStimulus
     UPROPERTY(BlueprintReadOnly, Category = "Noise")
     TObjectPtr<AActor> InstigatorActor = nullptr;
 };
+
+/**
+ * 소음 감쇄 · 치환 규칙 1건. 장비나 패시브가 UNoiseEmitterComponent 에 등록한다.
+ *
+ * 인터페이스가 아니라 값 구조체인 이유 — 다른 사람이 소음 코드를 상속하거나 수정하지 않고
+ * 등록/해제만으로 끝내게 하려는 것이다.
+ */
+USTRUCT(BlueprintType)
+struct FNoiseModifier
+{
+    GENERATED_BODY()
+
+    // 어떤 소음에 적용되는가. 비워두면 전부에 적용된다. 예: Noise.Player 하위 전부
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    FGameplayTagQuery AffectedTags;
+
+    // 소리 크기 배율. 고무창 신발 0.5, 완충 장갑 0.3
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise", meta = (ClampMin = "0.0"))
+    float Multiplier = 1.f;
+
+    // 미믹 "발소리 위장" 처럼 배율이 아니라 태그를 갈아끼우는 경우. 비워두면 원래 태그 유지
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    FGameplayTag OverrideTag;
+};
