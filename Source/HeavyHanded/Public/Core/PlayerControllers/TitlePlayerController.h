@@ -78,13 +78,18 @@ private:
 
     void TitleOnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
     
+    void TitleOnStartSessionComplete(FName SessionName, bool bWasSuccessful);
+
     void TitleOnFindSessionsComplete(bool bWasSuccessful);
     
     void TitleOnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
     
 
     FDelegateHandle CreateHandle;
+    FDelegateHandle StartHandle;
+
     FDelegateHandle FindHandle;
+
     FDelegateHandle JoinHandle;
 
 

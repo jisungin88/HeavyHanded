@@ -30,8 +30,7 @@ void ATitlePlayerController::TitleCreateSession
     }
     else
     {
-        UE_LOG(LogTemp, Error,
-            TEXT("OSS NULL"));
+        UE_LOG(LogTemp, Error, TEXT("OSS NULL"));
     }
 
 
@@ -42,18 +41,16 @@ void ATitlePlayerController::TitleCreateSession
     }
 
 
-    if (SessionInterface->GetNamedSession(NAME_GameSession))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Existing Session Found"));
-        SessionInterface->DestroySession(NAME_GameSession);
-    }
-
     // if (SessionInterface->GetNamedSession(NAME_GameSession))
     // {
     //     return;
-    // 
+    //     //UE_LOG(LogTemp, Warning, TEXT("Existing Session Found"));
     //     //SessionInterface->DestroySession(NAME_GameSession);
     // }
+
+
+
+
 
     CreateHandle =
         SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(
@@ -74,7 +71,7 @@ void ATitlePlayerController::TitleCreateSession
     Settings.bUsesPresence = false;
 
 
-    /*
+    
     Settings.Set(
         FName(TEXT("ROOM_NAME")),
         RoomName,
@@ -82,6 +79,7 @@ void ATitlePlayerController::TitleCreateSession
         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
     );
 
+    
     // 비공개 방만 코드 생성
     if (!isPublic)
     {
@@ -93,7 +91,15 @@ void ATitlePlayerController::TitleCreateSession
             EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
         );
     }
-    */
+    
+
+
+    StartHandle =
+        SessionInterface->AddOnStartSessionCompleteDelegate_Handle(
+            FOnStartSessionCompleteDelegate::CreateUObject(
+                this,
+                &ATitlePlayerController::TitleOnStartSessionComplete));
+
 
 
     bool bCreateStarted = SessionInterface->CreateSession(
@@ -109,6 +115,119 @@ void ATitlePlayerController::TitleCreateSession
 
 void ATitlePlayerController::TitleFindSessions()
 {
+
+    UE_LOG(LogTemp, Warning, TEXT("===== FindSessions Debug Start ====="));
+
+    // 현재 컨트롤러가 로컬 플레이어인지
+    UE_LOG(LogTemp, Warning,
+        TEXT("IsLocalController = %d"),
+        IsLocalController());
+
+    // 현재 NetMode 확인
+    FString NetModeString;
+
+    switch (GetNetMode())
+    {
+    case NM_Standalone:
+        NetModeString = TEXT("Standalone");
+        break;
+
+    case NM_DedicatedServer:
+        NetModeString = TEXT("DedicatedServer");
+        break;
+
+    case NM_ListenServer:
+        NetModeString = TEXT("ListenServer");
+        break;
+
+    case NM_Client:
+        NetModeString = TEXT("Client");
+        break;
+    }
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("NetMode = %s"),
+        *NetModeString);
+
+
+    // LocalPlayer 확인
+    ULocalPlayer* LP = GetLocalPlayer();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("LocalPlayer Valid = %d"),
+        LP != nullptr);
+
+
+    if (LP)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("ControllerId = %d"),
+            LP->GetControllerId());
+    }
+
+
+    // OnlineSubsystem 확인
+    IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("OSS = %s"),
+        OSS ? *OSS->GetSubsystemName().ToString() : TEXT("NULL"));
+
+
+    // SessionInterface 확인
+    UE_LOG(LogTemp, Warning,
+        TEXT("SessionInterface Valid = %d"),
+        SessionInterface.IsValid());
+
+
+
+
+
+    // -----------------------------
+
+    
+    //FString NetModeString;
+
+    // switch (GetNetMode())
+    // {
+    // case NM_Standalone:
+    //     NetModeString = TEXT("Standalone");
+    //     break;
+    // 
+    // case NM_DedicatedServer:
+    //     NetModeString = TEXT("DedicatedServer");
+    //     break;
+    // 
+    // case NM_ListenServer:
+    //     NetModeString = TEXT("ListenServer");
+    //     break;
+    // 
+    // case NM_Client:
+    //     NetModeString = TEXT("Client");
+    //     break;
+    // 
+    // default:
+    //     NetModeString = TEXT("Unknown");
+    //     break;
+    // }
+
+    //UE_LOG(LogTemp, Warning,
+    //    TEXT("NetMode = %s"),
+    //    *NetModeString);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("IsLocalController = %d"),
+        IsLocalController());
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("PlayerController Name = %s"),
+        *GetName());
+
+        
+
+    UE_LOG(LogTemp, Warning, TEXT("===== FindSessions Debug End ====="));
+
+
     if (!SessionInterface.IsValid())
     {
         UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
@@ -117,13 +236,8 @@ void ATitlePlayerController::TitleFindSessions()
 
     SessionSearch = MakeShared<FOnlineSessionSearch>();
     SessionSearch->bIsLanQuery = true;
-    SessionSearch->MaxSearchResults = 100;
+    SessionSearch->MaxSearchResults = 10;
 
-    SessionSearch->QuerySettings.Set(
-        FName(TEXT("PRESENCE")),
-        false,
-        EOnlineComparisonOp::Equals
-    );
 
     FindHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(
         FOnFindSessionsCompleteDelegate::CreateUObject(
@@ -132,10 +246,30 @@ void ATitlePlayerController::TitleFindSessions()
         )
     );
 
-    SessionInterface->FindSessions(
-        0,
+    //bool bStarted = SessionInterface->FindSessions(
+    //    0,
+    //    SessionSearch.ToSharedRef()
+    //);
+
+
+    int32 LocalPlayerNum = 0;
+    
+    if (GetLocalPlayer())
+    {
+        LocalPlayerNum = GetLocalPlayer()->GetControllerId();
+    }
+    
+    bool bStarted = SessionInterface->FindSessions(
+        LocalPlayerNum,
         SessionSearch.ToSharedRef()
     );
+
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("FindSessions Started = %d"),
+        bStarted);
+
+
 }
 
 void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
@@ -189,11 +323,54 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
             TEXT("Connections = %d"),
             Session->SessionSettings.NumPublicConnections);
 
+        UE_LOG(LogTemp, Warning,
+            TEXT("HOST SESSION OK"));
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("Advertise=%d LAN=%d"),
+            Session->SessionSettings.bShouldAdvertise,
+            Session->SessionSettings.bIsLANMatch);
+    }
+
+    else
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("HOST SESSION NONE"));
     }
 
 
-    SessionInterface->StartSession(NAME_GameSession);
+    //SessionInterface->StartSession(NAME_GameSession);
+
+
+
+
+
+
+
+
+
+
+
     OnSessionCreated.Broadcast(bWasSuccessful);
+
+}
+
+void ATitlePlayerController::TitleOnStartSessionComplete(FName SessionName, bool bWasSuccessful)
+{
+    UE_LOG(LogTemp, Warning,
+        TEXT("StartSession Success = %d"),
+        bWasSuccessful);
+
+    FNamedOnlineSession* Session =
+        SessionInterface->GetNamedSession(NAME_GameSession);
+
+    if (Session)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("State After StartSession = %d"),
+            (int32)Session->SessionState);
+    }
+
 
 }
 
