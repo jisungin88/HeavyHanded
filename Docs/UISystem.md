@@ -1,0 +1,423 @@
+# UI / UX 시스템
+
+담당: 김지성 · 브랜치 `feature/uiux`
+기획서 8장(UI) 기준. 화면별 요소는 2장(코어 루프) · 4장(플레이어/역할) · 7장(장비)에서 끌어왔다.
+
+**원칙: 다른 사람은 내 파일을 수정하지 않고 호출만 한다. 나도 다른 사람 클래스를 수정하지 않는다.**
+UI는 데이터를 만들지 않고 **읽기만 한다.** 필요한 값은 담당자에게 게터·델리게이트를 요청한다 (5장).
+
+---
+
+## 1. 화면 목록
+
+`Config/Tags/Phase.ini` 의 페이즈 태그와 1:1로 맞춘다.
+
+| 페이즈 태그 | 화면 | 기획서 | 시안 |
+|---|---|---|---|
+| — | 타이틀 / 메인 메뉴 | (없음) | `ui_title.png` |
+| `Phase.Lobby` | 로비 — 호스트/참가, 4인 슬롯, 준비 상태 | 8장 | **없음** |
+| `Phase.Hideout` | 은신처 — 상점 · 스킬 강화 · 팀원 구출 · 목표 선택 | 2장, 8장 | `ui_shop.png` (상점 탭만) |
+| `Phase.Prep` | 준비 45초 — 역할 선택, 장비 구매, 드론 뷰 | 2장, 8장 | **없음** |
+| `Phase.Heist` | 인게임 HUD | 8장 | `ui_ingame.png` |
+| `Phase.Escape` | 경보 90초 / 밴 탑승 (HUD 상태 전환) | 3장 | **없음** |
+| `Phase.Result` | 결과 — 정산 · 기여도 · 최다 소음 유발자 | 8장 | `ui_result.png` |
+| — | 일시정지 | (없음) | `ui_menu.png` |
+
+시안 5장 중 기획서 화면과 대응하는 건 3장(은신처·HUD·결과)이고, **로비 · 준비 · 탈출 3개 화면은 시안이 없다.**
+
+---
+
+## 2. 디자인 토큰
+
+시안 5장에서 픽셀 실측한 값이다. 시안이 압축 스크린샷이라 근사값이며, **골드만 4장에서 hue 41로 일치**해 확실하다.
+
+| 토큰 | 값 | 근거 |
+|---|---|---|
+| `Bg/Base` | `#14181F` | 5장 전체 최빈색 |
+| `Bg/Panel` | `#1A1E28` | `ui_result` 패널 실측 |
+| `Bg/Card` | `#20242E` | `ui_shop` 카드 실측 (채도 보정) |
+| `Line/Divider` | `#2C3140` | **제안값** — 측정 안 됨 |
+| `Accent/Gold` | `#DEA934` | **4장 공통 실측.** 선택 테두리, 주 버튼, 강조 수치 |
+| `Accent/GoldBright` | `#E9AF31` | 타이틀 로고 전용 |
+| `Text/Primary` | `#F2F4F8` | |
+| `Text/Secondary` | `#8A93A3` | 라벨, 부제 |
+| `State/Health` | `#80E080` | `ui_ingame` 체력바 실측 |
+| `State/Money` | `#6FD08C` | 가격·정산 텍스트 (안티에일리어싱 심해 근사) |
+
+### 경계도 4단계 색상 — 신규 제안
+
+기획서 8장이 "경계도 게이지(4단계 색상)"를 요구하지만 **시안에 게이지 자체가 없어** 새로 잡았다.
+체력 초록과 겹치지 않도록 평온을 무채로 두고, 의심에 기존 골드를 재사용해 팔레트 안에서 상승감을 만든다.
+
+| `EAlertLevel` | 단계 | 색 | 연출 |
+|---|---|---|---|
+| `Calm` | 평온 | `#8A93A3` | 없음 |
+| `Suspicious` | 의심 | `#DEA934` | 채워질 때 한 번 펄스 |
+| `Alerted` | 경계 | `#E3762F` | 상시 느린 펄스 |
+| `Alarm` | 경보 | `#D93A34` | 점멸 + 90초 카운트다운 |
+
+색만으로 단계를 구분하지 않는다. 단계 이름 텍스트를 항상 같이 띄운다 (색각 이상 대응).
+
+---
+
+## 3. 화면별 정의
+
+### 3-1. 인게임 HUD (`Phase.Heist`)
+
+기획서 8장의 HUD · 플레이어 · 스킬 · 소음 피드백 · 상호작용 5행이 전부 이 화면이다.
+
+| 영역 | 요소 | 데이터 출처 | 상태 |
+|---|---|---|---|
+| 상단 중앙 | 남은 시간 (7/8/9분) | GameState — **대기** | ⛔ |
+| 상단 중앙 | 현재 / 목표 금액 | GameState — **대기** | ⛔ |
+| **상단** | **경계도 게이지 + 4단계 이름** | `UAlertComponent` | ✅ **지금 가능** |
+| 좌하단 | 4인 파티 — 체력, 상태 아이콘 | PlayerState — **대기** | ⛔ |
+| 우하단 | 스태미나, 무게 게이지 | Character — **대기** | ⛔ |
+| 하단 중앙 | 스킬 3슬롯 쿨다운 + 공통 소모품 1슬롯 | GAS — **대기** | ⛔ |
+| 하단 | 소지 노획물 (이름·가치·무게) | Loot — **대기** | ⛔ |
+| 화면 가장자리 | 소음 방향 표시 | 서버→클라 경로 **없음** (아래) | ⛔ |
+| 조준 대상 | 상호작용 프롬프트, 2인 캐리 대기 | Interaction — **대기** | ⛔ |
+| 월드 | 경보 연동형 60초 카운트다운, 절단 진행률 | Loot — **대기** | ⛔ |
+| 월드 (경비 머리 위) | **경비 인지 게이지** | `UPerceptionMeterComponent` | ✅ 지금 가능 |
+
+**소음 방향 표시는 클라이언트에서 동작할 수 없다.** `UNoiseSubsystem::OnNoiseReported` 는 일반 C++
+멀티캐스트 델리게이트라 서버에서만 발화하고, `ReportNoise()` 는 클라에서 조용히 무시되므로
+`INoiseListener` 전파도 서버에서만 돈다. 지금 만들면 **호스트 창에서만 보이고 나머지 3명은 아무것도 못 본다** —
+기획서 8장의 "누가 어디서 냈는지 팀 전원이 인지"가 성립하지 않는다.
+
+`UWorldSubsystem` 은 액터가 아니라 RPC를 쓸 수 없다. 이미 GameState에 붙어 복제되는 `UAlertComponent` 에
+얹는 것이 자연스럽다 (담당: 김지성):
+
+```cpp
+UFUNCTION(NetMulticast, Unreliable)   // 연출용이라 한두 개 놓쳐도 된다
+void Multicast_NoiseHeard(FVector_NetQuantize Location, float Loudness01, APlayerState* Instigator);
+
+UPROPERTY(BlueprintAssignable, Category = "Alert")
+FOnNoiseHeardForUI OnNoiseHeardForUI;
+```
+
+**모든 소음을 멀티캐스트하면 대역폭이 터진다.** 걷기 · 물건 충돌까지 초당 수십 건이다.
+중 · 대 · 특대 등급만, 또는 `Loudness01` 임계값 이상만 보내는 필터가 함께 있어야 한다.
+
+시안 HUD에 **경계도 게이지가 없다.** 기획서에서 이 게임의 3대 기둥 중 2개(소음 관리, 장르 전환)가 전부 경계도로 표현되므로 자리를 새로 잡아야 한다. 남은 시간 옆 상단 중앙을 제안한다.
+
+시안의 우상단 "목표 체크리스트"는 기획서에 대응이 없다. 기획서의 목표는 **금액 단일 조건**(저택 $50,000 / 박물관 $120,000 / 은행 $250,000)이라 체크리스트가 아니라 금액 진행바가 맞다.
+
+### 3-2. 은신처 (`Phase.Hideout`)
+
+기획서 2장 기준 기능 5개. 시안은 이 중 **장비 구매 하나만** 그려져 있다.
+
+| 탭 | 내용 | 시안 |
+|---|---|---|
+| 수익 정산 | 직전 작업 결과, 개인 기여도 | 없음 (결과 화면과 통합 가능) |
+| 장비 구매 | 장비 8종, 런 단위 유지 | `ui_shop.png` ✅ |
+| 스킬 강화 | 역할별 스킬 쿨다운·지속시간 수치 강화 | 없음 |
+| 팀원 구출 | 체포된 팀원 비용 지불 복귀 | 없음 |
+| 목표 선택 | 다음 장소 확인 및 출발 | 없음 |
+
+장비는 `Config/Tags/Equipment.ini` 의 8개와 기획서 7장 표 8개가 정확히 일치한다.
+(기획서 2장 본문의 "7장 장비 목록"은 **8종의 오타**로 보인다 — 확인 필요.)
+
+| 태그 | 장비 | 가격 |
+|---|---|---|
+| `Equipment.RubberShoes` | 고무창 신발 | $8,000 |
+| `Equipment.PaddedGloves` | 완충 장갑 | $12,000 |
+| `Equipment.HandCart` | 대차 | $20,000 |
+| `Equipment.EMP` | EMP 장치 | $10,000 |
+| `Equipment.Decoy` | 미끼 | $6,000 |
+| `Equipment.MedKit` | 응급 키트 | $7,000 |
+| `Equipment.Drone` | 정찰용 드론 | $4,000 |
+| `Equipment.Cutter` | 절단기 | $25,000 |
+
+절단기($25,000)는 대형 금고 개방의 유일한 수단이고, 기획서가 "이번 판에 절단기를 살 것인가"를 은신처의 핵심 판단으로 지정했다. **상점 UI에서 절단기는 다른 장비와 같은 크기로 두지 않고 별도 강조**한다.
+
+### 3-3. 준비 (`Phase.Prep`) — 시안 없음
+
+45초 타이머 아래 역할 4종 선택. 4인이 동시에 고르므로 **다른 사람이 뭘 골랐는지 실시간**으로 보여야 한다.
+중복 선택 허용 여부는 기획서에 없다 — 결정 필요 (7장).
+
+| 역할 | 액티브 A | 액티브 B | 팀 시너지 |
+|---|---|---|---|
+| `Role.Brute` 브루트 | 벽 뚫기 돌진 | 동료 투척 | 원맨 캐리 |
+| `Role.Ghost` 고스트 | 그림자 이동 | 시간 늦추기 | 그래플 라인 |
+| `Role.Oracle` 오라클 | 시야각 투영 | 소원의 나침반 | 전 구역 스캔 |
+| `Role.Mimic` 미믹 | 경비 변장 | 바디 스왑 | 카메라 루프 |
+
+드론 보유 시 이 시간에 드론 탐색 뷰로 전환된다.
+
+### 3-4. 결과 (`Phase.Result`)
+
+| 요소 | 시안 | 비고 |
+|---|---|---|
+| 성공 / 실패 | 성공만 | **실패 레이아웃 필요** (목표 금액 미달 / 전멸) |
+| 적재 목록 | ✅ 획득 현상 | |
+| 획득 금액 | ✅ | |
+| 개인 기여도 | ✅ 플레이어별 금액 | |
+| **최다 소음 유발자** | **없음** | 기획서가 "반드시 넣는다"고 명시. `GetNoisiestPlayer()` 로 **지금 가능** |
+| 재도전 | 없음 | 실패 시 같은 장소 재시작 |
+| 체포자 표시 | 없음 | 미승차 인원 = 노획물 몰수 |
+
+기획서 8장 주석: *"최다 소음 유발자 표시는 반드시 넣는다. 결과 화면에서 책임 소재가 드러나는 것이 이 게임의 코미디를 완성한다."*
+→ 부가 정보가 아니라 **결과 화면의 주인공**으로 배치한다.
+
+---
+
+## 4. 지금 붙일 수 있는 것
+
+플레이어 · 노획물 · 장비 · 세션 클래스가 아직 하나도 없다 (`Source/HeavyHanded/` 에 `Noise/` 와 `Alert/` 만 존재).
+**실데이터가 있는 건 소음/경계도 계열 3개뿐**이고, 이게 전부 HUD와 결과 화면의 핵심이다.
+
+```cpp
+#include "Alert/AlertComponent.h"
+
+// 경계도 게이지 — HUD 상단
+if (UAlertComponent* Alert = UAlertComponent::Get(this))
+{
+    Alert->OnAlertGaugeChanged.AddDynamic(this, &UMyHUD::HandleGauge);   // float 0~1
+    Alert->OnAlertLevelChanged.AddDynamic(this, &UMyHUD::HandleLevel);   // EAlertLevel 신·구
+}
+
+// 최다 소음 유발자 — 결과 화면
+float Contribution = 0.f;
+APlayerState* Noisiest = Alert->GetNoisiestPlayer(Contribution);
+```
+
+**단계는 게이지에서 직접 계산하지 않는다.** 히스테리시스가 있어 65%가 상승 중이면 의심, 하강 중이면 경계다.
+반드시 `GetAlertLevel()` 을 쓴다. 자세한 건 [NoiseSystem.md](NoiseSystem.md) 3장.
+
+경비 인지 게이지는 `UPerceptionMeterComponent::OnPerceptionChanged` 를 월드 스페이스 위젯에 물린다.
+
+나머지 화면은 **목 데이터로 껍데기부터** 만든다. 5장의 인터페이스가 채워지는 대로 교체한다.
+
+---
+
+## 5. 다른 담당자에게 요청할 API
+
+UI가 남의 클래스를 고치지 않으려면 읽을 창구가 필요하다. 담당자별로 아래를 요청한다.
+
+| 담당 | 필요한 것 | 쓰는 화면 |
+|---|---|---|
+| 이지은 (network) | `Phase` 태그 현재값 + 변경 델리게이트, 남은 시간, 현재/목표 금액, 팀 소지금 | 전 화면 전환 |
+| 이지은 (network) | 로비 세션 목록, 4인 슬롯 상태, 준비 완료 플래그 | 로비 |
+| 전영배 (player) | 체력 · 스태미나 · 무게(0~1), `State.*` 태그 보유 여부, 선택 역할 | HUD, 준비 |
+| 전영배 (skills) | 스킬 3슬롯 쿨다운 남은 시간(0~1), 소모품 잔량 | HUD |
+| 김민준 (physics) | 소지 노획물 (이름·가치·무게·특성 태그), 경보 카운트다운 남은 초, 절단 진행률 | HUD |
+| 김민준 (physics) | 2인 캐리 대기 상태, 상호작용 프롬프트 대상 | HUD |
+| 오유석 (env) | — (경계도 구독만, 이미 있음) | — |
+| 유정석 (AI) | 경비 BP `BeginPlay` 에서 `BindToGuard(Self)` **한 번** (6장 참조) | 경비 인지 게이지 |
+
+**요청 형식: `BlueprintPure` 게터 + `BlueprintAssignable` 델리게이트.** 폴링하지 않고 구독한다.
+`UFUNCTION` 반환 타입에 `TObjectPtr` 를 쓰면 UHT 에러가 나므로 원시 포인터로 받는다 (CLAUDE.md 함정 1).
+
+---
+
+## 6. 위젯 규칙
+
+- 접두사 `WBP_` (컨벤션 4-1). 예: `WBP_AlertGauge`, `WBP_ShopCard`, `WBP_ResultPanel`
+- 폴더는 기존 스캐폴딩을 그대로 쓴다 — `Content/HeavyHanded/UI/{Common,HUD,Lobby,Hideout,Result,Icons,Fonts}`
+  - 준비 화면은 `Hideout/` 에 함께 둔다 (`Prep/` 신설하지 않음)
+- **CommonUI는 쓰지 않는다.** `HeavyHanded.uproject` 는 6명 공유 파일이고 플러그인 추가는 팀 합의가 필요하다.
+  화면 5개 규모에는 `UMG` + 얇은 C++ 베이스로 충분하다. 게임패드 지원이 요구사항이 되면 그때 재검토한다.
+- C++ 베이스는 `Source/HeavyHanded/{Public,Private}/UI/` 에 두고, **레이아웃·애니메이션은 BP에서** 한다.
+  C++에는 데이터 바인딩과 구독 해제만 넣는다.
+- 델리게이트 구독은 `NativeConstruct`, 해제는 `NativeDestruct`. **해제를 빠뜨리면 위젯이 GC되고도 콜백이 남는다.**
+- **보여주기만 하는 위젯은 루트 `Visibility` 를 `Not Hit-Testable (Self & All Children)` 로 둔다.**
+  기본값 `Self Only` 는 자기 자신만 클릭을 안 받고 자식은 그대로 받는다. `Border` · `ProgressBar` 는
+  기본이 hit-testable 이라 HUD가 그 영역의 마우스 입력을 삼킨다. 버튼처럼 입력을 받아야 하는 것만 예외다.
+
+### 만들어진 C++ 베이스
+
+| 클래스 | 위치 | 상속할 WBP |
+|---|---|---|
+| `UUISettings` | `UI/UISettings.h` | — (Project Settings → Game → UI) |
+| `UAlertGaugeWidget` | `UI/AlertGaugeWidget.h` | `WBP_AlertGauge` |
+| `UPerceptionMeterWidget` | `UI/PerceptionMeterWidget.h` | `WBP_PerceptionMeter` |
+
+**경계도 4단계 색상은 `UUISettings` 하나만 본다.** 위젯 BP에 색을 직접 넣지 말 것 —
+HUD · 결과 화면 · 미니맵이 각자 다른 색을 쓰게 된다. `OnLevelUpdated` 가 색을 인자로 넘겨준다.
+
+`UAlertGaugeWidget` 은 `UAlertComponent` 를 찾을 때까지 0.25초 간격으로 재시도한다.
+컴포넌트가 GameState에 **런타임 부착 후 복제**로 도착하기 때문에, 한 번 찾고 포기하면
+호스트 창은 멀쩡한데 클라이언트에서만 게이지가 0으로 고정된다.
+
+`UPerceptionMeterWidget` 은 **소유 경비를 스스로 알 수 없다.**
+`UWidgetComponent::InitWidget()` 이 `CreateWidget(World, ...)` 으로 만들어서 Outer가 World이고
+액터로 거슬러 올라갈 방법이 없다. 경비 BP에서 한 번 연결해야 한다:
+
+```
+Event BeginPlay
+  → WidgetComponent → Get User Widget Object
+  → Cast To PerceptionMeterWidget
+  → Bind To Guard (Self)
+```
+
+안 부르면 2초 뒤 `LogHeavyUI` 에 경고가 남는다 (조용히 실패하지 않게).
+
+---
+
+## 7. 결정 필요
+
+### 기획자 확인
+
+| 항목 | 문제 |
+|---|---|
+| **게임 이름** | 기획서·컨벤션은 `Sneakers`, 시안 로고는 `SCRAP & ESCAPE`. 타이틀 화면이 막힌다 |
+| **상점 "무기" 카테고리** | 시안 `ui_shop` 에 무기 탭이 있으나 기획서 1장은 *"총이 없다. 싸울 수 없다"*. 카테고리 재정의 필요 |
+| 장비 개수 | 기획서 2장 "7장 장비 목록" vs 7장 표 8종 + 태그 8종. 8종이 맞는가 |
+| 역할 중복 선택 | 4인이 같은 역할을 고를 수 있는가. 준비 화면 UI가 갈린다 |
+| HUD 미니맵 | 시안에 상시 미니맵이 있으나 기획서는 오라클 팀 시너지("미니맵에 10초간 표시")에서만 언급. 상시인가 |
+| 결과 등급 | 시안에 A 등급 표기. 기획서에 산정식 없음 |
+| 경보 연동형 지연 | 기획서 5장 "60초 카운트다운"인데 지연 설명은 "30초 → 90초". 기준값이 60인지 30인지 |
+
+### 팀 확인
+
+- **로비 화면은 이지은(network)과 겹친다.** 세션 로직은 network, 위젯은 uiux로 나눌지 합의 필요
+- 결과 화면과 은신처 "수익 정산"이 같은 내용이다. 하나로 합칠지
+
+---
+
+## 8. 작업 순서
+
+실데이터가 있는 것부터 간다. 목 데이터 화면을 먼저 만들면 남의 API가 확정될 때 전부 다시 짜야 한다.
+
+| # | 작업 | 상태 |
+|---|---|---|
+| 1 | `UUISettings` · `UAlertGaugeWidget` · `UPerceptionMeterWidget` C++ 베이스 | ✅ 빌드 완료 |
+| 2 | `WBP_AlertGauge` — 경계도 4단계 게이지 | ✅ 색 전환 · 경보 점멸 · **클라 복제** 확인 |
+| 3 | `WBP_PerceptionMeter` — 경비 머리 위 게이지 | ✅ 게이지 상승 · **클라 복제** 확인 |
+| 4 | `WBP_HUD` 골격 + 목 데이터 (시간 · 금액 · 체력 · 스킬 슬롯) | 게이지의 최종 배치처. 6장 대기 |
+| 5 | 디자인 토큰 에셋화 — 팔레트, 폰트, `WBP_Button` / `WBP_Card` | |
+| 6 | 소음 방향 표시 — 화면 가장자리 인디케이터 | ⛔ 서버→클라 경로 선행 (3-1장) |
+| 7 | 결과 화면 — 최다 소음 유발자 중심 | |
+| 8 | 은신처 상점 — 장비 8종 | |
+| 9 | 로비 · 준비 | 7장 결정 후 |
+
+2~3번은 PIE **Number of Players 2 / Run Under One Process 해제 / Play As Listen Server** 로
+클라이언트 복제까지 바로 검증한다. 체크를 해제해야 별도 프로세스로 떠서 진짜 네트워크 경로를 탄다.
+
+경계도는 콘솔로도 확인된다 — `DisplayAll AlertComponent AlertGauge` (자세한 건 [NoiseSystem.md](NoiseSystem.md) 5장).
+
+---
+
+## 부록. WBP 레퍼런스 구현
+
+C++ 베이스를 상속하는 첫 두 위젯이다. 이후 위젯도 같은 형태를 따른다 —
+**C++ 이벤트를 받아 위젯 변수에 꽂기만 하고, 값 계산은 하지 않는다.**
+
+### WBP_AlertGauge
+
+`Content/HeavyHanded/UI/HUD/WBP_AlertGauge` · 부모 클래스 `AlertGaugeWidget`
+
+```
+SizeBox                        Width 320  Height 44
+└ Overlay
+   ├ Border            [Bg]    Brush #1A1E28 (A 0.85) · Padding 3
+   │   └ ProgressBar   [Bar]   Percent 0 · Fill #8A93A3 · Background Tint #14181F
+   └ HorizontalBox             Padding 10, 0
+       ├ TextBlock     [LevelText]     Fill(1) · Left  · "평온"
+       └ TextBlock     [PercentText]   Auto    · Right · "0%" · #F2F4F8
+```
+
+`Bar` · `LevelText` · `PercentText` 는 **Is Variable** 을 켠다.
+
+**애니메이션 `AlarmBlink` 는 에디터에서 직접 만든다.** Designer 탭 → Animations 패널 → `+ Animation`.
+`Bg` 트랙에 Render Opacity 키를 `0.0s → 1.0` / `0.25s → 0.35` / `0.5s → 1.0` 로 찍는다 (길이 0.5초 = 2Hz).
+위젯 블루프린트에는 Timeline 노드가 없어서 UMG 애니메이션 말고는 방법이 없다.
+
+애니메이션 길이는 에셋에 고정이므로 **`Play Animation` 의 `Playback Speed` 에
+`AlarmBlinkHz / 2.0` 을 넣어야** `UUISettings::AlarmBlinkHz` 가 죽은 값이 되지 않는다
+(애니메이션이 2Hz로 작성돼 있으므로). `AlarmBlinkHz <= 0` 이면 배속 0으로 얼어붙으니
+그때는 `Play Animation` 을 타지 않게 분기한다.
+
+| 이벤트 | 하는 일 |
+|---|---|
+| `On Gauge Updated (NewGauge01)` | `Bar → Set Percent (NewGauge01)` · `PercentText → Set Text` (`NewGauge01 × 100` → `To Text (Float)` **Maximum Fractional Digits 0** → `Format Text "{Pct}%"`) |
+| `On Level Updated (NewLevel, OldLevel, LevelColor)` | `Bar → Set Fill Color and Opacity (LevelColor)` · `LevelText → Set Text (Get Alert Level Text (NewLevel))` · `LevelText → Set Color and Opacity (LevelColor)` · `NewLevel == Alarm` 이면 `Play Animation (AlarmBlink, Num Loops 0, Playback Speed = AlarmBlinkHz / 2)`, 아니면 `Stop Animation` + `Bg → Set Render Opacity (1.0)` |
+
+바 색은 `Set Fill Color and Opacity`(`FLinearColor` 직접), 텍스트 색은 `Set Color and Opacity`(`Make SlateColor` 경유)다.
+이름이 비슷해서 헷갈리기 쉬운데, **바 쪽을 빠뜨리면 텍스트 색만 바뀌고 게이지는 평온 회색에 고정된다.**
+
+`Set Percent` 에 들어가는 값은 0~1 그대로이고, 퍼센트 표시에만 ×100 을 한다.
+`Stop Animation` 쪽에서 Render Opacity 를 1.0 으로 되돌리지 않으면
+경보가 풀릴 때 애니메이션이 멈춘 순간의 투명도로 굳는다.
+
+**색과 이름을 BP에 하드코딩하지 않는다.** 색은 `On Level Updated` 의 `LevelColor` 인자를,
+이름은 `Get Alert Level Text` 노드를 쓴다. 둘 다 `UUISettings` / `EAlertLevel` 이 유일한 출처다.
+
+최초 바인딩 때도 두 이벤트가 한 번씩 호출된다 (이때 `NewLevel == OldLevel`). 초기화 로직을 따로 두지 않아도 된다.
+
+### WBP_PerceptionMeter
+
+`Content/HeavyHanded/UI/HUD/WBP_PerceptionMeter` · 부모 클래스 `PerceptionMeterWidget`
+
+```
+SizeBox                        Width 64  Height 10
+└ ProgressBar       [Meter]    Percent 0 · Fill #DEA934
+```
+
+| 이벤트 | 하는 일 |
+|---|---|
+| `On Perception Updated (NewPerception01)` | `Meter → Set Percent` |
+| `On Meter Visibility Changed (bShouldShow)` | `Self → Set Visibility` (`Visible` / `Collapsed`) |
+
+가로 바는 데이터 흐름 검증용 MVP다. 기획서 8장의 "원형 게이지"는
+방사형 채우기 머티리얼(`Percent` 스칼라 파라미터)로 교체한다.
+
+### 검증 — `L_NoiseTest`
+
+경비 AI 없이도 지금 확인된다. `ANoiseTestListener` 에 `UPerceptionMeterComponent` 가 이미 붙어 있다.
+
+**경계도** — 레벨 블루프린트 `BeginPlay` → `Create Widget (WBP_AlertGauge, Get Player Controller 0)` → `Add to Viewport`
+
+```
+→ Set Anchors in Viewport    (Minimum 0.5, 0  /  Maximum 0.5, 0)
+→ Set Alignment in Viewport  (0.5, 0)
+→ Set Position in Viewport   (0, 40)
+```
+
+**앵커 3노드를 빠뜨리면 위젯이 화면 전체로 늘어난다.** `Add to Viewport` 의 기본 슬롯 앵커가
+`(0,0)~(1,1)` 스트레치라서 루트 SizeBox 의 크기 지정이 무시된다 — `GameViewportSubsystem.cpp` 의
+
+```cpp
+bool bUseAutoSize = FinalSize.IsZero()
+    && !Slot.Anchors.IsStretchedVertical() && !Slot.Anchors.IsStretchedHorizontal();
+```
+
+Minimum 과 Maximum 을 **같은 값**으로 줘야 스트레치가 아니게 되어 위젯의 desired size 가 쓰인다.
+`Set Desired Size in Viewport` 로도 되지만 크기 정의가 두 곳으로 갈라지므로 쓰지 않는다.
+
+이 3노드는 `WBP_HUD`(Canvas Panel 루트) 가 생기면 사라진다. 게이지는 독립 화면이 아니라 HUD의 부품이다.
+
+**인지 게이지** — `ANoiseTestListener` 를 상속한 `BP_NoiseTestListener` 를 만들고 `Widget` 컴포넌트 추가:
+
+| 속성 | 값 |
+|---|---|
+| Widget Class | `WBP_PerceptionMeter` |
+| Space | `Screen` |
+| Draw Size | 64 × 10 |
+| Location | Z +120 (머리 위) |
+
+`BeginPlay` → `Widget → Get User Widget Object` → `Cast To PerceptionMeterWidget` → `Bind To Guard (Self)`
+
+`Get User Widget Object` 가 null 이면 위젯 컴포넌트의 `Tick When Offscreen` 을 켜거나 한 틱 미루고 호출한다.
+
+**만든 `BP_NoiseTestListener` 를 레벨에 직접 배치할 것.** 레벨에 이미 놓여 있는 것은 C++ `ANoiseTestListener` 라
+위젯 컴포넌트가 없다. 기존 액터를 교체하지 않으면 게이지가 하나도 안 보인다.
+
+`hh.Noise.Test` 는 **플레이어 위치에서** 소음을 내므로, 리스너를 플레이어 스타트 근처에 놔야 반응 반경 안에 든다.
+
+**호스트 창 콘솔** ([NoiseSystem.md](NoiseSystem.md) 5장):
+
+```
+hh.Alert.Set 70              # 경계도 70% — 색이 경계(주황)로 바뀌는지
+hh.Alert.Set 100             # 경보 — 점멸이 도는지
+hh.Alert.Reset               # 래치 해제
+hh.Noise.Test Noise.Loot.Throw 1.0    # 인지 게이지가 차오르는지
+```
+
+**클라이언트 창**에서 값이 따라오는지가 진짜 검증이다. 호스트만 보고 넘어가면 복제 누락을 놓친다.
+
+```
+obj list class=AlertComponent
+DisplayAll AlertComponent AlertGauge
+```
