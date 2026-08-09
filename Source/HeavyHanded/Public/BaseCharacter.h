@@ -29,6 +29,7 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void PossessedBy(AController* NewController) override;
 
 	// --- 카메라 및 시점 컴포넌트 ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
@@ -46,7 +47,16 @@ protected:
 	TObjectPtr<UInputAction> IA_MoveRight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UInputAction> IA_Look;
+	TObjectPtr<UInputAction> IA_Turn;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UInputAction> IA_LookUp;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UInputAction> IA_Sprint;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UInputAction> IA_Crouch;
 
 	UPROPERTY(EditAnywhere, Category = "Input") 
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
@@ -57,8 +67,41 @@ protected:
 	void MoveRight(const FInputActionValue& Value);
 
 	// 마우스 회전 입력 등
-	void Look(const FInputActionValue& Value);
+	void Turn(const FInputActionValue& Value);
+	void LookUp(const FInputActionValue& Value);
 
+
+protected:
+	// 클라이언트가 입력했을 때 서버로 요청을 보내는 함수
+	UFUNCTION(Server, Reliable)
+	void Server_ApplyGameplayEffect(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
+
+	// 2. ★ [필수] 언리얼 빌드 시스템이 찾는 내부 구현체 함수 (_Implementation 필수 붙이기)
+	void Server_ApplyGameplayEffect_Implementation(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
+
+	// 기존 입력 함수 수정
+	virtual void StartCrouch(const FInputActionValue& Value);
+	virtual void StopCrouch(const FInputActionValue& Value);
+	virtual void StartSprint(const FInputActionValue& Value);
+	virtual void StopSprint(const FInputActionValue& Value);
+
+protected:
+	// MovementSpeed 속성이 변할 때 호출될 콜백 함수
+	virtual void OnMovementSpeedChanged(const struct FOnAttributeChangeData& Data);
+
+	// ASC 초기화 시 속성 바인딩을 수행할 함수
+	void BindAttributeDelegates();
+
+	// 입력에 따라 적용할 달리기/앉기 Gameplay Effect 클래스 (블루프린트에서 지정)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
+	TSubclassOf<class UGameplayEffect> SprintGameplayEffectClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
+	TSubclassOf<class UGameplayEffect> CrouchGameplayEffectClass;
+
+protected:
+	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
+	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 
 public:	
 	// Called every frame

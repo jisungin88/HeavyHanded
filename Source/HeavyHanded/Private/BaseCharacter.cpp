@@ -3,6 +3,7 @@
 
 #include "BaseCharacter.h"
 #include "PlayerSessionState.h"
+#include "BaseAttributeSet.h"
 #include "AbilitySystemComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
@@ -32,9 +33,20 @@ ABaseCharacter::ABaseCharacter()
 void ABaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+    if (GetController() == nullptr)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Controller is nullptr!"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Controller"));
+    }
+
 	// ★ 클라이언트든 서버든 '로컬 플레이어'인 경우에만 입력 매핑을 추가해야 합니다.
     if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
     {
+        UE_LOG(LogTemp, Log, TEXT("True"));
         // 이 캐릭터를 조종하는 로컬 플레이어인지 확인 (AI나 다른 플레이어 소유일 때 오류 방지)
         if (PlayerController->IsLocalController())
         {
@@ -51,6 +63,14 @@ void ABaseCharacter::BeginPlay()
             }
         }
     }
+}
+
+void ABaseCharacter::PossessedBy(AController* NewController)
+{
+    Super::PossessedBy(NewController);
+
+    // 서버 측에서 컨트롤러 소유가 끝났을 때 바인딩 실행
+    BindAttributeDelegates();
 }
 
 // Called every frame
@@ -79,10 +99,27 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
             EnhancedInputComponent->BindAction(IA_MoveRight, ETriggerEvent::Triggered, this, &ABaseCharacter::MoveRight);
         }
 
-        // 시점 회전 바인딩
-        if (IA_Look)
+        // Turn (좌우) 바인딩
+        if (IA_Turn)
         {
-            EnhancedInputComponent->BindAction(IA_Look, ETriggerEvent::Triggered, this, &ABaseCharacter::Look);
+            EnhancedInputComponent->BindAction(IA_Turn, ETriggerEvent::Triggered, this, &ABaseCharacter::Turn);
+        }
+
+        // LookUp (상하) 바인딩
+        if (IA_LookUp)
+        {
+            EnhancedInputComponent->BindAction(IA_LookUp, ETriggerEvent::Triggered, this, &ABaseCharacter::LookUp);
+        }
+
+        if (IA_Sprint)
+        {
+            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Started, this, &ABaseCharacter::StartSprint);
+            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Completed, this, &ABaseCharacter::StopSprint);
+        }
+        if (IA_Crouch)
+        {
+            EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Started, this, &ABaseCharacter::StartCrouch);
+            EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &ABaseCharacter::StopCrouch);
         }
     }
 }
@@ -96,6 +133,7 @@ UAbilitySystemComponent* ABaseCharacter::GetAbilitySystemComponent() const
     }
     return nullptr;
 }
+
 // 2. 전진/후진 처리 함수 (Axis 1D 값 활용)
 void ABaseCharacter::MoveForward(const FInputActionValue& Value)
 {
@@ -126,21 +164,104 @@ void ABaseCharacter::MoveRight(const FInputActionValue& Value)
     }
 }
 
-// Enhanced Input 방식에 맞춘 시점 회전 로직 (마우스 X/Y 이동량)
-void ABaseCharacter::Look(const FInputActionValue& Value)
+void ABaseCharacter::Turn(const FInputActionValue& Value)
 {
-    // 2D 축 값 가져오기 (X: 좌우 시점 회전, Y: 상하 시점 회전)
-    const FVector2D LookAxisVector = Value.Get<FVector2D>();
-
-    if (Controller != nullptr)
+    float AxisValue = Value.Get<float>();
+    if (AxisValue != 0.0f)
     {
-        if (LookAxisVector.X != 0.0f)
-        {
-            AddControllerYawInput(LookAxisVector.X);
-        }
-        if (LookAxisVector.Y != 0.0f)
-        {
-            AddControllerPitchInput(LookAxisVector.Y);
-        }
+        AddControllerYawInput(AxisValue);
+    }
+}
+
+void ABaseCharacter::LookUp(const FInputActionValue& Value)
+{
+    float AxisValue = Value.Get<float>();
+    if (AxisValue != 0.0f)
+    {
+        AddControllerPitchInput(AxisValue);
+    }
+}
+
+// 예시: 캐릭터가 컨트롤러를 소유하거나 ASC가 초기화될 때 호출되는 함수 내부에서 바인딩 실행
+void ABaseCharacter::BindAttributeDelegates()
+{
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC) return;
+
+    // ASC로부터 UBaseAttributeSet 가져오기
+    const UBaseAttributeSet* BaseAttrSet = ASC->GetSet<UBaseAttributeSet>();
+    if (BaseAttrSet)
+    {
+        // MovementSpeed 속성 변화를 감지하는 델리게이트 구독
+        ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetMovementSpeedAttribute()).AddUObject(this, &ABaseCharacter::OnMovementSpeedChanged);
+    }
+}
+
+// 속성이 변경될 때 자동 호출되어 실제 무브먼트 속도에 적용
+void ABaseCharacter::OnMovementSpeedChanged(const FOnAttributeChangeData& Data)
+{
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        // Data.NewValue는 변경된 MovementSpeed의 새로운 값입니다.
+        MoveComp->MaxWalkSpeed = Data.NewValue;
+    }
+}
+
+void ABaseCharacter::ApplyGameplayEffectToSelf(TSubclassOf<UGameplayEffect> EffectClass)
+{
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (ASC && EffectClass)
+    {
+        FGameplayEffectContextHandle ContextHandle = ASC->MakeEffectContext();
+        ContextHandle.AddSourceObject(this);
+        ASC->ApplyGameplayEffectToSelf(EffectClass.GetDefaultObject(), 1.0f, ContextHandle);
+    }
+}
+
+void ABaseCharacter::RemoveGameplayEffectFromSelf(TSubclassOf<UGameplayEffect> EffectClass)
+{
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (ASC && EffectClass)
+    {
+        ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
+    }
+}
+
+void ABaseCharacter::StartCrouch(const FInputActionValue& Value)
+{
+    Server_ApplyGameplayEffect(CrouchGameplayEffectClass, true);
+}
+
+void ABaseCharacter::StopCrouch(const FInputActionValue& Value)
+{
+    Server_ApplyGameplayEffect(CrouchGameplayEffectClass, false);
+}
+
+void ABaseCharacter::StartSprint(const FInputActionValue& Value)
+{
+    Server_ApplyGameplayEffect(SprintGameplayEffectClass, true);
+}
+
+void ABaseCharacter::StopSprint(const FInputActionValue& Value)
+{
+    Server_ApplyGameplayEffect(SprintGameplayEffectClass, false);
+}
+
+// --- 서버 RPC 실제 동작 구현 ---
+void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGameplayEffect> EffectClass, bool bApply)
+{
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC || !EffectClass) return;
+
+    if (bApply)
+    {
+        FGameplayEffectContextHandle ContextHandle = ASC->MakeEffectContext();
+        ContextHandle.AddSourceObject(this);
+        ASC->ApplyGameplayEffectToSelf(EffectClass.GetDefaultObject(), 1.0f, ContextHandle);
+    }
+    else
+    {
+        // 제거할 때 핸들 방식이거나 소스 이펙트 방식 사용
+        ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
     }
 }
