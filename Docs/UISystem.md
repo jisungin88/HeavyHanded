@@ -44,6 +44,44 @@ UI는 데이터를 만들지 않고 **읽기만 한다.** 필요한 값은 담�
 | `State/Health` | `#80E080` | `ui_ingame` 체력바 실측 |
 | `State/Money` | `#6FD08C` | 가격·정산 텍스트 (안티에일리어싱 심해 근사) |
 
+**이 10개는 `UUISettings` 에 있다** (Project Settings → Game → UI → Palette). `EUIColorToken` 으로 꺼낸다:
+
+```
+Get UI Color (Token = Gold)      → FLinearColor
+```
+
+색 에셋을 `Content/` 에 두지 않은 이유는 **UMG 디자이너에 찍은 색은 그대로 구워지기 때문**이다.
+토큰을 나중에 고쳐도 이미 만든 위젯은 따라오지 않는다. 위젯이 `PreConstruct` 에서 읽어 스스로 칠하면
+디자이너 편집 중에도 보이고(PreConstruct 는 디자이너에서도 돈다) 런타임에도 같은 색이 나온다.
+시안 원본이 오면 Project Settings 값만 고치면 전 화면이 따라온다.
+
+### 타이포그래피
+
+크기를 위젯마다 찍으면 화면별로 제각각이 된다. **세 단계 밖으로 나가지 않는다.**
+
+| `EUIFontToken` | 크기 | 쓰는 곳 |
+|---|---|---|
+| `타이머` | 28 Bold | 남은 시간, 목표 금액 — 화면에서 제일 큰 수치 |
+| `수치` | 18 Regular | 체력 %, 가격, 노획물 가치 |
+| `라벨` | 12 Regular | 라벨, 부제 |
+
+```
+Get UI Font (Token = 수치)      → FSlateFontInfo
+```
+
+**폰트 프로퍼티(`TimerFont` 등)를 직접 읽지 않는다.** BP에 아예 노출하지 않았다.
+Project Settings의 Font 슬롯은 비어 있는 게 기본값이고(게임 폰트 미정), 빈 `FSlateFontInfo` 를
+그대로 위젯에 꽂으면 **Slate가 LastResort 폰트로 떨어져 한글이든 숫자든 글자가 전부 네모가 된다.**
+`GetUIFont()` 가 그때 엔진 기본 폰트에 크기·굵기만 얹어 돌려준다.
+
+게임 폰트가 정해지면 Project Settings → Typography 의 Font 슬롯 세 개에 꽂는다. 그 뒤로는 꽂은 폰트가 쓰인다.
+
+> **생성자에서 폰트를 로드하지 말 것.** `UTextBlock` 이 하는 것처럼
+> `ConstructorHelpers::FObjectFinder<UFont>(*UWidget::GetDefaultFontName())` 를 쓰면
+> **게임 모듈에서는 조용히 실패한다** — `UDeveloperSettings` CDO는 모듈 로드 중에 만들어지고
+> 그 시점에 `/Engine/EngineFonts/Roboto` 를 못 읽는다. 컴파일도 경고도 통과하고 로그도 안 남으며,
+> 위젯을 열어야 네모로 나오는 걸 본다. `FCoreStyle::GetDefaultFontStyle()` 은 에셋 로드가 없어 안전하다.
+
 ### 경계도 4단계 색상 — 신규 제안
 
 기획서 8장이 "경계도 게이지(4단계 색상)"를 요구하지만 **시안에 게이지 자체가 없어** 새로 잡았다.
@@ -233,8 +271,19 @@ UI가 남의 클래스를 고치지 않으려면 읽을 창구가 필요하다. 
 | `UAlertGaugeWidget` | `UI/AlertGaugeWidget.h` | `WBP_AlertGauge` |
 | `UPerceptionMeterWidget` | `UI/PerceptionMeterWidget.h` | `WBP_PerceptionMeter` |
 
-**경계도 4단계 색상은 `UUISettings` 하나만 본다.** 위젯 BP에 색을 직접 넣지 말 것 —
-HUD · 결과 화면 · 미니맵이 각자 다른 색을 쓰게 된다. `OnLevelUpdated` 가 색을 인자로 넘겨준다.
+**색과 폰트는 `UUISettings` 하나만 본다.** 위젯 BP에 색을 직접 찍지 말 것 —
+HUD · 결과 화면 · 상점이 각자 다른 색을 쓰게 된다.
+
+| 무엇 | 어떻게 |
+|---|---|
+| 토큰 색 | `Get UI Color (Token)` — static 이라 노드 하나 |
+| 폰트 | `Get UI Font (Token)` — 프로퍼티 직접 읽기 금지 (2장) |
+| 경계도 4단계 색 | `OnLevelUpdated` 의 `LevelColor` 인자 (직접 조회하지 않는다) |
+| 경계도 단계 이름 | `Get Alert Level Text (Level)` |
+
+토큰을 적용하는 자리는 **`Event PreConstruct`** 다. `Construct` 가 아니다 —
+`PreConstruct` 는 디자이너에서도 실행돼서 편집 중에도 실제 색으로 보인다.
+`Construct` 에 넣으면 디자이너에는 흰 상자만 보이고 실행해야 색이 나온다.
 
 `UAlertGaugeWidget` 은 `UAlertComponent` 를 찾을 때까지 0.25초 간격으로 재시도한다.
 컴포넌트가 GameState에 **런타임 부착 후 복제**로 도착하기 때문에, 한 번 찾고 포기하면
@@ -285,12 +334,13 @@ Event BeginPlay
 | 1 | `UUISettings` · `UAlertGaugeWidget` · `UPerceptionMeterWidget` C++ 베이스 | ✅ 빌드 완료 |
 | 2 | `WBP_AlertGauge` — 경계도 4단계 게이지 | ✅ 색 전환 · 경보 점멸 · **클라 복제** 확인 |
 | 3 | `WBP_PerceptionMeter` — 경비 머리 위 게이지 | ✅ 게이지 상승 · **클라 복제** 확인 |
-| 4 | `WBP_HUD` 골격 + 목 데이터 (시간 · 금액 · 체력 · 스킬 슬롯) | 게이지의 최종 배치처. 6장 대기 |
-| 5 | 디자인 토큰 에셋화 — 팔레트, 폰트, `WBP_Button` / `WBP_Card` | |
-| 6 | 소음 방향 표시 — 화면 가장자리 인디케이터 | ⛔ 서버→클라 경로 선행 (3-1장) |
-| 7 | 결과 화면 — 최다 소음 유발자 중심 | |
-| 8 | 은신처 상점 — 장비 8종 | |
-| 9 | 로비 · 준비 | 7장 결정 후 |
+| 4 | 디자인 토큰 — 팔레트 10색 · 폰트 3단계 | ✅ `UUISettings` (2장) |
+| 5 | 공통 위젯 — `WBP_Button` / `WBP_Card` / `WBP_StatBar` | 토큰을 `PreConstruct` 에서 적용 (6장) |
+| 6 | `WBP_HUD` 골격 + 목 데이터 (시간 · 금액 · 체력 · 스킬 슬롯) | 게이지의 최종 배치처. 5장 API 없이 목 데이터로 간다 |
+| 7 | 소음 방향 표시 — 화면 가장자리 인디케이터 | ⛔ 서버→클라 경로 선행 (3-1장) |
+| 8 | 결과 화면 — 최다 소음 유발자 중심 | |
+| 9 | 은신처 상점 — 장비 8종 | |
+| 10 | 로비 · 준비 | 7장 결정 후 |
 
 2~3번은 PIE **Number of Players 2 / Run Under One Process 해제 / Play As Listen Server** 로
 클라이언트 복제까지 바로 검증한다. 체크를 해제해야 별도 프로세스로 떠서 진짜 네트워크 경로를 탄다.
@@ -311,17 +361,34 @@ C++ 베이스를 상속하는 첫 두 위젯이다. 이후 위젯도 같은 형�
 ```
 SizeBox                        Width 320  Height 44
 └ Overlay
-   ├ Border            [Bg]    Brush #1A1E28 (A 0.85) · Padding 3
-   │   └ ProgressBar   [Bar]   Percent 0 · Fill #8A93A3 · Background Tint #14181F
+   ├ Border            [BG]    Brush 흰색 (A 0.85) · Padding 3
+   │   └ Overlay
+   │      ├ Image        [Trough]   Fill / Fill · 브러시 흰색
+   │      └ ProgressBar  [Bar]      Percent 0 · Background Image Tint A 0
    └ HorizontalBox             Padding 10, 0
-       ├ TextBlock     [LevelText]     Fill(1) · Left  · "평온"
-       └ TextBlock     [PercentText]   Auto    · Right · "0%" · #F2F4F8
+       ├ TextBlock     [Txt Level]     Fill(1) · Left  · "평온"
+       └ TextBlock     [Txt Percent]   Auto    · Right · "0%"
 ```
 
-`Bar` · `LevelText` · `PercentText` 는 **Is Variable** 을 켠다.
+`BG` · `Trough` · `Bar` · `Txt Level` · `Txt Percent` 는 **Is Variable** 을 켠다.
+
+**바 뒤에 `Image [Trough]` 를 따로 깐 이유** — `UProgressBar` 의 블루프린트 세터는 5.4 기준
+`SetPercent` · `SetIsMarquee` · `SetFillColorAndOpacity` 셋뿐이다. **Background Image 의 Tint 는
+BP 에서 바꿀 수 없다.** 디자이너에 색을 찍는 수밖에 없어 토큰 밖으로 새어나가므로,
+바 배경을 투명(Tint A 0)으로 만들고 뒤에 깐 `Image` 가 트로프 색을 맡는다.
+
+**교체냐 곱셈이냐가 위젯마다 다르다.** 여기서 색이 어긋나면 원인 찾기가 오래 걸린다.
+
+| 노드 | 동작 | 디자이너 값 |
+|---|---|---|
+| `Border → Set Brush Color` | 브러시 틴트를 **교체** | 무시된다. 알파도 노드가 준 값이 된다 |
+| `Image → Set Color and Opacity` | 브러시 틴트에 **곱셈** | **흰색으로 둬야** 토큰 색이 그대로 나온다 |
+| `Button → Set Background Color` | 스타일 브러시에 **곱셈** | 브러시를 흰색으로 |
+
+`Bg` 의 알파 0.85 는 디자이너가 아니라 `Set Brush Color` 에 넣는 값에 들어간다 (교체이므로).
 
 **애니메이션 `AlarmBlink` 는 에디터에서 직접 만든다.** Designer 탭 → Animations 패널 → `+ Animation`.
-`Bg` 트랙에 Render Opacity 키를 `0.0s → 1.0` / `0.25s → 0.35` / `0.5s → 1.0` 로 찍는다 (길이 0.5초 = 2Hz).
+`BG` 트랙에 Render Opacity 키를 `0.0s → 1.0` / `0.25s → 0.35` / `0.5s → 1.0` 로 찍는다 (길이 0.5초 = 2Hz).
 위젯 블루프린트에는 Timeline 노드가 없어서 UMG 애니메이션 말고는 방법이 없다.
 
 애니메이션 길이는 에셋에 고정이므로 **`Play Animation` 의 `Playback Speed` 에
@@ -331,11 +398,16 @@ SizeBox                        Width 320  Height 44
 
 | 이벤트 | 하는 일 |
 |---|---|
-| `On Gauge Updated (NewGauge01)` | `Bar → Set Percent (NewGauge01)` · `PercentText → Set Text` (`NewGauge01 × 100` → `To Text (Float)` **Maximum Fractional Digits 0** → `Format Text "{Pct}%"`) |
-| `On Level Updated (NewLevel, OldLevel, LevelColor)` | `Bar → Set Fill Color and Opacity (LevelColor)` · `LevelText → Set Text (Get Alert Level Text (NewLevel))` · `LevelText → Set Color and Opacity (LevelColor)` · `NewLevel == Alarm` 이면 `Play Animation (AlarmBlink, Num Loops 0, Playback Speed = AlarmBlinkHz / 2)`, 아니면 `Stop Animation` + `Bg → Set Render Opacity (1.0)` |
+| `Event PreConstruct` | `BG → Set Brush Color` (`Get UI Color (패널)` → `Break`/`Make Linear Color` 로 **A 만 0.85**) · `Trough → Set Color and Opacity (Get UI Color (배경))` · `Txt Percent → Set Color and Opacity (Get UI Color (본문))` · 두 텍스트 `Set Font (Get UI Font (수치))` |
+| `On Gauge Updated (NewGauge01)` | `Bar → Set Percent (NewGauge01)` · `Txt Percent → Set Text` (`NewGauge01 × 100` → `To Text (Float)` **Maximum Fractional Digits 0** → `Format Text "{Pct}%"`) |
+| `On Level Updated (NewLevel, OldLevel, LevelColor)` | `Bar → Set Fill Color and Opacity (LevelColor)` · `Txt Level → Set Text (Get Alert Level Text (NewLevel))` · `Txt Level → Set Color and Opacity (LevelColor)` · `NewLevel == Alarm` 이면 `Play Animation (AlarmBlink, Num Loops 0, Playback Speed = AlarmBlinkHz / 2)`, 아니면 `Stop Animation` + `BG → Set Render Opacity (1.0)` |
 
 바 색은 `Set Fill Color and Opacity`(`FLinearColor` 직접), 텍스트 색은 `Set Color and Opacity`(`Make SlateColor` 경유)다.
 이름이 비슷해서 헷갈리기 쉬운데, **바 쪽을 빠뜨리면 텍스트 색만 바뀌고 게이지는 평온 회색에 고정된다.**
+
+**`Txt Level` 의 색과 `Bar` 의 채우기 색은 `PreConstruct` 에서 건드리지 않는다.** 둘은 `OnLevelUpdated`
+가 매번 덮어쓰는 값이라, 여기서 토큰 색을 칠해봐야 바인딩되는 순간 사라진다. 경계도 4단계는
+팔레트가 아니라 `UUISettings` 의 별도 항목이고 창구는 `LevelColor` 인자 하나다.
 
 `Set Percent` 에 들어가는 값은 0~1 그대로이고, 퍼센트 표시에만 ×100 을 한다.
 `Stop Animation` 쪽에서 Render Opacity 를 1.0 으로 되돌리지 않으면
@@ -362,6 +434,31 @@ SizeBox                        Width 64  Height 10
 
 가로 바는 데이터 흐름 검증용 MVP다. 기획서 8장의 "원형 게이지"는
 방사형 채우기 머티리얼(`Percent` 스칼라 파라미터)로 교체한다.
+
+### 토큰 적용 — 공통 위젯
+
+`Content/HeavyHanded/UI/Common/`. 부모 클래스는 `UserWidget` 그대로 둔다 (C++ 베이스 불필요 —
+색을 칠하는 것 말고 하는 일이 없다).
+
+| 위젯 | 구조 | `Event PreConstruct` |
+|---|---|---|
+| `WBP_Button` | `SizeBox` → `Button [Btn]` → `TextBlock [Label]` | `Btn → Set Background Color (Get UI Color (BgCard))` · `Label → Set Font (Get UI Font (수치))` · `Label → Set Color and Opacity (Get UI Color (TextPrimary))` |
+| `WBP_Card` | `Border [Bg]` → `NamedSlot [Content]` | `Bg → Set Brush Color (Get UI Color (BgCard))` |
+| `WBP_StatBar` | `Overlay` → `ProgressBar [Bar]` + `TextBlock [Label]` | `Bar → Set Fill Color and Opacity` — 색은 인스턴스 변수(`FillToken`, `EUIColorToken`)로 노출해 체력/스태미나/무게가 같은 위젯을 쓰게 한다 |
+
+**`Label` 같은 표시용 텍스트는 `Is Variable` 을 켜야** PreConstruct에서 잡힌다.
+`WBP_Button` 의 문구는 `Instance Editable` + `Expose on Spawn` 인 `FText` 변수로 받아
+디자이너에서 배치할 때 바로 넣는다.
+
+버튼 색은 `Set Style` 이 아니라 **`Set Background Color`** 다. `Set Style` 은 브러시 4개짜리
+`FButtonStyle` 을 통째로 만들어야 해서 BP에서 짤 것이 못 된다. `Set Background Color` 는
+스타일 브러시에 색을 곱하므로 **디자이너에서 브러시를 흰색으로 둬야** 토큰 색이 그대로 나온다.
+
+호버는 같은 노드를 이벤트 두 개에 물린다 — `On Hovered` → `Gold`, `On Unhovered` → `BgCard`.
+곱셈이라 상태별 브러시를 따로 두면 색이 겹쳐 어두워진다.
+
+`WBP_AlertGauge` 에서 하드코딩 색을 걷어내는 방법은 이 문서 부록의 `WBP_AlertGauge` 항목에 있다.
+`Bar` 의 Background Tint 만은 BP에서 못 바꿔서 구조를 한 겹 바꿔야 한다.
 
 ### 검증 — `L_NoiseTest`
 
