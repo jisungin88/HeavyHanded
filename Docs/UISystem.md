@@ -335,8 +335,8 @@ Event BeginPlay
 | 2 | `WBP_AlertGauge` — 경계도 4단계 게이지 | ✅ 색 전환 · 경보 점멸 · **클라 복제** 확인 |
 | 3 | `WBP_PerceptionMeter` — 경비 머리 위 게이지 | ✅ 게이지 상승 · **클라 복제** 확인 |
 | 4 | 디자인 토큰 — 팔레트 10색 · 폰트 3단계 | ✅ `UUISettings` (2장) |
-| 5 | 공통 위젯 — `WBP_Button` / `WBP_Card` / `WBP_StatBar` | 토큰을 `PreConstruct` 에서 적용 (6장) |
-| 6 | `WBP_HUD` 골격 + 목 데이터 (시간 · 금액 · 체력 · 스킬 슬롯) | 게이지의 최종 배치처. 5장 API 없이 목 데이터로 간다 |
+| 5 | 공통 위젯 — `WBP_Button` / `WBP_Card` / `WBP_StatBar` | ✅ `Common/`. 확인은 `Developers/Ji/WBP_UITest` |
+| 6 | `WBP_HUD` 골격 + 목 데이터 (시간 · 금액 · 체력 · 스킬 슬롯) | 🔸 골격 · 앵커 · 게이지 이관 완료. 노획물 영역과 **2인 복제 검증** 남음 |
 | 7 | 소음 방향 표시 — 화면 가장자리 인디케이터 | ⛔ 서버→클라 경로 선행 (3-1장) |
 | 8 | 결과 화면 — 최다 소음 유발자 중심 | |
 | 9 | 은신처 상점 — 장비 8종 | |
@@ -399,7 +399,7 @@ BP 에서 바꿀 수 없다.** 디자이너에 색을 찍는 수밖에 없어 �
 | 이벤트 | 하는 일 |
 |---|---|
 | `Event PreConstruct` | `BG → Set Brush Color` (`Get UI Color (패널)` → `Break`/`Make Linear Color` 로 **A 만 0.85**) · `Trough → Set Color and Opacity (Get UI Color (배경))` · `Txt Percent → Set Color and Opacity (Get UI Color (본문))` · 두 텍스트 `Set Font (Get UI Font (수치))` |
-| `On Gauge Updated (NewGauge01)` | `Bar → Set Percent (NewGauge01)` · `Txt Percent → Set Text` (`NewGauge01 × 100` → `To Text (Float)` **Maximum Fractional Digits 0** → `Format Text "{Pct}%"`) |
+| `On Gauge Updated (NewGauge01)` | `Bar → Set Percent (NewGauge01)` · `Txt Percent → Set Text` (`NewGauge01 × 100` → `To Text (Float)` **Maximum Fractional Digits 1** → `Format Text "{Pct}%"`) — 밸런싱 중에는 소수 한 자리가 보이는 편이 낫다 |
 | `On Level Updated (NewLevel, OldLevel, LevelColor)` | `Bar → Set Fill Color and Opacity (LevelColor)` · `Txt Level → Set Text (Get Alert Level Text (NewLevel))` · `Txt Level → Set Color and Opacity (LevelColor)` · `NewLevel == Alarm` 이면 `Play Animation (AlarmBlink, Num Loops 0, Playback Speed = AlarmBlinkHz / 2)`, 아니면 `Stop Animation` + `BG → Set Render Opacity (1.0)` |
 
 바 색은 `Set Fill Color and Opacity`(`FLinearColor` 직접), 텍스트 색은 `Set Color and Opacity`(`Make SlateColor` 경유)다.
@@ -444,7 +444,18 @@ SizeBox                        Width 64  Height 10
 |---|---|---|
 | `WBP_Button` | `SizeBox` → `Button [Btn]` → `TextBlock [Label]` | `Btn → Set Background Color (Get UI Color (BgCard))` · `Label → Set Font (Get UI Font (수치))` · `Label → Set Color and Opacity (Get UI Color (TextPrimary))` |
 | `WBP_Card` | `Border [Bg]` → `NamedSlot [Content]` | `Bg → Set Brush Color (Get UI Color (BgCard))` |
-| `WBP_StatBar` | `Overlay` → `ProgressBar [Bar]` + `TextBlock [Label]` | `Bar → Set Fill Color and Opacity` — 색은 인스턴스 변수(`FillToken`, `EUIColorToken`)로 노출해 체력/스태미나/무게가 같은 위젯을 쓰게 한다 |
+| `WBP_StatBar` | `SizeBox(H 18)` → `Overlay` → `Image [Trough]` + `ProgressBar [Bar]` + `TextBlock [Txt Label]` | `Trough ← 배경` · `Bar → Set Fill Color and Opacity ← Get UI Color (FillToken)` · `Txt Label ← 라벨 폰트 · 본문` |
+
+`WBP_StatBar` 의 `FillToken` (`EUIColorToken`) 만 **Instance Editable + Expose on Spawn** 이다.
+체력 · 스태미나 · 무게 · 파티 4인이 색만 바꿔 같은 위젯을 쓴다. **인스턴스 변수는 여기까지다** —
+정렬이나 라벨 색까지 인스턴스로 빼면 배치한 곳마다 달라져서 토큰을 만든 의미가 없어진다.
+
+**`PreConstruct` 에서 `FillToken` 을 `SET` 하지 말 것.** 인스턴스에서 지정한 값을 매번 덮어써서
+전부 같은 색이 된다. 기본값은 노드가 아니라 변수 Details 의 Default Value 에 넣는다.
+
+라벨이 채워지는 바 **위에** 얹히므로 색 하나로는 대비가 안 나온다 (바가 비면 어두운 트로프,
+차면 밝은 채우기 색). 라벨은 `본문` 에 **Shadow Offset `1,1` · Shadow Color 검정 A 0.6** 을 준다.
+HUD 텍스트가 배경 위에 얹히는 곳(`Txt_Timer`, `Txt_Interact`)도 같은 처리를 한다.
 
 **`Label` 같은 표시용 텍스트는 `Is Variable` 을 켜야** PreConstruct에서 잡힌다.
 `WBP_Button` 의 문구는 `Instance Editable` + `Expose on Spawn` 인 `FText` 변수로 받아
@@ -459,6 +470,48 @@ SizeBox                        Width 64  Height 10
 
 `WBP_AlertGauge` 에서 하드코딩 색을 걷어내는 방법은 이 문서 부록의 `WBP_AlertGauge` 항목에 있다.
 `Bar` 의 Background Tint 만은 BP에서 못 바꿔서 구조를 한 겹 바꿔야 한다.
+
+### WBP_HUD
+
+`Content/HeavyHanded/UI/HUD/WBP_HUD` · 부모 클래스 `UserWidget` · 1920×1080 기준
+
+```
+Canvas Panel [Root]        Visibility = Not Hit-Testable (Self & All Children)
+├ VBox_Top      ├ Txt_Timer · Bar_Objective(금액) · Gauge_Alert
+├ VBox_Party    └ Bar_Party1~4 (체력)
+├ VBox_Vitals   └ Bar_Stamina(골드) · Bar_Weight(금액)
+├ VBox_Loot
+├ HBox_Skills   └ Card_Skill1~4 (WBP_Card)
+└ Txt_Interact
+```
+
+| 위젯 | Anchors (Min = Max) | Alignment | Position | Size |
+|---|---|---|---|---|
+| `VBox_Top` | 0.5, 0 | 0.5, 0 | 0, 24 | 520 × 140 |
+| `VBox_Party` | 0, 1 | 0, 1 | 32, −32 | 280 × 116 |
+| `VBox_Vitals` | 1, 1 | 1, 1 | −32, −32 | 260 × 52 |
+| `VBox_Loot` | 1, 1 | 1, 1 | −32, −104 | 260 × 160 |
+| `HBox_Skills` | 0.5, 1 | 0.5, 1 | 0, −32 | 376 × 88 |
+| `Txt_Interact` | 0.5, 0.5 | 0.5, 0.5 | 0, 120 | Size To Content |
+
+**Anchors 는 Minimum 과 Maximum 을 같은 값으로**, **Alignment 는 프리셋으로 안 잡히니 직접 입력**한다.
+Alignment 를 빼먹으면 코너 기준이 아니라 좌상단 기준이 되어 화면 밖으로 나간다.
+
+**박스 안의 `WBP_StatBar` 는 Horizontal Alignment 를 `Fill`, Size 를 `Auto` 로 둔다.**
+`WBP_StatBar` 의 루트 `SizeBox` 는 Height 18 만 있고 Width 가 없어서, 가로 정렬이 `Center` 면
+내용물 폭으로 쪼그라들어 **16픽셀짜리 사각형**이 된다. `Txt_Timer` 만 `Center` 다.
+Size 가 `Fill` 이면 세로로 늘어나 박스의 남은 높이를 먹는다.
+
+`Txt_Timer` 는 타이머 폰트, `Txt_Interact` 는 수치 폰트를 `PreConstruct` 에서 넣는다.
+
+레벨에는 HUD 하나만 띄운다. 게이지는 HUD 의 자식이라 따로 만들지 않는다:
+
+```
+Event BeginPlay → Create Widget (WBP_HUD, Get Player Controller 0) → Add to Viewport
+```
+
+게이지를 독립으로 띄울 때 필요했던 `Set Anchors / Alignment / Position in Viewport` 3노드는
+**HUD 에서는 필요 없다.** `Add to Viewport` 의 기본 스트레치 앵커가 전체 화면 HUD 에는 맞는 동작이다.
 
 ### 검증 — `L_NoiseTest`
 
