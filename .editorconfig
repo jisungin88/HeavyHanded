@@ -1,0 +1,25 @@
+# 들여쓰기가 파일마다 달라서 diff 에 로직 변경과 공백 변경이 섞여 들어왔다.
+# Visual Studio · Rider · VS Code 가 모두 이 파일을 읽는다.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# 언리얼 코딩 표준: 탭 들여쓰기, 탭 폭 4
+[*.{h,cpp,inl,cs}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+[*.ini]
+indent_style = space
+indent_size = 4
+# ini 는 엔진이 그대로 다시 쓰기 때문에 손대지 않는다
+trim_trailing_whitespace = false
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
