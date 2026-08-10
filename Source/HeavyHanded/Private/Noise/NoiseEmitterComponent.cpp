@@ -1,4 +1,4 @@
-#include "Noise/NoiseEmitterComponent.h"
+﻿#include "Noise/NoiseEmitterComponent.h"
 
 #include "Components/PrimitiveComponent.h"
 #include "Curves/CurveFloat.h"

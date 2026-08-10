@@ -13,6 +13,10 @@ trim_trailing_whitespace = true
 indent_style = tab
 indent_size = 4
 tab_width = 4
+# BOM 이 없으면 MSVC 가 소스를 시스템 코드페이지(여기서는 CP949)로 읽는다.
+# 주석의 한글이 C4819 를 내고, 한글 바이트 끝이 0x5C 로 잡히면 줄 이음으로 먹혀
+# 다음 줄이 통째로 주석이 되는 일까지 생긴다. UBT 는 /utf-8 을 붙여주지 않는다.
+charset = utf-8-bom
 
 [*.ini]
 indent_style = space
