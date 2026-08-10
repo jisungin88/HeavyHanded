@@ -37,7 +37,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-													   FActorComponentTickFunction* ThisTickFunction) override;
+							   FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	//~ End
 
@@ -60,12 +60,19 @@ public:
 
 	/**
 	 * 결과 화면 집계 원본. 값은 누적 경계도 기여량.
-	 * UFUNCTION 파라미터·반환 타입에는 TObjectPtr 를 쓸 수 없어서 C++ 전용이다
+	 *
+	 * 서버에만 있다 — 이 맵 자체는 복제하지 않는다. 클라에서는 항상 비어 있으므로
+	 * 결과 화면은 아래 GetNoisiestPlayer() 를 쓸 것.
+	 * UFUNCTION 파라미터·반환 타입에는 TObjectPtr 를 쓸 수 없어서 C++ 전용이다.
 	 */
 	const TMap<TObjectPtr<APlayerState>, float>& GetNoiseContribution() const { return NoiseContribution; }
 
 	/**
-	 * 결과 화면 "최다 소음 유발자" (기획서 8장).
+	 * 결과 화면 "최다 소음 유발자" (기획서 8장). 서버·클라 양쪽에서 유효하다.
+	 *
+	 * 집계 맵 전체가 아니라 1위만 복제한다. 결과 화면이 필요한 것이 그것뿐이고,
+	 * 맵을 통째로 복제하려면 FFastArraySerializer 를 쓰거나 매치 종료 RPC 를 따로 만들어야 한다.
+	 *
 	 * @param OutContribution  그 플레이어의 누적 기여량. 아무도 없으면 0
 	 * @return                 최다 유발자. 집계가 비었으면 nullptr
 	 */
@@ -88,18 +95,47 @@ public:
 
 protected:
 	UFUNCTION()
-	void OnRep_AlertGauge();
+	void OnRep_ReplicatedGauge();
 
 	UFUNCTION()
 	void OnRep_AlertLevel();
 
-	/** 0~1. 서버 권위 */
-	UPROPERTY(ReplicatedUsing = OnRep_AlertGauge, BlueprintReadOnly, Category = "Alert")
+	/**
+	 * 0~1. 서버 권위. 이 값 자체는 복제하지 않는다 — ReplicatedGauge 가 대신한다.
+	 * 서버에서는 정밀한 실수값, 클라에서는 양자화를 되돌린 값이 들어 있다.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "Alert")
 	float AlertGauge = 0.f;
+
+	/**
+	 * AlertGauge 를 0~255 로 양자화한 복제본. 해상도 약 0.4%p — HUD 바로는 충분하다.
+	 *
+	 * float 를 그대로 복제하면 자연 감소 중에 매 프레임 값이 바뀌어
+	 * GameState 의 넷 업데이트 레이트(AActor 기본 100Hz) 만큼 계속 전송된다.
+	 * 감소가 30~60초씩 이어지므로 그동안 내내 나간다.
+	 * uint8 로 끊으면 1%/초 기준 초당 2~3번만 dirty 가 되어 나머지는 아예 전송되지 않는다.
+	 *
+	 * 단계 판정에는 절대 쓰지 말 것 — 판정은 항상 AlertGauge 원본으로 한다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedGauge)
+	uint8 ReplicatedGauge = 0;
 
 	/** 히스테리시스 때문에 게이지에서 유도할 수 없다. 별도로 복제한다 */
 	UPROPERTY(ReplicatedUsing = OnRep_AlertLevel, BlueprintReadOnly, Category = "Alert")
 	EAlertLevel AlertLevel = EAlertLevel::Calm;
+
+	/**
+	 * 현재 1위 소음 유발자. 결과 화면(클라)에서 읽으라고 복제한다.
+	 *
+	 * 기여량은 단조 증가라 1위 갱신이 O(1) 이다 — 새 기여량이 기존 1위를 넘을 때만 바뀐다.
+	 * 그래서 매 소음마다 맵 전체를 훑을 필요가 없고, dirty 도 순위가 실제로 뒤집힐 때만 생긴다.
+	 */
+	UPROPERTY(Replicated)
+	TObjectPtr<APlayerState> NoisiestPlayer = nullptr;
+
+	/** NoisiestPlayer 의 누적 기여량 */
+	UPROPERTY(Replicated)
+	float NoisiestContribution = 0.f;
 
 	// 임계값 · 감소율은 UAlertSettings 에 있다.
 	// 이 컴포넌트는 런타임 생성이라 디테일 패널에 안 뜨므로
@@ -107,7 +143,7 @@ protected:
 	// Project Settings → Game → Alert
 
 private:
-	bool HasAlertAuthority() const;
+	// 권위 판정은 Shared/NetAuthority.h 의 HasServerAuthority(this) 하나로 통일했다
 
 	/** 감쇄 전 소음 1건을 받는다. 서버에서만 호출된다 */
 	void HandleNoiseReported(const FNoiseEvent& Event, const FNoiseProfileRow& Profile, AActor* Instigator);

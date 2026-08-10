@@ -10,6 +10,8 @@
 #include "Net/UnrealNetwork.h"
 
 #include "Alert/AlertSettings.h"
+#include "Shared/Gauge01.h"
+#include "Shared/NetAuthority.h"
 #include "Noise/NoiseSubsystem.h"
 #include "Noise/NoiseTypes.h"
 
@@ -67,6 +69,12 @@ UAlertComponent::UAlertComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;   // 게이지가 0 이면 돌 필요 없다
 
+	// 이 틱이 하는 일은 무소음 시간 누적과 자연 감소뿐이다.
+	// 기본 감소율이 1%/초라 프레임마다 볼 이유가 없고, 감소가 선형이라
+	// 간격을 벌려도 결과가 수학적으로 동일하다 (DeltaTime 이 그만큼 커진다).
+	// 144fps 기준 틱 횟수가 14분의 1이 된다
+	PrimaryComponentTick.TickInterval = 0.1f;
+
 	SetIsReplicatedByDefault(true);
 }
 
@@ -74,20 +82,20 @@ void UAlertComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UAlertComponent, AlertGauge);
+	DOREPLIFETIME(UAlertComponent, ReplicatedGauge);
 	DOREPLIFETIME(UAlertComponent, AlertLevel);
-}
 
-bool UAlertComponent::HasAlertAuthority() const
-{
-	return GetOwnerRole() == ROLE_Authority;
+	// 결과 화면은 클라에서 뜨는데 NoiseContribution 맵은 서버에만 있다.
+	// 1위만 복제해서 GetNoisiestPlayer() 가 양쪽에서 같은 답을 주게 한다
+	DOREPLIFETIME(UAlertComponent, NoisiestPlayer);
+	DOREPLIFETIME(UAlertComponent, NoisiestContribution);
 }
 
 void UAlertComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (!HasAlertAuthority())
+	if (!HasServerAuthority(this))
 	{
 		return;   // 클라는 복제된 값만 받는다
 	}
@@ -163,13 +171,17 @@ UAlertComponent* UAlertComponent::EnsureOnGameState(AGameStateBase* GameState)
 
 void UAlertComponent::HandleNoiseReported(const FNoiseEvent& Event, const FNoiseProfileRow& Profile, AActor* Instigator)
 {
-	if (!HasAlertAuthority() || AlertLevel == EAlertLevel::Alarm)
+	if (!HasServerAuthority(this) || AlertLevel == EAlertLevel::Alarm)
 	{
 		return;   // 경보는 래치라 더 올릴 것도 없다
 	}
 
 	// 소리 크기에 비례해 오른다. 7단계 공식: AlertDelta = Row.AlertDelta * Loudness01
-	const float Delta = Profile.AlertDelta * Event.Loudness01;
+	//
+	// AlertScale 은 발행측 스팸 필터가 넘겨주는 "새로운 정보량" 이다.
+	// 구르는 와인 랙은 경비에게 매번 제대로 들려야 하므로 Loudness01 을 깎으면 안 되고,
+	// 대신 이쪽만 낮춰서 한 번 굴린 것으로 경보가 차지 않게 한다
+	const float Delta = Profile.AlertDelta * Event.Loudness01 * Event.AlertScale;
 
 	SilenceTimer = 0.f;   // 소음이 나면 무소음 타이머 리셋
 
@@ -182,7 +194,15 @@ void UAlertComponent::HandleNoiseReported(const FNoiseEvent& Event, const FNoise
 	// 여기서 안 모으면 나중에 소음 이벤트를 다시 파고들어야 한다
 	if (APlayerState* PlayerState = ResolvePlayerState(Instigator))
 	{
-		NoiseContribution.FindOrAdd(PlayerState) += Delta;
+		const float Total = (NoiseContribution.FindOrAdd(PlayerState) += Delta);
+
+		// 기여량은 단조 증가라 1위 갱신이 O(1) 이다 — 맵을 다시 훑을 필요가 없다.
+		// 같은 사람이 계속 1위면 값만 오르고, 순위가 뒤집힐 때만 대상이 바뀐다
+		if (Total > NoisiestContribution)
+		{
+			NoisiestPlayer       = PlayerState;
+			NoisiestContribution = Total;
+		}
 	}
 
 	ApplyGauge(AlertGauge + Delta);
@@ -205,11 +225,8 @@ EAlertLevel UAlertComponent::EvaluateLevel(float Gauge, EAlertLevel Current) con
 		return EAlertLevel::Alarm;
 	}
 
-	const UAlertSettings* Settings = UAlertSettings::Get();
-	if (!Settings)
-	{
-		return Current;
-	}
+	// Get() 은 CDO 라 null 이 아니다 (AlertSettings.h 주석 참고)
+	const UAlertSettings& Settings = *UAlertSettings::Get();
 
 	// 진입은 Enter, 이탈은 Exit 임계값을 쓴다. 이 간격(히스테리시스)이 없으면
 	// 33/34% 경계에서 단계가 깜빡이면서 셔터가 열렸다 닫혔다 한다.
@@ -219,16 +236,16 @@ EAlertLevel UAlertComponent::EvaluateLevel(float Gauge, EAlertLevel Current) con
 	switch (Current)
 	{
 	case EAlertLevel::Calm:
-		if (AtLeast(Gauge, Settings->AlertedEnter))    { return EAlertLevel::Alerted; }
-		return AtLeast(Gauge, Settings->SuspiciousEnter) ? EAlertLevel::Suspicious : EAlertLevel::Calm;
+		if (AtLeast(Gauge, Settings.AlertedEnter))    { return EAlertLevel::Alerted; }
+		return AtLeast(Gauge, Settings.SuspiciousEnter) ? EAlertLevel::Suspicious : EAlertLevel::Calm;
 
 	case EAlertLevel::Suspicious:
-		if (AtLeast(Gauge, Settings->AlertedEnter))    { return EAlertLevel::Alerted; }
-		return AtLeast(Gauge, Settings->SuspiciousExit) ? EAlertLevel::Suspicious : EAlertLevel::Calm;
+		if (AtLeast(Gauge, Settings.AlertedEnter))    { return EAlertLevel::Alerted; }
+		return AtLeast(Gauge, Settings.SuspiciousExit) ? EAlertLevel::Suspicious : EAlertLevel::Calm;
 
 	case EAlertLevel::Alerted:
-		if (!AtLeast(Gauge, Settings->SuspiciousExit)) { return EAlertLevel::Calm; }
-		return AtLeast(Gauge, Settings->AlertedExit) ? EAlertLevel::Alerted : EAlertLevel::Suspicious;
+		if (!AtLeast(Gauge, Settings.SuspiciousExit)) { return EAlertLevel::Calm; }
+		return AtLeast(Gauge, Settings.AlertedExit) ? EAlertLevel::Alerted : EAlertLevel::Suspicious;
 
 	default:
 		return Current;
@@ -240,7 +257,14 @@ void UAlertComponent::ApplyGauge(float NewGauge)
 	const float Clamped = FMath::Clamp(NewGauge, 0.f, 1.f);
 	const EAlertLevel NextLevel = EvaluateLevel(Clamped, AlertLevel);
 
-	const bool bGaugeChanged = !FMath::IsNearlyEqual(Clamped, AlertGauge);
+	// 정확히 비교한다. FMath::IsNearlyEqual(기본 허용오차 1e-4) 을 쓰면
+	// 프레임당 감소량이 그보다 작을 때 통째로 버려진다. 기본 감소율 1%/초 기준
+	// 100fps 를 넘으면(1e-2 / 100 = 1e-4) 매 프레임 버려지고, 누적되지도 않으므로
+	// 경계도가 영원히 안 내려간다. 컴파일 경고도 로그도 없이 조용히 멈추는 종류의 버그다.
+	//
+	// 매 프레임 값이 바뀌어도 복제와 브로드캐스트는 늘지 않는다 —
+	// 둘 다 ReplicatedGauge(uint8) 가 실제로 한 칸 움직였을 때만 일어난다
+	const bool bGaugeChanged = (Clamped != AlertGauge);
 	const bool bLevelChanged = (NextLevel != AlertLevel);
 
 	if (!bGaugeChanged && !bLevelChanged)
@@ -257,7 +281,12 @@ void UAlertComponent::ApplyGauge(float NewGauge)
 	// 리슨 서버의 호스트 창 HUD 도 갱신되려면 직접 불러야 한다
 	if (bGaugeChanged)
 	{
-		OnRep_AlertGauge();
+		const uint8 Quantized = Gauge01::Quantize(AlertGauge);
+		if (Quantized != ReplicatedGauge)
+		{
+			ReplicatedGauge = Quantized;
+			OnRep_ReplicatedGauge();
+		}
 	}
 	if (bLevelChanged)
 	{
@@ -273,8 +302,14 @@ void UAlertComponent::ApplyGauge(float NewGauge)
 	}
 }
 
-void UAlertComponent::OnRep_AlertGauge()
+void UAlertComponent::OnRep_ReplicatedGauge()
 {
+	// 클라에는 양자화된 값만 도착한다. 서버의 AlertGauge 는 이미 정밀한 원본이므로 덮지 않는다
+	if (!HasServerAuthority(this))
+	{
+		AlertGauge = Gauge01::Dequantize(ReplicatedGauge);
+	}
+
 	OnAlertGaugeChanged.Broadcast(AlertGauge);
 }
 
@@ -294,24 +329,21 @@ void UAlertComponent::OnRep_AlertLevel()
 
 APlayerState* UAlertComponent::GetNoisiestPlayer(float& OutContribution) const
 {
-	APlayerState* Noisiest = nullptr;
-	OutContribution = 0.f;
-
-	for (const TPair<TObjectPtr<APlayerState>, float>& Pair : NoiseContribution)
+	// 복제된 값을 그대로 쓴다. 서버에서 맵을 훑고 클라에서 이걸 읽는 식으로 갈라두면
+	// 두 경로가 서로 다른 답을 내는 순간을 아무도 못 잡는다
+	if (!IsValid(NoisiestPlayer))
 	{
-		if (Pair.Value > OutContribution && IsValid(Pair.Key))
-		{
-			Noisiest        = Pair.Key;
-			OutContribution = Pair.Value;
-		}
+		OutContribution = 0.f;
+		return nullptr;
 	}
 
-	return Noisiest;
+	OutContribution = NoisiestContribution;
+	return NoisiestPlayer;
 }
 
 void UAlertComponent::SetAlertGauge01(float NewGauge)
 {
-	if (!HasAlertAuthority())
+	if (!HasServerAuthority(this))
 	{
 		return;
 	}
@@ -322,14 +354,17 @@ void UAlertComponent::SetAlertGauge01(float NewGauge)
 
 void UAlertComponent::ResetAlert()
 {
-	if (!HasAlertAuthority())
+	if (!HasServerAuthority(this))
 	{
 		return;
 	}
 
 	AlertLevel   = EAlertLevel::Calm;   // 래치 해제. ApplyGauge 보다 먼저여야 한다
 	SilenceTimer = 0.f;
+
 	NoiseContribution.Reset();
+	NoisiestPlayer       = nullptr;     // 복제본도 같이 비운다
+	NoisiestContribution = 0.f;
 
 	ApplyGauge(0.f);
 
@@ -346,21 +381,16 @@ void UAlertComponent::ResetAlert()
 
 float UAlertComponent::GetSilenceGrace() const
 {
-	const UAlertSettings* Settings = UAlertSettings::Get();
-	if (!Settings)
-	{
-		return 30.f;
-	}
-
-	return (AlertLevel == EAlertLevel::Alerted) ? Settings->AlertedSilenceSeconds : Settings->SilenceSeconds;
+	const UAlertSettings& Settings = *UAlertSettings::Get();
+	return (AlertLevel == EAlertLevel::Alerted) ? Settings.AlertedSilenceSeconds : Settings.SilenceSeconds;
 }
 
 void UAlertComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-																	  FActorComponentTickFunction* ThisTickFunction)
+									FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!HasAlertAuthority() || AlertLevel == EAlertLevel::Alarm || AlertGauge <= 0.f)
+	if (!HasServerAuthority(this) || AlertLevel == EAlertLevel::Alarm || AlertGauge <= 0.f)
 	{
 		SetComponentTickEnabled(false);
 		return;
@@ -372,15 +402,18 @@ void UAlertComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		return;
 	}
 
-	const UAlertSettings* Settings = UAlertSettings::Get();
-	const float DecayPerSecond = Settings ? Settings->DecayPerSecond : 0.01f;
-
-	ApplyGauge(AlertGauge - DecayPerSecond * DeltaTime);
+	ApplyGauge(AlertGauge - UAlertSettings::Get()->DecayPerSecond * DeltaTime);
 }
 
 // ──────────────────────────────────────────────────────────────
 // [디버그 전용] 치트
+//
+// 쉬핑 빌드에서는 코드째 빠진다. hh.Alert.Set 0 은 경보를 지우는 치트라
+// 협동 잠입 게임의 출시 빌드 콘솔에 남아 있으면 안 된다.
+// 개발 · 테스트 빌드에서도 ECVF_Cheat 를 달아 이 파일 위쪽 CVarNoiseDebug 와 규칙을 맞춘다.
 // ──────────────────────────────────────────────────────────────
+#if !UE_BUILD_SHIPPING
+
 static void AlertSetCommand(const TArray<FString>& Args, UWorld* World)
 {
 	if (!World)
@@ -410,7 +443,8 @@ static void AlertSetCommand(const TArray<FString>& Args, UWorld* World)
 static FAutoConsoleCommandWithWorldAndArgs GAlertSetCommand(
 	  TEXT("hh.Alert.Set"),
 	  TEXT("hh.Alert.Set <퍼센트> — 경계도를 강제 설정한다. 예: hh.Alert.Set 66"),
-	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AlertSetCommand));
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AlertSetCommand),
+	  ECVF_Cheat);
 
 // 경보는 래치라 hh.Alert.Set 0 으로는 안 풀린다. 테스트를 반복하려면 이게 필요하다
 static void AlertResetCommand(UWorld* World)
@@ -440,18 +474,15 @@ static void AlertResetCommand(UWorld* World)
 static FAutoConsoleCommandWithWorld GAlertResetCommand(
 	  TEXT("hh.Alert.Reset"),
 	  TEXT("경계도를 0 으로 되돌리고 경보 래치를 푼다"),
-	  FConsoleCommandWithWorldDelegate::CreateStatic(&AlertResetCommand));
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&AlertResetCommand),
+	  ECVF_Cheat);
 
 // 임계값 비교가 경계에서 어긋날 때 원인을 가리기 위한 덤프.
 // float 는 화면 표시로는 같아 보여도 비트가 다를 수 있어서 원시 비트까지 찍는다
 static void AlertDumpCommand(const TArray<FString>& Args, UWorld* World)
 {
+	// Get() 은 CDO 라 null 이 아니다 (AlertSettings.h). 프로덕션 경로와 규칙을 맞춘다
 	const UAlertSettings* Settings = UAlertSettings::Get();
-	if (!Settings)
-	{
-		UE_LOG(LogAlert, Warning, TEXT("UAlertSettings CDO 를 가져오지 못했습니다."));
-		return;
-	}
 
 	auto BitsOf = [](float Value) -> uint32
 	{
@@ -486,7 +517,8 @@ static void AlertDumpCommand(const TArray<FString>& Args, UWorld* World)
 static FAutoConsoleCommandWithWorldAndArgs GAlertDumpCommand(
 	  TEXT("hh.Alert.Dump"),
 	  TEXT("hh.Alert.Dump [퍼센트] — 임계값과 입력값을 원시 비트까지 찍는다. 기본 67"),
-	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AlertDumpCommand));
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&AlertDumpCommand),
+	  ECVF_Cheat);
 
 // 기획서 8장 "최다 소음 유발자" 집계 확인.
 // Instigator 가 제대로 심어져 있지 않으면 이 목록이 비어 있다
@@ -504,11 +536,30 @@ static void AlertContributorsCommand(UWorld* World)
 		return;
 	}
 
+	// 복제되는 1위를 먼저 찍는다. 상세 맵은 서버에만 있으므로, 이걸 뒤로 미루면
+	// 클라에서 "집계가 비었다 → Instigator 를 확인하라" 는 엉뚱한 경고만 보고 끝난다
+	float Top = 0.f;
+	if (const APlayerState* Noisiest = Alert->GetNoisiestPlayer(Top))
+	{
+		UE_LOG(LogAlert, Log, TEXT("최다 소음 유발자: %s (%.1f%%)"), *Noisiest->GetPlayerName(), Top * 100.f);
+	}
+	else
+	{
+		UE_LOG(LogAlert, Warning,
+				TEXT("최다 소음 유발자가 없습니다. 소음원 액터에 Instigator 가 설정돼 있는지 확인하세요."));
+	}
+
+	// 여기부터는 서버 전용 데이터다
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogAlert, Log, TEXT("(플레이어별 상세 집계는 서버에만 있습니다. 서버 창에서 실행하세요)"));
+		return;
+	}
+
 	const TMap<TObjectPtr<APlayerState>, float>& Contribution = Alert->GetNoiseContribution();
 	if (Contribution.IsEmpty())
 	{
-		UE_LOG(LogAlert, Warning,
-				TEXT("소음 유발자 집계가 비어 있습니다. 소음원 액터에 Instigator 가 설정돼 있는지 확인하세요."));
+		UE_LOG(LogAlert, Log, TEXT("플레이어별 집계가 비어 있습니다."));
 		return;
 	}
 
@@ -519,15 +570,11 @@ static void AlertContributorsCommand(UWorld* World)
 				IsValid(Pair.Key) ? *Pair.Key->GetPlayerName() : TEXT("(사라진 플레이어)"),
 				Pair.Value * 100.f);
 	}
-
-	float Top = 0.f;
-	if (const APlayerState* Noisiest = Alert->GetNoisiestPlayer(Top))
-	{
-		UE_LOG(LogAlert, Log, TEXT("최다 소음 유발자: %s (%.1f%%)"), *Noisiest->GetPlayerName(), Top * 100.f);
-	}
 }
 
 static FAutoConsoleCommandWithWorld GAlertContributorsCommand(
 	  TEXT("hh.Alert.Contributors"),
 	  TEXT("플레이어별 누적 소음 기여량과 최다 소음 유발자를 출력한다"),
-	  FConsoleCommandWithWorldDelegate::CreateStatic(&AlertContributorsCommand));
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&AlertContributorsCommand),
+	  ECVF_Cheat);
+#endif   // !UE_BUILD_SHIPPING

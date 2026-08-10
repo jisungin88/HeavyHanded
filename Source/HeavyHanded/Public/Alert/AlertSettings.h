@@ -19,6 +19,7 @@ class HEAVYHANDED_API UAlertSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
+	/** CDO 라 절대 null 이 아니다 — 호출부에서 null 검사를 하지 말 것. UNoiseSettings::Get() 주석 참고 */
 	static const UAlertSettings* Get() { return GetDefault<UAlertSettings>(); }
 
 	virtual FName GetCategoryName() const override { return TEXT("Game"); }

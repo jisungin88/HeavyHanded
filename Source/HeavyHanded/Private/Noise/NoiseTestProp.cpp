@@ -29,7 +29,10 @@ ANoiseTestProp::ANoiseTestProp()
 		Body->SetStaticMesh(CubeMesh.Object);
 	}
 
-	Body->SetCollisionProfileName(TEXT("PhysicsActor"));
+	// PhysicsActor 가 아니라 Loot 이어야 한다.
+	// PhysicsActor 는 CustomResponses 가 비어 있어서 NoiseOcclusion 채널 기본값(Block)을 그대로 쓴다.
+	// 그러면 테스트 상자가 스스로 차폐물이 되어 실제 노획물과 다른 감쇄 거동을 보인다
+	Body->SetCollisionProfileName(TEXT("Loot"));
 	Body->SetSimulatePhysics(true);
 
 	// 이걸 안 켜면 OnComponentHit 이 아예 오지 않는다.
@@ -43,8 +46,9 @@ ANoiseTestProp::ANoiseTestProp()
 }
 
 // ──────────────────────────────────────────────────────────────
-// [디버그 전용] 콘솔 명령
+// [디버그 전용] 콘솔 명령. 쉬핑 빌드에서는 코드째 빠진다
 // ──────────────────────────────────────────────────────────────
+#if !UE_BUILD_SHIPPING
 
 static void NoiseSpawnPropCommand(const TArray<FString>& Args, UWorld* World)
 {
@@ -88,7 +92,8 @@ static void NoiseSpawnPropCommand(const TArray<FString>& Args, UWorld* World)
 static FAutoConsoleCommandWithWorldAndArgs GNoiseSpawnPropCommand(
 	  TEXT("hh.Noise.SpawnProp"),
 	  TEXT("hh.Noise.SpawnProp [높이] — 플레이어 앞 상공에 물리 상자를 떨어뜨린다. 기본 500"),
-	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&NoiseSpawnPropCommand));
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&NoiseSpawnPropCommand),
+	  ECVF_Cheat);
 
 static void NoiseClearPropsCommand(UWorld* World)
 {
@@ -110,4 +115,7 @@ static void NoiseClearPropsCommand(UWorld* World)
 static FAutoConsoleCommandWithWorld GNoiseClearPropsCommand(
 	  TEXT("hh.Noise.ClearProps"),
 	  TEXT("생성된 테스트 상자를 전부 제거한다"),
-	  FConsoleCommandWithWorldDelegate::CreateStatic(&NoiseClearPropsCommand));
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&NoiseClearPropsCommand),
+	  ECVF_Cheat);
+
+#endif   // !UE_BUILD_SHIPPING

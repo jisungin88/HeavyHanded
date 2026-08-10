@@ -25,7 +25,17 @@ public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Noise")
 	void OnNoiseHeard(const FNoiseStimulus& Stimulus);
 
-	/** 청취 지점(귀 위치). 오클루전 트레이스의 끝점이 된다 */
+	/**
+	 * 청취 지점(귀 위치). 오클루전 트레이스의 끝점이 된다.
+	 *
+	 * 계약: 반환 지점은 소유 액터 위치에서 500cm(UNoiseSubsystem 의 ListenerCullMargin) 안이어야 한다.
+	 * UNoiseSubsystem 이 액터 위치로 값싼 1차 거리 컬링을 한 뒤에야 이 함수를 부르기 때문이다
+	 * (BlueprintNativeEvent 라 호출 자체가 ProcessEvent 를 탄다).
+	 *
+	 * 이 범위를 벗어나면 반경 경계의 청취자가 조용히 걸러진다.
+	 * 개발 빌드에서는 ensure 로 잡히지만 쉬핑에서는 아무 신호도 없다.
+	 * 액터에서 멀리 떨어진 지점을 듣게 하려면 별도 청취자를 그 자리에 두는 편이 맞다.
+	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Noise")
 	FVector GetListenerLocation() const;
 };
