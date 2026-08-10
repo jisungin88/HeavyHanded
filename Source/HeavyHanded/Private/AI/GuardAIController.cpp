@@ -33,6 +33,17 @@ AGuardAIController::AGuardAIController()
 	// 시야각·거리 등 세부 파라미터는 BP_GuardVariant_* 에서 GuardType별로 override.
 	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+
+	// 팀 시스템(IGenericTeamAgentInterface)을 별도로 구현하지 않았기 때문에,
+	// 기본 설정(bDetectEnemies만 true)으로는 플레이어가 "중립"으로 판정되어 전혀 감지되지 않는다.
+	// 소속과 무관하게 전부 감지하도록 명시적으로 켠다.
+	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+
 	PerceptionComp->ConfigureSense(*SightConfig);
 	PerceptionComp->ConfigureSense(*HearingConfig);
 }
@@ -48,6 +59,16 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 	UBlackboardComponent* BlackboardComp = nullptr;
 	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
+
+	// SearchStartTime/LastSeenTime 기본값이 0.0이면, 게임 시작 직후 몇 초 동안
+	// "한 번도 감지 안 했는데 타임아웃 조건이 우연히 참"이 되는 문제가 생길 수 있다.
+	// 아주 먼 과거 값으로 초기화해 실제로 감지되기 전까지는 항상 타임아웃이 만료된 상태로 둔다.
+	if (IsValid(BlackboardComp))
+	{
+		constexpr float FarPast = -100000.f;
+		BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), FarPast);
+		BlackboardComp->SetValueAsFloat(TEXT("LastSeenTime"), FarPast);
+	}
 
 	// SelfActor / GuardType / AIState는 더 이상 Blackboard에 두지 않는다.
 	// - Self는 OwnerComp.GetAIOwner()->GetPawn()으로 즉시 조회 가능
@@ -85,12 +106,23 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 		{
 			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+
+			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 Pursue를 바로 이탈하지 않도록,
+			// 실제로 "본" 순간마다 시각을 갱신한다. BTDecorator_CheckSearchTimeout(TimeKeyName=LastSeenTime,
+			// TimeoutSeconds=1~2초)이 Pursue 브랜치에서 이 값을 기준으로 짧은 유예를 준다.
+			BlackboardComp->SetValueAsFloat(TEXT("LastSeenTime"), GetWorld()->GetTimeSeconds());
 		}
 	}
 	else if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
 	{
-		BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
+		// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
+		// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
+		if (Stimulus.WasSuccessfullySensed())
+		{
+			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
+			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
+			BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), GetWorld()->GetTimeSeconds());
+		}
 	}
 }
 
