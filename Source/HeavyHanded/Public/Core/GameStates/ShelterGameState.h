@@ -11,7 +11,7 @@
  */
 
  // Delegate ¼±¾ð
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerListChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLobbyPlayerCountChanged, int32, PlayerCount);
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -22,9 +22,17 @@ class HEAVYHANDED_API AShelterGameState : public AGameState
 public:
 
     UPROPERTY(BlueprintAssignable)
-    FOnPlayerListChanged OnPlayerListChanged;
+    FOnLobbyPlayerCountChanged OnLobbyPlayerCountChanged;
 
-    void BroadcastPlayerListChanged();
+    UFUNCTION(BlueprintPure)
+    int32 GetLobbyPlayerCount() const;
+
+    void UpdateLobbyPlayerCount();
+
+protected:
+
+    virtual void AddPlayerState(APlayerState* PlayerState) override;
+    virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
 
 };
