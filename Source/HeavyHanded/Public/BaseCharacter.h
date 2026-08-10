@@ -8,6 +8,21 @@
 #include "InputActionValue.h"
 #include "BaseCharacter.generated.h"
 
+USTRUCT(BlueprintType)
+struct FAbilityInputBinding
+{
+	GENERATED_BODY()
+
+public:
+	// 에디터에서 지정할 입력 액션 (예: IA_Interact)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
+	TObjectPtr<class UInputAction> InputAction;
+
+	// 그 입력에 대응할 어빌리티 클래스 (예: GA_Interact)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
+	TSubclassOf<class UGameplayAbility> AbilityClass;
+};
+
 class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
@@ -102,6 +117,45 @@ protected:
 protected:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
+
+protected:
+	// ★ [통합됨] 에디터 디테일 패널에서 입력과 스킬을 1:1로 매핑하는 리스트 (DefaultAbilities 삭제됨)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Abilities")
+	TArray<FAbilityInputBinding> AbilityInputBindings;
+
+	// 인프라 입력 감지 시 실행될 콜백 함수
+	void AbilityInputPressed(TSubclassOf<class UGameplayAbility> AbilityClass);
+
+protected:
+	// 현재 손에 들고 있는 액터
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction")
+	TObjectPtr<AActor> HeldActor = nullptr;
+
+public:
+	// HeldActor를 반환하는 함수
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	AActor* GetHeldActor() const { return HeldActor; }
+
+	// HeldActor를 설정하는 함수
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void SetHeldActor(AActor* NewHeldActor) { HeldActor = NewHeldActor; }
+
+	// 손에 든 아이템을 내려놓는 함수 (Q키 등에 바인딩용)
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void DropItem();
+
+public:
+	// 서버가 아이템을 집었음을 모든 클라이언트에게 알려주는 함수
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_AttachItem(AActor* ItemToAttach);
+
+	//아이템을 내려놓는 과정을 모든 클라이언트에게 동기화하는 함수
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_DropItem();
+
+	// ★ [추가] 클라이언트가 서버에게 "아이템 버려줘!"라고 요청하는 서버 RPC
+	UFUNCTION(Server, Reliable)
+	void Server_DropItem();
 
 public:	
 	// Called every frame

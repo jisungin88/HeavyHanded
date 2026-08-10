@@ -14,6 +14,11 @@ class HEAVYHANDED_API UBaseGameplayAbility : public UGameplayAbility
 {
 	GENERATED_BODY()
 
+protected:
+	// 에디터(블루프린트)에서 스킬마다 다른 몽타주를 지정할 수 있도록 오픈합니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
+	class UAnimMontage* SkillMontage;
+
 public:
 	UBaseGameplayAbility();
 

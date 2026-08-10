@@ -69,6 +69,28 @@ void ABaseCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
 
+    // 서버 권한에서 AbilityInputBindings에 등록된 모든 스킬들을 ASC에 부여합니다.
+    if (HasAuthority())
+    {
+        APlayerSessionState* SessionState = GetPlayerState<APlayerSessionState>();
+        if (SessionState)
+        {
+            UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+            if (ASC)
+            {
+                ASC->InitAbilityActorInfo(SessionState, this);
+
+                for (const FAbilityInputBinding& Binding : AbilityInputBindings)
+                {
+                    if (Binding.AbilityClass)
+                    {
+                        ASC->GiveAbility(FGameplayAbilitySpec(Binding.AbilityClass, 1, 0, this));
+                    }
+                }
+            }
+        }
+    }
+
     // 서버 측에서 컨트롤러 소유가 끝났을 때 바인딩 실행
     BindAttributeDelegates();
 }
@@ -120,6 +142,20 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
         {
             EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Started, this, &ABaseCharacter::StartCrouch);
             EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &ABaseCharacter::StopCrouch);
+        }
+
+        for (const FAbilityInputBinding& Binding : AbilityInputBindings)
+        {
+            if (Binding.InputAction && Binding.AbilityClass)
+            {
+                EnhancedInputComponent->BindAction(
+                    Binding.InputAction,
+                    ETriggerEvent::Triggered,
+                    this,
+                    &ABaseCharacter::AbilityInputPressed,
+                    Binding.AbilityClass   // ← 페이로드로 전달, 클로저처럼 각 바인딩마다 고정됨
+                );
+            }
         }
     }
 }
@@ -264,4 +300,75 @@ void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGame
         // 제거할 때 핸들 방식이거나 소스 이펙트 방식 사용
         ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
     }
+}
+
+void ABaseCharacter::AbilityInputPressed(TSubclassOf<UGameplayAbility> AbilityClass)
+{
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC || !AbilityClass) return;
+
+    ASC->TryActivateAbilityByClass(AbilityClass);
+}
+
+void ABaseCharacter::Multicast_AttachItem_Implementation(AActor* ItemToAttach)
+{
+    if (!ItemToAttach) return;
+
+    // 1. 물리 시뮬레이션 및 콜리전 끄기
+    if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ItemToAttach->GetRootComponent()))
+    {
+        PrimComp->SetSimulatePhysics(false);
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
+    // 2. 캐릭터 손 소켓에 부착
+    ItemToAttach->AttachToComponent(
+        GetMesh(),
+        FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+        FName("Hand_R_Socket")
+    );
+
+    // 3. 들고 있는 액터로 기억
+    HeldActor = ItemToAttach;
+}
+
+void ABaseCharacter::DropItem()
+{
+    // 만약 내가 서버라면 바로 멀티캐스트를 태워 실행하고,
+    if (HasAuthority())
+    {
+        Multicast_DropItem();
+    }
+    // 만약 내가 클라이언트라면 서버에게 "나 아이템 버릴래!" 하고 요청(Server RPC)을 보냅니다.
+    else
+    {
+        Server_DropItem();
+    }
+}
+
+// 1단계: 클라이언트의 요청을 받아 서버에서 실행되는 함수
+void ABaseCharacter::Server_DropItem_Implementation()
+{
+    // 서버가 권한을 가지고 안전하게 멀티캐스트를 호출합니다.
+    Multicast_DropItem();
+}
+
+void ABaseCharacter::Multicast_DropItem_Implementation()
+{
+    if (!HeldActor) return;
+
+    // 1. 손에서 떼어내기 (월드 좌표계 유지)
+    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+    HeldActor->DetachFromActor(DetachRules);
+
+    // 2. 물리 엔진 다시 켜기 (바닥으로 툭 떨어지게)
+    if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
+    {
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetSimulatePhysics(true);
+    }
+
+    // 3. 들고 있던 액터 비우기
+    HeldActor = nullptr;
+    UE_LOG(LogTemp, Log, TEXT("Item Drop (Multicast)"));
 }
