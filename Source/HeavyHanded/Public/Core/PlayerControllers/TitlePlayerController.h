@@ -49,6 +49,8 @@ public:
     UPROPERTY(BlueprintReadOnly)
     TArray<FRoomListData> RoomList;
 
+    TArray<FOnlineSessionSearchResult> PublicSessionResults;
+
     // ------------------------------------------------
 
     UPROPERTY(BlueprintAssignable, Category = "Session")

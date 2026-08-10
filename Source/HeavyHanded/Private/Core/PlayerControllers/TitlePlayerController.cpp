@@ -302,6 +302,45 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         TEXT("JoinSession Started = %d"),
         bStarted);
         */
+
+    if (!SessionInterface.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Join: SessionInterface Invalid"));
+        return;
+    }
+
+    if (!PublicSessionResults.IsValidIndex(SearchIndex))
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("Join: Invalid Index = %d / Num = %d"),
+            SearchIndex,
+            PublicSessionResults.Num());
+        return;
+    }
+
+    JoinHandle =
+        SessionInterface->AddOnJoinSessionCompleteDelegate_Handle(
+            FOnJoinSessionCompleteDelegate::CreateUObject(
+                this,
+                &ATitlePlayerController::TitleOnJoinSessionComplete)
+        );
+
+    const FOnlineSessionSearchResult& Result =
+        PublicSessionResults[SearchIndex];
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Join: Session Id = %s"),
+        *Result.GetSessionIdStr());
+
+    bool bStarted =
+        SessionInterface->JoinSession(
+            0,
+            NAME_GameSession,
+            Result);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("JoinSession Called = %d"),
+        bStarted);
 }
 
 
@@ -370,14 +409,6 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
 
 
 
-
-
-
-
-
-
-
-
     OnSessionCreated.Broadcast(bWasSuccessful);
 
 }
@@ -424,7 +455,7 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 
     //RoomList.Empty();
     RoomList.Reset();
-
+    PublicSessionResults.Reset();
 
     for (const FOnlineSessionSearchResult& Result : SessionSearch->SearchResults)
     {
@@ -470,8 +501,9 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 
         NewRoom.SessionResult = Result;
 
-        RoomList.Add(NewRoom);
 
+        RoomList.Add(NewRoom);
+        PublicSessionResults.Add(Result);
 
     } //for
 
@@ -491,42 +523,47 @@ void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJo
     }
 
 
+    UE_LOG(LogTemp, Warning,
+        TEXT("===== Join Complete ====="));
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Join Result = %d"),
+        static_cast<int32>(Result));
+
+
     if (Result != EOnJoinSessionCompleteResult::Success)
     {
         UE_LOG(LogTemp, Error,
-            TEXT("Join Failed : %d"),
-            (int32)Result);
-
+            TEXT("JOIN FAILED"));
         return;
     }
-
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("Join Success"));
 
 
     FString ConnectString;
 
+    bool bResolved =
+        SessionInterface->GetResolvedConnectString(
+            SessionName,
+            ConnectString);
 
-    if (!SessionInterface->GetResolvedConnectString(
-        SessionName,
-        ConnectString))
+    UE_LOG(LogTemp, Warning,
+        TEXT("Resolve Connect String = %d"),
+        bResolved);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("ConnectString = %s"),
+        *ConnectString);
+
+
+    if (!bResolved || ConnectString.IsEmpty())
     {
-        UE_LOG(LogTemp, Error,
-            TEXT("Get Connect String Failed"));
         return;
     }
 
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("Connect String : %s"),
-        *ConnectString);
-
-
     ClientTravel(
         ConnectString,
-        TRAVEL_Absolute
-    );
+        TRAVEL_Absolute);
 
 
 }
