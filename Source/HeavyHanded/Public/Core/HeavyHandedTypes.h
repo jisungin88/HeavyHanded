@@ -63,6 +63,41 @@ struct FLootPhysicsData
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry")
     bool bAllowJumpWhileCarried = true;
 
+    /** 던질 수 있는가. 중량형처럼 놓기만 되는 물건은 false 로 둔다 */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw")
+    bool bAllowThrow = true;
+
+    /**
+     * 던졌을 때의 목표 초기 속도(cm/s).
+     * 임펄스는 질량을 곱해 만들기 때문에, 무게가 달라도 이 속도 그대로 나간다.
+     * 무거운 물건이 덜 날아가는 것은 여기 값을 낮게 잡아 표현한다. (행동이 아니라 데이터로)
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
+        meta = (ClampMin = "0.0"))
+    float ThrowSpeed = 900.f;
+
+    /**
+     * 조준 방향에 섞을 위쪽 성분의 비율. 포물선을 만든다.
+     * 0 이면 조준한 그대로 직선으로 나가 바닥에 바로 박힌다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ThrowUpwardRatio = 0.25f;
+
+    /** 던질 때 부여할 회전 속도(도/초). 0 이면 회전 없이 날아가 던진 티가 안 난다 */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
+        meta = (ClampMin = "0.0"))
+    float ThrowSpinSpeed = 180.f;
+
+    /**
+     * 던지기 직전 조준 방향으로 밀어내는 거리(cm).
+     * 손 소켓은 던진 사람의 캡슐과 겹쳐 있어서, 그대로 물리를 켜면
+     * 물리 엔진이 겹침을 해소하느라 자기가 던진 물건에 튕긴다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
+        meta = (ClampMin = "0.0"))
+    float ThrowClearance = 20.f;
+
     /**
      * 이 값 미만의 충격은 FLootImpactEvent 를 방송하지 않는다.
      * 미세 진동·재접촉을 걸러 소음 파트의 경계도가 순식간에 치솟는 것을 막는다.

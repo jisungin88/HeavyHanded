@@ -53,6 +53,18 @@ public:
     /** 놓임 처리 (서버 전용). 물리 ON + 소음 발행 */
     virtual void OnReleased(APawn* Carrier) = 0;
 
+    /** 던질 수 있는가. 중량형처럼 놓기만 되는 물건이 있다 */
+    virtual bool CanBeThrown() const = 0;
+
+    /**
+     * 던짐 처리 (서버 전용). 놓기와 달리 초기 속도를 준다.
+     *
+     * AimDirection 은 플레이어 파트가 넘기는 조준 방향(정규화 전이어도 된다).
+     * 세기·포물선·회전은 아이템이 자기 데이터로 결정한다 — 플레이어는 방향만 준다.
+     * 던질 수 없는 물건이면 제자리에 놓는 것으로 처리한다.
+     */
+    virtual void OnThrown(APawn* Carrier, const FVector& AimDirection) = 0;
+
     /** 현재 이 노획물을 들고 있는 대표(리더). 없으면 nullptr */
     virtual APawn* GetPrimaryCarrier() const = 0;
 

@@ -9,6 +9,7 @@
 class UStaticMeshComponent;
 class UPrimitiveComponent;
 class APawn;
+struct FPredictProjectilePathResult;
 
 /**
  * 모든 노획물의 베이스.
@@ -46,9 +47,27 @@ public:
     virtual bool CanBeCarriedBy(const APawn* Requester) const override;
     virtual void OnGrabbed(APawn* Carrier) override;
     virtual void OnReleased(APawn* Carrier) override;
+    virtual bool CanBeThrown() const override;
+    virtual void OnThrown(APawn* Carrier, const FVector& AimDirection) override;
     virtual APawn* GetPrimaryCarrier() const override;
     virtual UPrimitiveComponent* GetPhysicsRoot() const override;
     //~ ICarryable 끝
+
+    /**
+     * 던졌을 때의 발사 속도. 조준 방향 + 포물선 성분 + 운반자 속도까지 합친 최종 값이다.
+     *
+     * 서버의 임펄스와 클라이언트의 궤적 표시가 이 함수 하나를 공유한다.
+     * 계산을 따로 두면 미리 보이는 궤적과 실제로 날아가는 경로가 어긋난다.
+     */
+    FVector ComputeThrowVelocity(const FVector& AimDirection) const;
+
+    /**
+     * 던지기 궤적을 예측한다. 조준 중인 클라이언트가 로컬로 그리는 표시용이다.
+     *
+     * 클라이언트 예측이 아니다 — 결과를 서버에 보내지 않고, 실제 판정은 서버가 다시 한다.
+     * 표시가 실제와 다르면 그건 표시가 틀린 것이지 게임 상태가 갈린 것이 아니다.
+     */
+    bool PredictThrowPath(const FVector& AimDirection, FPredictProjectilePathResult& OutResult);
 
     /**
      * 게이팅을 통과한 '확정 충격'만 방송된다. 서버에서만 발생한다.

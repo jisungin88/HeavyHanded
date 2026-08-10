@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
@@ -159,6 +160,124 @@ void ALootBase::OnReleased(APawn* Carrier)
     SetPendingImpactCause(ELootImpactCause::Drop, Carrier);
 
     ApplyCarryState();
+}
+
+bool ALootBase::CanBeThrown() const
+{
+    return PhysicsData.bAllowThrow;
+}
+
+void ALootBase::OnThrown(APawn* Carrier, const FVector& AimDirection)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (PrimaryCarrier.Get() != Carrier)
+    {
+        return;
+    }
+
+    // 던질 수 없는 물건은 요청을 씹지 않고 제자리에 놓는다.
+    // 거부만 하면 플레이어는 입력이 먹지 않는 것으로 느낀다.
+    if (!CanBeThrown())
+    {
+        OnReleased(Carrier);
+        return;
+    }
+
+    // 운반자의 이동 속도를 더하기 때문에 PrimaryCarrier 를 비우기 전에 계산해야 한다.
+    const FVector LaunchVelocity = ComputeThrowVelocity(AimDirection);
+
+    PrimaryCarrier = nullptr;
+
+    // 날아가서 처음 부딪히는 것이 던지기의 결과다. Drop 이 아니라 Throw 로 표시한다.
+    SetPendingImpactCause(ELootImpactCause::Throw, Carrier);
+
+    // 디태치 + 물리 ON + 프로파일 복구
+    ApplyCarryState();
+
+    // 손 소켓은 던진 사람 캡슐과 겹쳐 있다. 겹친 채로 물리를 켜면 물리 엔진이
+    // 침투를 해소하느라 자기가 던진 물건에 튕겨 나간다. 먼저 간격을 만든다.
+    const FVector LaunchDirection = AimDirection.GetSafeNormal();
+    if (PhysicsData.ThrowClearance > 0.f && !LaunchDirection.IsNearlyZero())
+    {
+        SetActorLocation(GetActorLocation() + LaunchDirection * PhysicsData.ThrowClearance,
+            /*bSweep=*/false);
+    }
+
+    // 임펄스 = 질량 x 목표 속도.
+    // 질량을 곱해야 무게와 무관하게 데이터에 적은 ThrowSpeed 그대로 나간다.
+    // 무거운 물건이 덜 날아가는 것은 ThrowSpeed 값으로 표현한다. (값은 데이터, 행동은 공통)
+    LootMesh->AddImpulse(LaunchVelocity * LootMesh->GetMass());
+
+    // 회전이 없으면 물건이 미끄러지듯 날아가 던진 느낌이 안 난다.
+    // 조준 방향 기준 오른쪽 축으로 굴린다. 위/아래로 똑바로 던지면 축이 0 이라 회전은 생략된다.
+    if (PhysicsData.ThrowSpinSpeed > 0.f)
+    {
+        const FVector SpinAxis =
+            FVector::CrossProduct(LaunchDirection, FVector::UpVector).GetSafeNormal();
+        if (!SpinAxis.IsNearlyZero())
+        {
+            LootMesh->SetPhysicsAngularVelocityInDegrees(SpinAxis * PhysicsData.ThrowSpinSpeed);
+        }
+    }
+}
+
+FVector ALootBase::ComputeThrowVelocity(const FVector& AimDirection) const
+{
+    const FVector Aim = AimDirection.GetSafeNormal();
+    if (Aim.IsNearlyZero())
+    {
+        return FVector::ZeroVector;
+    }
+
+    // 조준 방향에 위쪽 성분을 섞어 포물선을 만든다.
+    const FVector LaunchDirection =
+        (Aim + FVector::UpVector * PhysicsData.ThrowUpwardRatio).GetSafeNormal();
+
+    FVector Velocity = LaunchDirection * PhysicsData.ThrowSpeed;
+
+    // 달리면서 던지면 그만큼 더 나간다. 물리 운반 게임에서 이게 있고 없고가 체감 차이가 크다.
+    if (const APawn* Carrier = PrimaryCarrier.Get())
+    {
+        Velocity += Carrier->GetVelocity();
+    }
+
+    return Velocity;
+}
+
+bool ALootBase::PredictThrowPath(const FVector& AimDirection, FPredictProjectilePathResult& OutResult)
+{
+    const FVector LaunchDirection = AimDirection.GetSafeNormal();
+    if (LaunchDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    FPredictProjectilePathParams Params;
+
+    // 실제 던지기와 같은 출발점·속도를 써야 미리 보이는 궤적이 맞는다.
+    Params.StartLocation = GetActorLocation() + LaunchDirection * PhysicsData.ThrowClearance;
+    Params.LaunchVelocity = ComputeThrowVelocity(AimDirection);
+    Params.ProjectileRadius = LootMesh->Bounds.SphereRadius;
+
+    Params.bTraceWithCollision = true;
+    Params.bTraceWithChannel = true;
+    Params.TraceChannel = ECollisionChannel::ECC_WorldStatic;
+
+    // 자기 자신과 던지는 사람은 궤적에서 빼야 조준선이 발밑에서 끊기지 않는다.
+    Params.ActorsToIgnore.Add(this);
+    if (APawn* Carrier = PrimaryCarrier.Get())
+    {
+        Params.ActorsToIgnore.Add(Carrier);
+    }
+
+    Params.MaxSimTime = 3.f;
+    Params.SimFrequency = 15.f;
+
+    return UGameplayStatics::PredictProjectilePath(this, Params, OutResult);
 }
 
 APawn* ALootBase::GetPrimaryCarrier() const
