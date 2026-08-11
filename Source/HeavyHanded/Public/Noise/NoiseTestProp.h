@@ -8,6 +8,10 @@ class UNoiseEmitterComponent;
 class UStaticMeshComponent;
 
 /**
+
+ * TODO(출시 전): 이 UCLASS 는 쿠킹에 포함된다. 콘솔 명령과 달리 #if 로 못 빼므로
+ *                에디터 전용 모듈로 옮기거나 실제 노획물 액터가 나오면 삭제할 것.
+ *
  * [디버그 전용] 물리 충돌 소음 테스트용 상자.
  * 실제 노획물 액터가 나오기 전까지 7단계를 검증하는 용도다.
  *

@@ -32,39 +32,39 @@ enum class EAlertLevel : uint8
 USTRUCT(BlueprintType)
 struct FNoiseProfileRow : public FTableRowBase
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    // 등급 라벨. UI와 AI 힌트 전용
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise")
-    ENoiseGrade Grade = ENoiseGrade::Small;
+	// 등급 라벨. UI와 AI 힌트 전용
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise")
+	ENoiseGrade Grade = ENoiseGrade::Small;
 
-    // 경계도 증가량. 0.01 == 1%
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", UIMax = "0.5"))
-    float AlertDelta = 0.01f;
+	// 경계도 증가량. 0.01 == 1%
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", UIMax = "0.5"))
+	float AlertDelta = 0.01f;
 
-    // 전파 반경. 소 800 / 중 1500 / 대 3000
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", Units = "cm"))
-    float Radius = 800.f;
+	// 전파 반경. 소 800 / 중 1500 / 대 3000
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", Units = "cm"))
+	float Radius = 800.f;
 
-    // true면 전 구역. 거리 감쇄와 차폐를 모두 무시한다
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise")
-    bool bGlobal = false;
+	// true면 전 구역. 거리 감쇄와 차폐를 모두 무시한다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise")
+	bool bGlobal = false;
 
-    // 이 충격량 이하는 소음 없음 (물리 충돌 전용)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact", meta = (ClampMin = "0.0"))
-    float MinImpulse = 0.f;
+	// 이 충격량 이하는 소음 없음 (물리 충돌 전용)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact", meta = (ClampMin = "0.0"))
+	float MinImpulse = 0.f;
 
-    // 이 충격량 이상은 Loudness 1.0으로 포화 (물리 충돌 전용)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact", meta = (ClampMin = "0.0"))
-    float MaxImpulse = 1000.f;
+	// 이 충격량 이상은 Loudness 1.0으로 포화 (물리 충돌 전용)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact", meta = (ClampMin = "0.0"))
+	float MaxImpulse = 1000.f;
 
-    // 정규화된 충격량(0~1)을 Loudness로 매핑. 비워두면 선형
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact")
-    TSoftObjectPtr<UCurveFloat> ImpactCurve;
+	// 정규화된 충격량(0~1)을 Loudness로 매핑. 비워두면 선형
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Impact")
+	TSoftObjectPtr<UCurveFloat> ImpactCurve;
 
-    // 같은 (에미터, 태그) 조합의 재발행 최소 간격. 충돌 스팸 방지
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", Units = "s"))
-    float CooldownSeconds = 0.25f;
+	// 같은 (에미터, 태그) 조합의 재발행 최소 간격. 충돌 스팸 방지
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise", meta = (ClampMin = "0.0", Units = "s"))
+	float CooldownSeconds = 0.25f;
 };
 
 /**
@@ -75,25 +75,39 @@ struct FNoiseProfileRow : public FTableRowBase
 USTRUCT(BlueprintType)
 struct FNoiseEvent
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    FGameplayTag Tag;
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	FGameplayTag Tag;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    FVector Location = FVector::ZeroVector;
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	FVector Location = FVector::ZeroVector;
 
-    // 0~1. 충돌 속도 · 재질 · 모디파이어가 모두 반영된 연속값
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    float Loudness01 = 0.f;
+	// 0~1. 충돌 속도 · 재질 · 모디파이어가 모두 반영된 연속값.
+	// "이 소리가 얼마나 크게 들리는가" — 전파 반경과 청취자 자극 강도를 결정한다
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	float Loudness01 = 0.f;
 
-    // Loudness로 스케일된 실제 전파 반경 (cm)
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    float Radius = 0.f;
+	/**
+	 * 0~1. 경계도에 기여하는 비율. 들리는 크기와는 별개의 축이다.
+	 *
+	 * 구르는 와인 랙처럼 같은 소리가 연달아 날 때, 경비에게는 매번 제대로 들려야 하지만
+	 * 저택 경계도는 한 번 굴린 것으로 100% 가 차면 안 된다.
+	 * 그래서 "얼마나 크게 들리는가"(Loudness01)와 "얼마나 새로운 정보인가"(AlertScale)를
+	 * 분리한다. UNoiseEmitterComponent 의 스팸 필터가 이 값을 낮춰서 보낸다.
+	 *
+	 * 1.0 이 기본이며, 직접 ReportNoise 를 부르는 쪽은 신경 쓸 필요가 없다.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	float AlertScale = 1.f;
 
-    // 소음을 낸 주체. 결과 화면 "최다 소음 유발자" 집계에 사용
-    UPROPERTY()
-    TWeakObjectPtr<AActor> InstigatorActor;
+	// Loudness로 스케일된 실제 전파 반경 (cm)
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	float Radius = 0.f;
+
+	// 소음을 낸 주체. 결과 화면 "최다 소음 유발자" 집계에 사용
+	UPROPERTY()
+	TWeakObjectPtr<AActor> InstigatorActor;
 };
 
 /**
@@ -103,24 +117,24 @@ struct FNoiseEvent
 USTRUCT(BlueprintType)
 struct FNoiseStimulus
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    FGameplayTag Tag;
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	FGameplayTag Tag;
 
-    // 청취자가 조사하러 갈 지점
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    FVector Location = FVector::ZeroVector;
+	// 청취자가 조사하러 갈 지점
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	FVector Location = FVector::ZeroVector;
 
-    // 0~1. 감쇄까지 끝난 최종 강도. 인지 게이지 증가율에 그대로 곱한다
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    float Strength = 0.f;
+	// 0~1. 감쇄까지 끝난 최종 강도. 인지 게이지 증가율에 그대로 곱한다
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	float Strength = 0.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    ENoiseGrade Grade = ENoiseGrade::None;
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	ENoiseGrade Grade = ENoiseGrade::None;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Noise")
-    TObjectPtr<AActor> InstigatorActor = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category = "Noise")
+	TObjectPtr<AActor> InstigatorActor = nullptr;
 };
 
 /**
@@ -132,17 +146,17 @@ struct FNoiseStimulus
 USTRUCT(BlueprintType)
 struct FNoiseModifier
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    // 어떤 소음에 적용되는가. 비워두면 전부에 적용된다. 예: Noise.Player 하위 전부
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    FGameplayTagQuery AffectedTags;
+	// 어떤 소음에 적용되는가. 비워두면 전부에 적용된다. 예: Noise.Player 하위 전부
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+	FGameplayTagQuery AffectedTags;
 
-    // 소리 크기 배율. 고무창 신발 0.5, 완충 장갑 0.3
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise", meta = (ClampMin = "0.0"))
-    float Multiplier = 1.f;
+	// 소리 크기 배율. 고무창 신발 0.5, 완충 장갑 0.3
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise", meta = (ClampMin = "0.0"))
+	float Multiplier = 1.f;
 
-    // 미믹 "발소리 위장" 처럼 배율이 아니라 태그를 갈아끼우는 경우. 비워두면 원래 태그 유지
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    FGameplayTag OverrideTag;
+	// 미믹 "발소리 위장" 처럼 배율이 아니라 태그를 갈아끼우는 경우. 비워두면 원래 태그 유지
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+	FGameplayTag OverrideTag;
 };

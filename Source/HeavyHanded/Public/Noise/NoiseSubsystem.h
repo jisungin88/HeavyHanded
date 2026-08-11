@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/HitResult.h"          // FHitResult — 스크래치 버퍼를 값으로 들고 있어 완전한 타입이 필요하다
 #include "GameplayTagContainer.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Noise/NoiseTypes.h"
@@ -20,6 +21,21 @@ class UDataTable;
  */
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnNoiseReported,
 	const FNoiseEvent& /*Event*/, const FNoiseProfileRow& /*Profile*/, AActor* /*Instigator*/);
+
+/**
+ * 등록된 청취자 1명.
+ *
+ * OwnerActor 는 오클루전 트레이스에서 제외할 대상이다 (자기 콜리전에 막히면 안 된다).
+ * 등록 시점에 한 번만 풀어둔다 — 예전에는 소음 1건 × 청취자마다 Cast 를 두 번씩 다시 했고,
+ * 값싼 거리 컬링을 GetListenerLocation(ProcessEvent) 뒤로 미룰 수밖에 없었다.
+ *
+ * 컴포넌트의 소유 액터는 런타임에 바뀌지 않으므로 등록 때 확정해도 안전하다.
+ */
+struct FNoiseListenerEntry
+{
+	TWeakObjectPtr<UObject> Listener;
+	TWeakObjectPtr<AActor>  OwnerActor;
+};
 
 /** 지속형 소음 1건 (대형 금고 절단 등). 핸들로 시작/정지한다 */
 USTRUCT()
@@ -59,14 +75,25 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 
+	/**
+	 * 지속형 소음이 하나도 없으면 아예 틱하지 않는다.
+	 * 기본 TickType 은 Conditional 이라 이 값이 매 프레임 반영된다
+	 * (IsAllowedToTick 은 UTickableWorldSubsystem 에서 final 이라 건드릴 수 없다).
+	 */
+	virtual bool IsTickable() const override { return !ContinuousNoises.IsEmpty(); }
+
 	// ── 소음 발행 (서버에서만 유효) ──
 
 	/**
 	 * 단발 소음. Tag는 DT_NoiseProfiles의 RowName과 일치해야 한다.
+	 *
 	 * @param LoudnessScale  프로파일 기본값에 곱하는 배율. 결과는 0~1로 클램프된다
+	 * @param AlertScale     경계도 기여 배율. 기본 1.0 — 스팸 필터를 가진 호출부만 낮춰서 보낸다.
+	 *                       들리는 크기(LoudnessScale)에는 영향을 주지 않는다
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Noise")
-	void ReportNoise(FGameplayTag Tag, FVector Location, float LoudnessScale = 1.f, AActor* Instigator = nullptr);
+	void ReportNoise(FGameplayTag Tag, FVector Location, float LoudnessScale = 1.f, AActor* Instigator = nullptr,
+					 float AlertScale = 1.f);
 
 	/** 지속 소음 시작. 반환 핸들을 보관했다가 반드시 Stop 할 것 */
 	UFUNCTION(BlueprintCallable, Category = "Noise")
@@ -89,10 +116,15 @@ public:
 	FOnNoiseReported OnNoiseReported;
 
 private:
-	bool HasNoiseAuthority() const;
+	// 권위 판정은 Shared/NetAuthority.h 의 자유 함수 하나로 통일했다.
+	// 예전에는 여기와 컴포넌트 셋이 각자 다른 기준을 들고 있었다
 
-	/** 이벤트 1건을 반경 안 청취자들에게 감쇄 적용해 전달 */
-	void Propagate(const FNoiseEvent& Event, ENoiseGrade Grade, bool bGlobal);
+	/**
+	 * 이벤트 1건을 반경 안 청취자들에게 감쇄 적용해 전달.
+	 * 프로파일을 통째로 받는다 — 필드를 풀어서 넘기면 뭘 더 쓸 때마다 시그니처가 늘어나고,
+	 * 바로 위에서 브로드캐스트하는 OnNoiseReported 와 모양도 어긋난다
+	 */
+	void Propagate(const FNoiseEvent& Event, const FNoiseProfileRow& Profile);
 
 	/** 거리 + 오클루전 감쇄. 0이면 안 들림 */
 	float ComputeAttenuation(const FVector& From, const FVector& To, float Radius,
@@ -106,8 +138,17 @@ private:
 
 	bool bProfileTableResolved = false;
 
+	/** 이미 경고한 미싱 태그. 물리 충돌 경로라 태그당 한 번만 찍어야 한다 */
+	TSet<FGameplayTag> WarnedMissingProfiles;
+
 	/** 죽거나 파괴된 청취자가 알아서 빠지도록 약참조 */
-	TArray<TWeakObjectPtr<UObject>> Listeners;
+	TArray<FNoiseListenerEntry> Listeners;
+
+	/**
+	 * 오클루전 트레이스 결과 재사용 버퍼. 트레이스마다 힙 할당이 나지 않게 하려는 것이다.
+	 * ComputeAttenuation 이 const 라 mutable 이다. 게임 스레드 전용.
+	 */
+	mutable TArray<FHitResult> OcclusionHitsScratch;
 
 	TMap<FGuid, FContinuousNoise> ContinuousNoises;
 	

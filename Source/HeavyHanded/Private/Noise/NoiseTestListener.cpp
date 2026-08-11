@@ -77,6 +77,7 @@ void ANoiseTestListener::Tick(float DeltaTime)
 }
 
 // ──────────────────────────────────────────────────────────────
+#if !UE_BUILD_SHIPPING
 // [디버그 전용] 래치 해제. 경비 BT 가 ResetPerception() 을 부르기 전까지의 대역이다
 // ──────────────────────────────────────────────────────────────
 static void NoiseResetListenersCommand(UWorld* World)
@@ -102,4 +103,6 @@ static void NoiseResetListenersCommand(UWorld* World)
 static FAutoConsoleCommandWithWorld GNoiseResetListenersCommand(
 	  TEXT("hh.Noise.ResetListeners"),
 	  TEXT("배치된 NoiseTestListener 의 인지 게이지를 전부 0 으로 되돌린다"),
-	  FConsoleCommandWithWorldDelegate::CreateStatic(&NoiseResetListenersCommand));
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&NoiseResetListenersCommand),
+	  ECVF_Cheat);
+#endif   // !UE_BUILD_SHIPPING
