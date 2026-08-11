@@ -2,6 +2,7 @@
 
 #include "Components/PrimitiveComponent.h"
 #include "Core/HeavyHandedTypes.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Loot/LootBase.h"
 #include "Net/UnrealNetwork.h"
@@ -90,6 +91,15 @@ void ULootDurabilityComponent::HandleLootImpact(const FLootImpactEvent& Event)
     // 서버에서 값을 직접 바꾸면 RepNotify 가 불리지 않는다. 서버 몫은 손으로 부른다.
     OnRep_ImpactCount();
 
+    // 게이팅이 통과시킨 충격 중 실제로 파손까지 간 것이 몇 개인지 같이 봐야
+    // DamageImpulseThreshold 가 적당한지 판단할 수 있다. 스위치는 ALootBase 와 공유한다.
+    if (OwnerLoot->IsImpactDebugEnabled() && GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red,
+            FString::Printf(TEXT("[%s] 파손 %d / %d  (임펄스 %.0f)"),
+                *OwnerLoot->GetName(), ImpactCount, Data.MaxImpactCount, Event.ImpulseMagnitude));
+    }
+
     if (ImpactCount >= Data.MaxImpactCount)
     {
         Break(Event);
@@ -107,6 +117,12 @@ void ULootDurabilityComponent::Break(const FLootImpactEvent& CausingEvent)
     // 액터를 지우기 전에 먼저 방송해야 한다. 구독자가 LootActor 를 유효한 상태로 받는다.
     OwnerLoot->ReportImpact(ELootImpactCause::Break, CausingEvent.ImpulseMagnitude,
         CausingEvent.ImpactPoint, CausingEvent.InstigatorPawn.Get());
+
+    if (OwnerLoot->IsImpactDebugEnabled() && GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 6.f, FColor::Magenta,
+            FString::Printf(TEXT("[%s] 파괴 — %.2f초 뒤 소멸"), *OwnerLoot->GetName(), BreakDestroyDelay));
+    }
 
     ApplyBrokenState();
 

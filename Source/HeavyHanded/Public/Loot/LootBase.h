@@ -98,6 +98,9 @@ public:
     void ReportImpact(ELootImpactCause InCause, float ImpulseMagnitude,
         const FVector& ImpactPoint, APawn* InInstigator);
 
+    /** 파손 컴포넌트 등이 같은 스위치로 디버그를 켜고 끄기 위해 연다 */
+    bool IsImpactDebugEnabled() const { return bShowImpactDebug; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -131,6 +134,18 @@ protected:
     float ImpactDebounceSeconds = 0.3f;
 
     /**
+     * 충돌 게이팅이 실제로 도는지 화면에 표시한다. (테스트용, 기본 꺼짐)
+     *
+     * 확정된 충격뿐 아니라 '기각된' 충격도 사유와 함께 찍는다.
+     * 낙하 1회에 OnHit 이 몇 번 오고 그중 몇 개가 통과하는지를 눈으로 봐야
+     * 임계값(200/3000)과 디바운스(0.3초)가 적당한지 판단할 수 있다.
+     *
+     * 판정은 서버에서만 돌기 때문에 표시도 서버(호스트 창)에만 나온다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug")
+    bool bShowImpactDebug = false;
+
+    /**
      * 현재 이 노획물을 들고 있는 대표(리더).
      * 2인 협력 캐리에서도 소유·이동을 결정하는 쪽은 항상 리더 한 명이다.
      * 물건 하나에 두 플레이어가 물리 제약을 거는 방식은 네트워크에서 깨진다.
@@ -157,6 +172,15 @@ private:
 
     /** 운반자 캡슐과 노획물이 서로의 이동 스윕을 무시하도록 설정/해제한다 */
     void SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore);
+
+    /** 로그 + 화면 메시지 + 충돌 지점 구. bShowImpactDebug 가 꺼져 있으면 아무것도 하지 않는다 */
+    void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const;
+
+    /** OnHit 콜백이 온 총 횟수. 확정 횟수와 비교해 게이팅 효과를 본다 */
+    int32 DebugRawHitCount = 0;
+
+    /** 게이팅을 통과해 방송된 횟수 */
+    int32 DebugConfirmedCount = 0;
 
     /** 대상별 마지막 확정 충격 시각. 키가 죽으면 정리된다 */
     TMap<TWeakObjectPtr<const AActor>, float> RecentImpactTimes;

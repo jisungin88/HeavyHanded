@@ -16,9 +16,12 @@ struct FLootImpactEvent;
  *   즉사한다. 기획서의 '3회'는 의미 있는 충격 3번이지 콜백 3개가 아니다.
  *
  * [임계값이 2개인 이유]
- *   ImpactReportThreshold(200)  = 소음 파트에 알릴 최소 충격
- *   DamageImpulseThreshold(600) = 파손으로 칠 최소 충격
+ *   ImpactReportThreshold(200)   = 소음 파트에 알릴 최소 충격
+ *   DamageImpulseThreshold(3000) = 파손으로 칠 최소 충격
  *   살짝 부딪히는 소리는 나야 하지만 그게 파손까지 되면 안 된다.
+ *
+ *   실측(10kg): 150cm 낙하는 착지 6497 + 튕김 581 로 잡힌다.
+ *   둘 다 방송되어 '쿵' 다음 '탁' 소리가 나지만, 파손은 착지 하나만 센다.
  *
  * 값은 ALootBase 의 FLootPhysicsData 에서 읽는다. 여기에 수치를 중복해서 두지 않는다.
  */

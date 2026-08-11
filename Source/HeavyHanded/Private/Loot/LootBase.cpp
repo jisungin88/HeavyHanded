@@ -2,6 +2,8 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
@@ -447,10 +449,17 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 
     const float ImpulseMagnitude = NormalImpulse.Size();
 
+    // 게이팅 효과를 재려면 들어온 총량을 알아야 한다.
+    ++DebugRawHitCount;
+
     // [1겹] 임계값 미만 무시.
     // 구르거나 미세하게 재접촉하는 것까지 전부 OnHit 으로 온다.
     if (ImpulseMagnitude < PhysicsData.ImpactReportThreshold)
     {
+        ShowImpactDebug(
+            FString::Printf(TEXT("기각(약함) %.0f < %.0f"),
+                ImpulseMagnitude, PhysicsData.ImpactReportThreshold),
+            FColor::Silver, Hit.ImpactPoint);
         return;
     }
 
@@ -459,6 +468,9 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     const float Now = World->GetTimeSeconds();
     if (!TryConsumeImpactCooldown(OtherActor, Now))
     {
+        ShowImpactDebug(
+            FString::Printf(TEXT("기각(%.1f초 내 재충돌) %.0f"), ImpactDebounceSeconds, ImpulseMagnitude),
+            FColor::Orange, Hit.ImpactPoint);
         return;
     }
 
@@ -491,9 +503,38 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     // 아이템은 물리적 사실만 알린다 — 얼마나 시끄러운지는 판단하지 않는다.
     OnLootImpact.Broadcast(Event);
 
+    // 낙하 1회에 OnHit 5~15회가 확정 1회로 묶이는지를 이 비율로 확인한다.
+    ++DebugConfirmedCount;
+    ShowImpactDebug(
+        FString::Printf(TEXT("확정 #%d  임펄스 %.0f  (OnHit 누적 %d회)"),
+            DebugConfirmedCount, ImpulseMagnitude, DebugRawHitCount),
+        FColor::Yellow, Event.ImpactPoint);
+
     // 예약된 원인은 1회성이다. 다음 충돌부터는 일반 충돌로 돌아간다.
     PendingImpactCause = ELootImpactCause::Collision;
     PendingInstigatorPawn = nullptr;
+}
+
+void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const
+{
+    if (!bShowImpactDebug)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Loot:%s] %s"), *GetName(), *Message);
+
+    if (GEngine)
+    {
+        // 키를 -1 로 주면 줄이 덮어써지지 않고 쌓인다. 몇 번 왔는지를 봐야 하므로 쌓아야 한다.
+        GEngine->AddOnScreenDebugMessage(-1, 4.f, Color,
+            FString::Printf(TEXT("[%s] %s"), *GetName(), *Message));
+    }
+
+#if ENABLE_DRAW_DEBUG
+    // 어디에 부딪혔는지가 기각 사유를 읽는 데 필요하다 (바닥인지 벽인지 다른 물건인지).
+    DrawDebugSphere(GetWorld(), Location, 12.f, 8, Color, false, 2.f);
+#endif
 }
 
 bool ALootBase::TryConsumeImpactCooldown(const AActor* OtherActor, float Now)
