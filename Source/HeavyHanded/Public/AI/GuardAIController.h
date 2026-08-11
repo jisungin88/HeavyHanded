@@ -47,6 +47,9 @@ private:
 	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
-	// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 +1 순환.
+	// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
 	int32 CurrentPatrolIndex = -1;
+
+	// PingPong 패턴에서 현재 진행 방향 (true=정방향/증가, false=역방향/감소)
+	bool bPatrolMovingForward = true;
 };

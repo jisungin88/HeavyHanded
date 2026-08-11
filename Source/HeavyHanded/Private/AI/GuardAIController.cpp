@@ -1,4 +1,4 @@
-#include "AI/GuardAIController.h"
+﻿#include "AI/GuardAIController.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
@@ -80,7 +80,7 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 시작 시 첫 순찰 지점을 미리 채워둔다 (비어있는 채로 Move To가 실행되는 것을 방지).
 	SelectNextPatrolPoint();
 
-	RunBehaviorTree(BehaviorTreeAsset);
+	// RunBehaviorTree(BehaviorTreeAsset);
 }
 
 void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
@@ -106,11 +106,11 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 		{
 			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
-
-			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 Pursue를 바로 이탈하지 않도록,
-			// 실제로 "본" 순간마다 시각을 갱신한다. BTDecorator_CheckSearchTimeout(TimeKeyName=LastSeenTime,
-			// TimeoutSeconds=1~2초)이 Pursue 브랜치에서 이 값을 기준으로 짧은 유예를 준다.
-			BlackboardComp->SetValueAsFloat(TEXT("LastSeenTime"), GetWorld()->GetTimeSeconds());
+		}
+		else
+		{
+			// 시야를 잃은 순간 = 수색 타이머 시작점
+			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 		}
 	}
 	else if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
@@ -141,12 +141,63 @@ void AGuardAIController::SelectNextPatrolPoint()
 	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
 	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
 
-	if (!IsValid(GuardPawn) || !IsValid(BlackboardComp) || GuardPawn->GetPatrolPointCount() == 0)
+	const int32 PointCount = IsValid(GuardPawn) ? GuardPawn->GetPatrolPointCount() : 0;
+	if (!IsValid(GuardPawn) || !IsValid(BlackboardComp) || PointCount == 0)
 	{
 		return;
 	}
 
-	CurrentPatrolIndex = (CurrentPatrolIndex + 1) % GuardPawn->GetPatrolPointCount();
+	// 첫 호출(-1)은 항상 0번 지점에서 시작.
+	if (CurrentPatrolIndex < 0)
+	{
+		CurrentPatrolIndex = 0;
+	}
+	else if (PointCount == 1)
+	{
+		CurrentPatrolIndex = 0;
+	}
+	else
+	{
+		switch (GuardPawn->PatrolPattern)
+		{
+		case EPatrolPattern::Loop:
+			CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PointCount;
+			break;
+
+		case EPatrolPattern::PingPong:
+			if (bPatrolMovingForward)
+			{
+				CurrentPatrolIndex++;
+				if (CurrentPatrolIndex >= PointCount - 1)
+				{
+					CurrentPatrolIndex = PointCount - 1;
+					bPatrolMovingForward = false; // 끝에 도달 -> 역방향으로 전환
+				}
+			}
+			else
+			{
+				CurrentPatrolIndex--;
+				if (CurrentPatrolIndex <= 0)
+				{
+					CurrentPatrolIndex = 0;
+					bPatrolMovingForward = true; // 처음으로 복귀 -> 정방향으로 전환
+				}
+			}
+			break;
+
+		case EPatrolPattern::Random:
+			{
+				// 직전 지점을 제외하고 뽑아서, 같은 자리에 멈춰있는 것처럼 보이는 걸 방지.
+				int32 NextIndex = CurrentPatrolIndex;
+				while (NextIndex == CurrentPatrolIndex)
+				{
+					NextIndex = FMath::RandRange(0, PointCount - 1);
+				}
+				CurrentPatrolIndex = NextIndex;
+			}
+			break;
+		}
+	}
 
 	FVector NextLocation;
 	if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, NextLocation))
