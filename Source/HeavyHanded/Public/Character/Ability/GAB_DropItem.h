@@ -3,14 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "BaseGameplayAbility.h"
-#include "GA_DropItem.generated.h"
+#include "Character/BaseGameplayAbility.h"
+#include "GAB_DropItem.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class HEAVYHANDED_API UGA_DropItem : public UBaseGameplayAbility
+class HEAVYHANDED_API UGAB_DropItem : public UBaseGameplayAbility
 {
 	GENERATED_BODY()
 public:

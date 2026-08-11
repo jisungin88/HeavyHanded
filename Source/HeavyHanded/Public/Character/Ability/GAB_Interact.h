@@ -2,25 +2,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Abilities/GameplayAbility.h"
-#include "GA_Interact.generated.h"
+#include "Character/BaseGameplayAbility.h"
+#include "GAB_Interact.generated.h"
 
 UCLASS()
-class HEAVYHANDED_API UGA_Interact : public UGameplayAbility
+class HEAVYHANDED_API UGAB_Interact : public UBaseGameplayAbility
 {
     GENERATED_BODY()
 
 public:
-    UGA_Interact();
+    UGAB_Interact();
 
     virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData) override;
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
 
 protected:
-    // 에디터에서 지정할 상호작용 몽타주
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Animation")
-    TObjectPtr<UAnimMontage> SkillMontage;
-
     // 상호작용 레이캐스트 및 로직 수행 함수
     void PerformInteraction();
 

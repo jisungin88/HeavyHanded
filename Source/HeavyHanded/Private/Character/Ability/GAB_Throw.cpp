@@ -1,0 +1,161 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "Character/Ability/GAB_Throw.h"
+#include "Character/BaseCharacter.h"
+#include "Kismet/GameplayStatics.h"
+
+UGAB_Throw::UGAB_Throw()
+{
+	bReplicateInputDirectly = true;
+}
+
+void UGAB_Throw::ActivateAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	const FGameplayEventData* TriggerEventData)
+{
+	// 1. 부모의 ActivateAbility 호출 (몽타주 재생 로직이 여기에 있음)
+	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+
+	// 2. 캐릭터 확인
+	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
+	if (!Character || !Character->GetHeldActor())
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	// 꾹 누르고 있는 동안 궤적을 실시간으로 그려줄 타이머 시작 (클라이언트/서버 공통 차징 연출)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			TrajectoryUpdateTimerHandle,
+			this,
+			&UGAB_Throw::UpdateTrajectoryPreview,
+			TrajectoryUpdateInterval,
+			true
+		);
+	}
+}
+
+void UGAB_Throw::InputReleased(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo)
+{
+	Super::InputReleased(Handle, ActorInfo, ActivationInfo);
+
+	// 차징 시각화 및 타이머 정리
+	ClearTrajectoryPreview();
+
+	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
+	if (!Character)
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+		return;
+	}
+
+	// 1. 클라이언트라면 부모의 헬퍼를 통해 서버로 이벤트 전송
+	if (!ActorInfo->IsNetAuthority())
+	{
+		FGameplayEventData Payload;
+		FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName("Ability.Slot.Consumable"));
+		SendGameplayEventToASCOnServer(EventTag, Payload);
+
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+		return;
+	}
+
+	// 2. 서버 권한에서의 실제 던지기 (물리 부여)
+	if (AActor* HeldActor = Character->GetHeldActor())
+	{
+		FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+		HeldActor->DetachFromActor(DetachRules);
+
+		// ★ 핵심: 다시 상호작용(집기)이 가능하도록 콜리전과 물리 복구
+		if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
+		{
+			PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); // 콜리전 다시 켜기!
+			PrimComp->SetSimulatePhysics(true);                                // 물리 켜기
+
+			FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
+			if (!LaunchVelocity.IsNearlyZero())
+			{
+				PrimComp->AddImpulse(LaunchVelocity, NAME_None, true);
+			}
+		}
+
+		// 캐릭터가 들고 있는 상태 해제
+		Character->SetHeldActor(nullptr);
+	}
+
+	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+}
+
+void UGAB_Throw::UpdateTrajectoryPreview()
+{
+	ACharacter* Character = Cast<ACharacter>(GetAvatarActorFromActorInfo());
+	if (!Character)
+	{
+		return;
+	}
+
+	const FVector StartLocation = Character->GetActorLocation() + MuzzleOffset;
+	const FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
+
+	FPredictProjectilePathParams Params(
+		ProjectileRadius,
+		StartLocation,
+		LaunchVelocity,
+		2.0f,
+		ECollisionChannel::ECC_WorldStatic,
+		Character
+	);
+	Params.bTraceWithCollision = true;
+	Params.SimFrequency = 15.0f;
+
+	// 자동 디버그 드로우는 끄고, 직접 선을 그릴 것이므로 None
+	Params.DrawDebugType = EDrawDebugTrace::None;
+
+	FPredictProjectilePathResult Result;
+	UGameplayStatics::PredictProjectilePath(this, Params, Result);
+
+	UWorld* World = GetWorld();
+	if (!World || Result.PathData.Num() < 2)
+	{
+		return;
+	}
+
+	// 경로 포인트들을 순서대로 이어서 매끈한 선으로 그림
+	for (int32 i = 0; i < Result.PathData.Num() - 1; ++i)
+	{
+		const FVector& PointA = Result.PathData[i].Location;
+		const FVector& PointB = Result.PathData[i + 1].Location;
+
+		DrawDebugLine(World, PointA, PointB, FColor::Yellow, false, TrajectoryUpdateInterval, 0, 2.0f);
+	}
+
+	// 뭔가에 부딪혔다면 그 착탄 지점에 표시
+	if (Result.HitResult.bBlockingHit)
+	{
+		DrawDebugSphere(World, Result.HitResult.Location, 12.0f, 12, FColor::Red, false, TrajectoryUpdateInterval);
+	}
+}
+
+void UGAB_Throw::ClearTrajectoryPreview()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TrajectoryUpdateTimerHandle);
+	}
+}
+
+void UGAB_Throw::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+{
+	// 스킬이 어떤 이유로든 끝날 때 타이머와 그려진 궤적이 남지 않도록 확실하게 정리
+	ClearTrajectoryPreview();
+
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+}

@@ -18,7 +18,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
 	TObjectPtr<class UInputAction> InputAction;
 
-	// 그 입력에 대응할 어빌리티 클래스 (예: GA_Interact)
+	// 그 입력에 대응할 어빌리티 클래스 (예: GAB_Interact)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
 	TSubclassOf<class UGameplayAbility> AbilityClass;
 };
@@ -124,7 +124,9 @@ protected:
 	TArray<FAbilityInputBinding> AbilityInputBindings;
 
 	// 인프라 입력 감지 시 실행될 콜백 함수
-	void AbilityInputPressed(TSubclassOf<class UGameplayAbility> AbilityClass);
+	//void AbilityInputPressed(TSubclassOf<class UGameplayAbility> AbilityClass);
+	void AbilityInputPressed(int32 InputID);
+	void AbilityInputReleased(int32 InputID);
 
 protected:
 	// 현재 손에 들고 있는 액터
@@ -141,21 +143,31 @@ public:
 	void SetHeldActor(AActor* NewHeldActor) { HeldActor = NewHeldActor; }
 
 	// 손에 든 아이템을 내려놓는 함수 (Q키 등에 바인딩용)
-	UFUNCTION(BlueprintCallable, Category = "Interaction")
-	void DropItem();
+	//UFUNCTION(BlueprintCallable, Category = "Interaction")
+	//void DropItem();
 
+	// 손에 든 아이템을 던지는 함수 (Impulse 방향/크기로 던짐)
+	//UFUNCTION(BlueprintCallable, Category = "Interaction")
+	//void ReleaseHeldActor(const FVector& Impulse = FVector::ZeroVector);
 public:
 	// 서버가 아이템을 집었음을 모든 클라이언트에게 알려주는 함수
-	UFUNCTION(NetMulticast, Reliable)
-	void Multicast_AttachItem(AActor* ItemToAttach);
+	//UFUNCTION(NetMulticast, Reliable)
+	//void Multicast_AttachItem(AActor* ItemToAttach);
 
 	//아이템을 내려놓는 과정을 모든 클라이언트에게 동기화하는 함수
-	UFUNCTION(NetMulticast, Reliable)
-	void Multicast_DropItem();
+	/*UFUNCTION(NetMulticast, Reliable)
+	void Multicast_DropItem();*/
 
-	// ★ [추가] 클라이언트가 서버에게 "아이템 버려줘!"라고 요청하는 서버 RPC
-	UFUNCTION(Server, Reliable)
-	void Server_DropItem();
+	//클라이언트가 서버에게 "아이템 버려줘!"라고 요청하는 서버 RPC
+	/*UFUNCTION(Server, Reliable)
+	void Server_DropItem();*/
+
+protected:
+	/*UFUNCTION(Server, Reliable)
+	void Server_ReleaseHeldActor(const FVector& Impulse);*/
+
+	//UFUNCTION(NetMulticast, Reliable)
+	//void Multicast_ReleaseHeldActor(const FVector& Impulse);
 
 public:	
 	// Called every frame

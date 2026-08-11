@@ -17,7 +17,16 @@ class HEAVYHANDED_API UBaseGameplayAbility : public UGameplayAbility
 protected:
 	// 에디터(블루프린트)에서 스킬마다 다른 몽타주를 지정할 수 있도록 오픈합니다.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
-	class UAnimMontage* SkillMontage;
+	TObjectPtr<UAnimMontage> SkillMontage;
+
+	UFUNCTION(BlueprintCallable, Category = "GAS|Ability")
+	ABaseCharacter* GetBaseCharacterFromActorInfo() const;
+
+
+protected:
+	// 클라이언트에서 서버 ASC로 Gameplay Event 태그를 전송하는 공통 함수
+	UFUNCTION(BlueprintCallable, Category = "GAS|Ability")
+	void SendGameplayEventToASCOnServer(FGameplayTag EventTag, const FGameplayEventData& Payload);
 
 public:
 	UBaseGameplayAbility();
