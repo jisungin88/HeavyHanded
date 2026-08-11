@@ -1,11 +1,14 @@
 ﻿#include "Loot/LootBase.h"
 
+#include "Components/InputComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -25,12 +28,23 @@ namespace
 {
     /** 이 개수를 넘으면 만료된 디바운스 항목을 청소한다. 상시 순회를 피하기 위한 값 */
     constexpr int32 ImpactCooldownPruneThreshold = 8;
+
+    /** 놓을 때 운반자 몸 밖으로 밀어내며 추가로 띄우는 여유(cm) */
+    constexpr float ReleaseDepenetrationMargin = 2.f;
+
+    /** [임시] 조준점을 찾는 트레이스 길이(cm). 아무것도 안 맞으면 이 거리의 허공을 조준점으로 본다 */
+    constexpr float DebugAimTraceDistance = 20000.f;
+
+    /** [임시] 조준점이 발사점에서 이보다 가까우면 방향이 불안정해지므로 시선 방향으로 대체한다 */
+    constexpr float DebugMinAimDistance = 150.f;
 }
 
 ALootBase::ALootBase()
 {
-    // 노획물 자체는 매 프레임 할 일이 없다. 물리는 엔진이 돌린다.
-    PrimaryActorTick.bCanEverTick = false;
+    // 평소에는 매 프레임 할 일이 없다. 물리는 엔진이 돌린다.
+    // 조준 중에만 궤적을 갱신해야 하므로, 틱 자체는 열어 두고 기본은 꺼 둔다.
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
 
     bReplicates = true;
     SetReplicateMovement(true);
@@ -77,6 +91,25 @@ void ALootBase::BeginPlay()
 
     // 스폰 직후 상태를 한 번 맞춘다 (레벨에 놓인 채 시작하는 경우 포함)
     ApplyCarryState();
+
+    Debug_SetupTestKeys();
+}
+
+void ALootBase::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    // 조준이 끝났거나 손에서 놓였으면 틱을 도로 끈다. 노획물이 수십 개 깔리므로
+    // 필요 없는 틱을 계속 돌리지 않는다.
+    APawn* Carrier = PrimaryCarrier.Get();
+    if (!bDebugAiming || !IsValid(Carrier))
+    {
+        bDebugAiming = false;
+        SetActorTickEnabled(false);
+        return;
+    }
+
+    ShowThrowTrajectory(Debug_ComputeAimDirection());
 }
 
 // --------------------------------------------------------------------------
@@ -241,10 +274,14 @@ FVector ALootBase::ComputeThrowVelocity(const FVector& AimDirection) const
 
     FVector Velocity = LaunchDirection * PhysicsData.ThrowSpeed;
 
-    // 달리면서 던지면 그만큼 더 나간다. 물리 운반 게임에서 이게 있고 없고가 체감 차이가 크다.
-    if (const APawn* Carrier = PrimaryCarrier.Get())
+    // 운반자의 이동 속도를 얼마나 섞을지는 데이터가 정한다. 기본은 0 이다.
+    // 1:1 로 더하면 이동 속도가 ThrowSpeed 와 비슷할 때 조준이 무의미해진다.
+    if (PhysicsData.CarrierVelocityInfluence > 0.f)
     {
-        Velocity += Carrier->GetVelocity();
+        if (const APawn* Carrier = PrimaryCarrier.Get())
+        {
+            Velocity += Carrier->GetVelocity() * PhysicsData.CarrierVelocityInfluence;
+        }
     }
 
     return Velocity;
@@ -307,13 +344,11 @@ void ALootBase::ApplyCarryState()
     const bool bCarried = IsValid(Carrier);
 
     // 운반자가 바뀌거나 놓인 경우, 이전 운반자와의 상호 무시를 먼저 푼다.
-    if (APawn* Previous = MoveIgnoredCarrier.Get())
+    APawn* PreviousCarrier = MoveIgnoredCarrier.Get();
+    if (PreviousCarrier && PreviousCarrier != Carrier)
     {
-        if (Previous != Carrier)
-        {
-            SetCarrierMoveIgnore(Previous, false);
-            MoveIgnoredCarrier = nullptr;
-        }
+        SetCarrierMoveIgnore(PreviousCarrier, false);
+        MoveIgnoredCarrier = nullptr;
     }
 
     if (bCarried)
@@ -337,6 +372,14 @@ void ALootBase::ApplyCarryState()
         DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
         LootMesh->SetCollisionProfileName(LootCollisionProfiles::Simulating);
+
+        // 물리를 켜기 전에 운반자와의 겹침을 푼다. 순서가 바뀌면 소용없다.
+        // 위치 보정은 서버가 정하고 클라이언트는 복제로 받는다.
+        if (HasAuthority())
+        {
+            ResolveReleaseOverlap(PreviousCarrier);
+        }
+
         LootMesh->SetSimulatePhysics(true);
     }
 }
@@ -370,6 +413,44 @@ void ALootBase::AttachToCarrier(APawn* Carrier)
     // 노획물마다 크기가 다르므로 스케일은 자기 것을 유지한다.
     AttachToComponent(AttachTarget,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketToUse);
+}
+
+void ALootBase::ResolveReleaseOverlap(const APawn* Carrier)
+{
+    if (!IsValid(Carrier))
+    {
+        return;
+    }
+
+    // ComputePenetration 이 비const 함수라 const 포인터로 받을 수 없다.
+    UPrimitiveComponent* CarrierBody = Cast<UPrimitiveComponent>(Carrier->GetRootComponent());
+    if (!CarrierBody)
+    {
+        return;
+    }
+
+    // 소지 중에는 물리가 꺼져 있어 노획물이 운반자 몸 안에 들어가 있어도 아무 일도 없다.
+    // 그 상태로 물리를 켜면 물리 엔진이 겹침을 해소하느라 큰 임펄스를 만들고,
+    // 그게 '세게 부딪혔다'로 잡혀 파손 카운트까지 올라간다. 놓기만 했는데 물건이 상한다.
+    //
+    // 상호 무시(IgnoreActorWhenMoving)로는 막을 수 없다. 그건 컴포넌트 이동 스윕에만
+    // 적용되고, 시뮬레이션 중인 바디의 접촉은 물리 엔진이 따로 처리하기 때문이다.
+    //
+    // 그래서 물리를 켜기 전에 겹침을 직접 푼다. 최소 이동 거리(MTD)만큼만 밀어내므로
+    // 실제로 겹쳐 있을 때만, 필요한 만큼만 움직인다.
+    FMTDResult PenetrationResult;
+    if (!CarrierBody->ComputePenetration(PenetrationResult,
+        LootMesh->GetCollisionShape(), GetActorLocation(), GetActorQuat()))
+    {
+        // 겹치지 않았다. 손 소켓에 제대로 붙어 있으면 대개 이쪽이다.
+        return;
+    }
+
+    // 딱 붙여 놓으면 부동소수 오차로 다시 겹친 것으로 잡힐 수 있어 여유를 조금 준다.
+    const FVector SafeLocation = GetActorLocation()
+        + PenetrationResult.Direction * (PenetrationResult.Distance + ReleaseDepenetrationMargin);
+
+    SetActorLocation(SafeLocation, /*bSweep=*/false);
 }
 
 void ALootBase::SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore)
@@ -513,6 +594,191 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     // 예약된 원인은 1회성이다. 다음 충돌부터는 일반 충돌로 돌아간다.
     PendingImpactCause = ELootImpactCause::Collision;
     PendingInstigatorPawn = nullptr;
+}
+
+// --------------------------------------------------------------------------
+// 디버그 — 플레이어 파트가 연결되면 Debug_ 함수들은 지운다
+// --------------------------------------------------------------------------
+
+void ALootBase::Debug_SetupTestKeys()
+{
+    // 판정이 서버 전용이라 클라이언트에 붙여 봐야 눌리지 않는다.
+    if (!bDebugEnableTestKeys || !HasAuthority())
+    {
+        return;
+    }
+
+    APlayerController* LocalPC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!IsValid(LocalPC))
+    {
+        return;
+    }
+
+    // 액터도 EnableInput 을 하면 InputComponent 를 받아 키를 직접 받을 수 있다.
+    EnableInput(LocalPC);
+    if (!InputComponent)
+    {
+        return;
+    }
+
+    InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ALootBase::Debug_ToggleGrabByLocalPlayer);
+
+    // 누르고 있는 동안 조준, 뗄 때 던진다.
+    InputComponent->BindKey(EKeys::T, IE_Pressed, this, &ALootBase::Debug_BeginThrowAim);
+    InputComponent->BindKey(EKeys::T, IE_Released, this, &ALootBase::Debug_ThrowForward);
+}
+
+void ALootBase::Debug_ToggleGrabByLocalPlayer()
+{
+    APawn* LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+    if (!IsValid(LocalPawn))
+    {
+        // 에디터에서 (플레이 중이 아닐 때) 버튼이 눌린 경우.
+        // 조용히 빠지면 원인을 못 찾으므로 로그라도 남긴다.
+        UE_LOG(LogTemp, Warning, TEXT("[Loot:%s] 로컬 플레이어 폰이 없다. PIE 중인지 확인할 것."), *GetName());
+        return;
+    }
+
+    // 들고 있으면 놓는다.
+    if (PrimaryCarrier.Get() == LocalPawn)
+    {
+        OnReleased(LocalPawn);
+        return;
+    }
+
+    // 남이 들고 있으면 건드리지 않는다.
+    if (IsValid(PrimaryCarrier))
+    {
+        return;
+    }
+
+    // 키는 모든 노획물이 같이 받는다. 가까이 간 하나만 반응해야 한다.
+    if (FVector::Dist(GetActorLocation(), LocalPawn->GetActorLocation()) > DebugGrabRange)
+    {
+        return;
+    }
+
+    OnGrabbed(LocalPawn);
+}
+
+FVector ALootBase::Debug_ComputeAimDirection() const
+{
+    const APawn* Carrier = PrimaryCarrier.Get();
+    const UWorld* World = GetWorld();
+    if (!IsValid(Carrier) || !World)
+    {
+        return FVector::ZeroVector;
+    }
+
+    // 카메라 시점. 컨트롤러가 있으면 실제 카메라를, 없으면 폰의 눈 위치를 쓴다.
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    if (const AController* CarrierController = Carrier->GetController())
+    {
+        CarrierController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+    }
+    else
+    {
+        Carrier->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+    }
+
+    const FVector ViewDirection = ViewRotation.Vector();
+
+    // 화면 중앙이 가리키는 지점을 찾는다.
+    FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(LootDebugAim), false, this);
+
+    // 들고 있는 노획물은 카메라 바로 앞에 있어서 반드시 먼저 걸린다. 던진 사람도 뺀다.
+    TraceParams.AddIgnoredActor(Carrier);
+
+    FVector AimPoint = ViewLocation + ViewDirection * DebugAimTraceDistance;
+
+    FHitResult AimHit;
+    if (World->LineTraceSingleByChannel(AimHit, ViewLocation, AimPoint, ECC_Visibility, TraceParams))
+    {
+        AimPoint = AimHit.ImpactPoint;
+    }
+
+    // 벽에 바짝 붙으면 조준점이 발사점보다 뒤에 놓여 엉뚱한 방향이 나온다.
+    // 그때는 시선 방향을 그대로 쓴다.
+    const FVector ToAimPoint = AimPoint - GetActorLocation();
+    if (ToAimPoint.SizeSquared() < FMath::Square(DebugMinAimDistance))
+    {
+        return ViewDirection;
+    }
+
+    return ToAimPoint.GetSafeNormal();
+}
+
+void ALootBase::Debug_BeginThrowAim()
+{
+    if (!IsValid(PrimaryCarrier))
+    {
+        return;
+    }
+
+    bDebugAiming = true;
+    SetActorTickEnabled(true);
+}
+
+void ALootBase::Debug_ThrowForward()
+{
+    bDebugAiming = false;
+    SetActorTickEnabled(false);
+
+    APawn* Carrier = PrimaryCarrier.Get();
+    if (!IsValid(Carrier))
+    {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::White,
+                TEXT("먼저 G 로 잡아야 한다"));
+        }
+        return;
+    }
+
+    // 조준 중 궤적과 같은 함수를 쓴다. 두 곳에서 따로 구하면 보던 것과 다르게 날아간다.
+    const FVector AimDirection = Debug_ComputeAimDirection();
+    if (AimDirection.IsNearlyZero())
+    {
+        return;
+    }
+
+    // 던지기 전에 그려야 한다. OnThrown 이 PrimaryCarrier 를 비우면
+    // 운반자 속도가 빠져서 예측과 실제가 달라진다.
+    // 조준 중 궤적은 한 프레임짜리라 사라지므로, 비교용으로 6초짜리를 한 번 더 남긴다.
+    ShowThrowTrajectory(AimDirection, 6.f);
+
+    OnThrown(Carrier, AimDirection);
+}
+
+void ALootBase::ShowThrowTrajectory(const FVector& AimDirection, float Duration)
+{
+#if ENABLE_DRAW_DEBUG
+    FPredictProjectilePathResult Result;
+    if (!PredictThrowPath(AimDirection, Result))
+    {
+        // 아무데도 맞지 않아도 경로 자체는 그린다. 반환값은 충돌 여부일 뿐이다.
+    }
+
+    const UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    for (int32 Index = 1; Index < Result.PathData.Num(); ++Index)
+    {
+        DrawDebugLine(World,
+            Result.PathData[Index - 1].Location, Result.PathData[Index].Location,
+            FColor::Cyan, false, Duration, 0, 2.f);
+    }
+
+    // 예측한 착탄 지점. 실제로 여기 떨어지는지 보면 된다.
+    if (Result.HitResult.bBlockingHit)
+    {
+        DrawDebugSphere(World, Result.HitResult.ImpactPoint, 20.f, 12, FColor::Cyan, false, Duration);
+    }
+#endif
 }
 
 void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const

@@ -84,6 +84,21 @@ struct FLootPhysicsData
         meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ThrowUpwardRatio = 0.25f;
 
+    /**
+     * 던질 때 운반자의 이동 속도를 얼마나 더할지 (0 = 안 더함, 1 = 그대로 더함).
+     *
+     * 물리적으로는 1 이 맞다. 손에 든 물건은 나와 같이 움직이고 있으니까.
+     * 그런데 1 로 두면 조준이 불가능해진다. 이동 속도가 ThrowSpeed 와 비슷하면
+     * 뒷걸음질만 쳐도 물건이 뒤로 날아가고, 좌우로 한 발짝에 궤적이 크게 꺾인다.
+     * 밴에 던져 넣기처럼 정확도가 필요한 동작이 운에 좌우된다.
+     *
+     * 그래서 기본은 0 이다. 던지는 순간의 발밑 상태와 무관하게 조준한 대로 나간다.
+     * 플레이 테스트에서 밋밋하면 0.2~0.3 정도로 조금씩 올린다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CarrierVelocityInfluence = 0.f;
+
     /** 던질 때 부여할 회전 속도(도/초). 0 이면 회전 없이 날아가 던진 티가 안 난다 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
         meta = (ClampMin = "0.0"))

@@ -70,6 +70,17 @@ public:
     bool PredictThrowPath(const FVector& AimDirection, FPredictProjectilePathResult& OutResult);
 
     /**
+     * 예측 궤적을 그린다. 기본값은 한 프레임만 그리므로 조준 중 매 프레임 호출하면 된다.
+     *
+     * [경계] 언제 그릴지(조준 버튼을 누르고 있는 동안)는 플레이어 파트가 정한다.
+     *   아이템은 '자기가 어떻게 날아갈지'만 그린다.
+     *   실제로 던질 때와 같은 ComputeThrowVelocity 를 쓰므로 표시와 결과가 어긋나지 않는다.
+     *
+     * 지금은 디버그 선으로 그린다. 최종 연출(스플라인 메시·나이아가라 리본)은 나중에 교체한다.
+     */
+    void ShowThrowTrajectory(const FVector& AimDirection, float Duration = -1.f);
+
+    /**
      * 게이팅을 통과한 '확정 충격'만 방송된다. 서버에서만 발생한다.
      *
      * 구독자는 두 종류다. 둘 다 같은 이벤트를 소비한다.
@@ -101,8 +112,35 @@ public:
     /** 파손 컴포넌트 등이 같은 스위치로 디버그를 켜고 끄기 위해 연다 */
     bool IsImpactDebugEnabled() const { return bShowImpactDebug; }
 
+    /**
+     * [임시] 잡기/놓기 토글. 0번 로컬 플레이어 기준.
+     *
+     * 집기 입력·트레이스는 플레이어 파트 담당이라 아직 호출해 줄 것이 없다.
+     * DebugGrabRange 안에 있을 때만 반응하므로, 여러 개를 깔아 둬도
+     * 가까이 간 하나만 잡힌다. 플레이어 파트가 연결되면 지운다.
+     */
+    UFUNCTION(CallInEditor, BlueprintCallable, Category = "Loot|Debug")
+    void Debug_ToggleGrabByLocalPlayer();
+
+    /**
+     * [임시] 조준 시작. T 를 누르고 있는 동안 궤적이 매 프레임 갱신된다.
+     * 실제 게임에서는 플레이어 파트가 조준 입력을 받아 ShowThrowTrajectory 를 호출한다.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Loot|Debug")
+    void Debug_BeginThrowAim();
+
+    /**
+     * [임시] 조준을 끝내고 던진다. T 를 뗀 순간 호출된다.
+     * 보고 있던 궤적을 6초간 남겨서 실제 경로와 겹치는지 비교할 수 있게 한다.
+     */
+    UFUNCTION(CallInEditor, BlueprintCallable, Category = "Loot|Debug")
+    void Debug_ThrowForward();
+
 protected:
     virtual void BeginPlay() override;
+
+    /** 평소에는 꺼져 있고 조준 중에만 켜진다 (궤적 갱신용) */
+    virtual void Tick(float DeltaSeconds) override;
 
     /** 물리 바디이자 루트. 플레이어 파트가 Attach 대상으로 쓴다 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loot")
@@ -146,6 +184,21 @@ protected:
     bool bShowImpactDebug = false;
 
     /**
+     * [임시] G = 잡기/놓기, T = 던지기 키를 이 액터에 연결한다.
+     *
+     * 잡기 입력이 아직 없어서(플레이어 파트 담당) 손으로 눌러 볼 수단이 필요하다.
+     * 판정이 서버 전용이라 호스트 창에서만 연결된다. 클라이언트 창에서는 눌러도 반응이 없다.
+     * 플레이어 파트가 연결되면 이 스위치와 Debug_ 함수들을 통째로 지운다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug")
+    bool bDebugEnableTestKeys = false;
+
+    /** [임시] 이 거리 안에 있을 때만 G 키에 반응한다 (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug",
+        meta = (ClampMin = "0.0"))
+    float DebugGrabRange = 400.f;
+
+    /**
      * 현재 이 노획물을 들고 있는 대표(리더).
      * 2인 협력 캐리에서도 소유·이동을 결정하는 쪽은 항상 리더 한 명이다.
      * 물건 하나에 두 플레이어가 물리 제약을 거는 방식은 네트워크에서 깨진다.
@@ -173,8 +226,31 @@ private:
     /** 운반자 캡슐과 노획물이 서로의 이동 스윕을 무시하도록 설정/해제한다 */
     void SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore);
 
+    /**
+     * 물리를 켜기 전에 운반자 몸과의 겹침을 푼다. (서버 전용)
+     * 겹친 채로 켜면 물리 엔진이 침투를 해소하며 만든 임펄스가 파손으로 잡힌다.
+     */
+    void ResolveReleaseOverlap(const APawn* Carrier);
+
     /** 로그 + 화면 메시지 + 충돌 지점 구. bShowImpactDebug 가 꺼져 있으면 아무것도 하지 않는다 */
     void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const;
+
+    /** [임시] G/T 키를 이 액터에 연결한다. BeginPlay 에서 부른다 */
+    void Debug_SetupTestKeys();
+
+    /** [임시] T 를 누르고 있는 동안 참. 이때만 틱이 돈다 */
+    bool bDebugAiming = false;
+
+    /**
+     * [임시] 조준 방향을 구한다. 궤적 표시와 실제 던지기가 같은 값을 써야 하므로 한 곳에 둔다.
+     *
+     * 시선 방향을 그대로 쓰지 않는다. 발사점(손)이 화면 중앙에서 벗어나 있으면
+     * 시선 방향으로 던졌을 때 조준점 옆으로 날아가고, 멀수록 오차가 커진다.
+     * 카메라에서 트레이스해 조준점을 먼저 찾고, 발사점에서 그 지점을 향하게 한다.
+     *
+     * 플레이어 파트가 OnThrown 에 넘길 AimDirection 도 이렇게 계산해야 한다.
+     */
+    FVector Debug_ComputeAimDirection() const;
 
     /** OnHit 콜백이 온 총 횟수. 확정 횟수와 비교해 게이팅 효과를 본다 */
     int32 DebugRawHitCount = 0;
