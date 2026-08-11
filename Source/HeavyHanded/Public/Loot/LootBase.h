@@ -89,6 +89,15 @@ public:
      */
     void SetPendingImpactCause(ELootImpactCause InCause, APawn* InInstigator);
 
+    /**
+     * 물리 충돌이 아닌 사유(파괴 등)로 확정 충격을 즉시 방송한다. (서버 전용)
+     *
+     * 게이팅을 거치지 않는다. 게이팅은 '물리 낙하 1회가 OnHit 5~15회로 쪼개지는 것'을
+     * 되묶기 위한 장치인데, 파괴는 애초에 한 번만 일어나는 사건이라 되묶을 것이 없다.
+     */
+    void ReportImpact(ELootImpactCause InCause, float ImpulseMagnitude,
+        const FVector& ImpactPoint, APawn* InInstigator);
+
 protected:
     virtual void BeginPlay() override;
 

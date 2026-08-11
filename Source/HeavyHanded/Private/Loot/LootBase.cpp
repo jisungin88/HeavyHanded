@@ -400,6 +400,36 @@ void ALootBase::SetPendingImpactCause(ELootImpactCause InCause, APawn* InInstiga
     PendingInstigatorPawn = InInstigator;
 }
 
+void ALootBase::ReportImpact(ELootImpactCause InCause, float ImpulseMagnitude,
+    const FVector& ImpactPoint, APawn* InInstigator)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    FLootImpactEvent Event;
+    Event.ImpactPoint = ImpactPoint;
+    Event.ImpulseMagnitude = ImpulseMagnitude;
+    Event.Cause = InCause;
+    Event.LootActor = this;
+    Event.InstigatorPawn = InInstigator;
+    Event.ServerTime = World->GetTimeSeconds();
+
+    // 부딪힌 표면이 없는 사건이므로 노멀은 위쪽, 재질은 기본값으로 둔다.
+    // 파괴음의 재질(유리/나무)은 부딪힌 바닥이 아니라 노획물 자신의 것이므로,
+    // 소음 파트가 Cause == Break 일 때 LootActor 에서 직접 읽는다.
+    Event.ImpactNormal = FVector::UpVector;
+
+    OnLootImpact.Broadcast(Event);
+}
+
 void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
     UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
