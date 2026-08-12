@@ -214,11 +214,20 @@ bool AGuardAIController::SelectNextSearchPoint()
 		return false;
 	}
 
-	const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
-	if (!FAISystem::IsValidLocation(LastKnown))
+	// 조사 지점은 LastKnownLocation(시야 전용 키)이 아니라 InvestigateLocation에서 읽는다.
+	//
+	// SearchStartTime을 갱신하는 곳이 세 군데다: 시야 기반 UBTService_UpdateDetectionGauge
+	// (게이지 100% 도달), 소리 기반 HandlePerceptionFull(인지 게이지 100%),
+	// 그리고 OnTargetPerceptionUpdated의 Hearing 분기(자극 1건). 셋 다 SearchStartTime을
+	// 쓰는 바로 그 자리에서 InvestigateLocation도 같이 채워 넣으므로, 여기서 다시
+	// LastKnownLocation을 읽으면 "시야로 진입한 조사"만 성립하고 소리로 들어온 조사는
+	// LastKnownLocation이 비어 있어 매번 실패한다 — 실제로 경비를 한 번도 안 들켰는데
+	// 소리만으로 게이지를 채우면 "마지막 목격 위치가 없어 수색을 시작할 수 없다" 로 막혔었다.
+	const FVector SearchAnchor = BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation);
+	if (!FAISystem::IsValidLocation(SearchAnchor))
 	{
 		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] 마지막 목격 위치가 없어 수색을 시작할 수 없다."), *GetNameSafe(GuardPawn));
+			TEXT("[%s] 조사 지점이 없어 수색을 시작할 수 없다."), *GetNameSafe(GuardPawn));
 		return false;
 	}
 
@@ -232,13 +241,15 @@ bool AGuardAIController::SelectNextSearchPoint()
 
 	++CurrentSearchStep;
 
-	// 0번째는 마지막 목격 지점 자체. 여기부터 확인하는 게 자연스럽다.
+	// 0번째는 조사 지점 자체(마지막 목격 지점 또는 소리 지점). 여기부터 확인하는 게 자연스럽다.
 	if (CurrentSearchStep == 0)
 	{
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastKnown);
+		// 이미 InvestigateLocation에 들어있는 값과 같지만, Blackboard 갱신 시점을
+		// 명시적으로 남겨 다른 리스너(위젯 등)가 "조사 0단계 진입"을 관찰할 수 있게 한다.
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SearchAnchor);
 
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 시작 - 마지막 목격 지점 %s"),
-			*GetNameSafe(GuardPawn), *LastKnown.ToCompactString());
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 시작 - 조사 지점 %s"),
+			*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString());
 		return true;
 	}
 
@@ -249,12 +260,12 @@ bool AGuardAIController::SelectNextSearchPoint()
 		return false;
 	}
 
-	// 목격 지점 주변에서 실제로 도달 가능한 지점만 고른다.
+	// 조사 지점 주변에서 실제로 도달 가능한 지점만 고른다.
 	// 무작위 오프셋을 그냥 더하면 벽 너머나 NavMesh 밖이 나와 Move To 가 실패한다.
 	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
 	FNavLocation SweepPoint;
 
-	if (IsValid(NavSys) && NavSys->GetRandomReachablePointInRadius(LastKnown, SearchSweepRadius, SweepPoint))
+	if (IsValid(NavSys) && NavSys->GetRandomReachablePointInRadius(SearchAnchor, SearchSweepRadius, SweepPoint))
 	{
 		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SweepPoint.Location);
 
@@ -265,8 +276,8 @@ bool AGuardAIController::SelectNextSearchPoint()
 	}
 
 	UE_LOG(LogGuardAI, Warning,
-		TEXT("[%s] 목격 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
-		*GetNameSafe(GuardPawn), *LastKnown.ToCompactString(), SearchSweepRadius);
+		TEXT("[%s] 조사 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
+		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), SearchSweepRadius);
 	return false;
 }
 
