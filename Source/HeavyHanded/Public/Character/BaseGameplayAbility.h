@@ -22,6 +22,20 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "GAS|Ability")
 	ABaseCharacter* GetBaseCharacterFromActorInfo() const;
 
+protected:
+	// 몽타주 관련 콜백 함수들 (UFUNCTION 필수)
+	UFUNCTION()
+	virtual void OnMontageCompleted();
+
+	UFUNCTION()
+	virtual void OnMontageBlendOut();
+
+	UFUNCTION()
+	virtual void OnMontageInterrupted();
+
+	UFUNCTION()
+	virtual void OnMontageCancelled();
+	// ... 기존 코드
 
 protected:
 	// 클라이언트에서 서버 ASC로 Gameplay Event 태그를 전송하는 공통 함수

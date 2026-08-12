@@ -10,6 +10,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "AbilitySystemBlueprintLibrary.h"
 
 // Sets default values
 ABaseCharacter::ABaseCharacter()

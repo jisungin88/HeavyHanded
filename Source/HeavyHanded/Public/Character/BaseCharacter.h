@@ -91,8 +91,8 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_ApplyGameplayEffect(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
 
-	// 2. ★ [필수] 언리얼 빌드 시스템이 찾는 내부 구현체 함수 (_Implementation 필수 붙이기)
-	void Server_ApplyGameplayEffect_Implementation(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
+	// 2. 언리얼 빌드 시스템이 찾는 내부 구현체 함수 (_Implementation 필수 붙이기)
+	//void Server_ApplyGameplayEffect_Implementation(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
 
 	// 기존 입력 함수 수정
 	virtual void StartCrouch(const FInputActionValue& Value);
@@ -141,33 +141,6 @@ public:
 	// HeldActor를 설정하는 함수
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	void SetHeldActor(AActor* NewHeldActor) { HeldActor = NewHeldActor; }
-
-	// 손에 든 아이템을 내려놓는 함수 (Q키 등에 바인딩용)
-	//UFUNCTION(BlueprintCallable, Category = "Interaction")
-	//void DropItem();
-
-	// 손에 든 아이템을 던지는 함수 (Impulse 방향/크기로 던짐)
-	//UFUNCTION(BlueprintCallable, Category = "Interaction")
-	//void ReleaseHeldActor(const FVector& Impulse = FVector::ZeroVector);
-public:
-	// 서버가 아이템을 집었음을 모든 클라이언트에게 알려주는 함수
-	//UFUNCTION(NetMulticast, Reliable)
-	//void Multicast_AttachItem(AActor* ItemToAttach);
-
-	//아이템을 내려놓는 과정을 모든 클라이언트에게 동기화하는 함수
-	/*UFUNCTION(NetMulticast, Reliable)
-	void Multicast_DropItem();*/
-
-	//클라이언트가 서버에게 "아이템 버려줘!"라고 요청하는 서버 RPC
-	/*UFUNCTION(Server, Reliable)
-	void Server_DropItem();*/
-
-protected:
-	/*UFUNCTION(Server, Reliable)
-	void Server_ReleaseHeldActor(const FVector& Impulse);*/
-
-	//UFUNCTION(NetMulticast, Reliable)
-	//void Multicast_ReleaseHeldActor(const FVector& Impulse);
 
 public:	
 	// Called every frame
