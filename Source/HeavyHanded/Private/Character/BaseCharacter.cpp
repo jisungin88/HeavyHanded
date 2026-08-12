@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/BaseCharacter.h"
@@ -18,16 +18,16 @@ ABaseCharacter::ABaseCharacter()
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-    // --- 1ÀÎÄª Ä«¸Ş¶ó ¼³Á¤ (½ºÇÁ¸µ ¾Ï °ü·Ã ÄÚµå´Â Á¦°Å) ---
+    // --- 1ì¸ì¹­ ì¹´ë©”ë¼ ì„¤ì • (ìŠ¤í”„ë§ ì•” ê´€ë ¨ ì½”ë“œëŠ” ì œê±°) ---
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(RootComponent);
-    FollowCamera->bUsePawnControlRotation = true; // ¸¶¿ì½º È¸Àü¿¡ µû¶ó Ä«¸Ş¶ó°¡ °°ÀÌ È¸Àü
+    FollowCamera->bUsePawnControlRotation = true; // ë§ˆìš°ìŠ¤ íšŒì „ì— ë”°ë¼ ì¹´ë©”ë¼ê°€ ê°™ì´ íšŒì „
 
-    // Ä«¸Ş¶ó À§Ä¡¸¦ Ä³¸¯ÅÍÀÇ ´«³ôÀÌ(¾à ZÃà 64cm À§)·Î ¼³Á¤
+    // ì¹´ë©”ë¼ ìœ„ì¹˜ë¥¼ ìºë¦­í„°ì˜ ëˆˆë†’ì´(ì•½ Zì¶• 64cm ìœ„)ë¡œ ì„¤ì •
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
 
-    // --- Ä³¸¯ÅÍ ÀÌµ¿ ¹× È¸Àü ¹æÇâ ¼³Á¤ ---
-    bUseControllerRotationYaw = true; // 1ÀÎÄªÀº ½Ã¼±°ú ¸öÅë ¹æÇâÀ» ÀÏÄ¡½ÃÅ°±â À§ÇØ true·Î ¼³Á¤
+    // --- ìºë¦­í„° ì´ë™ ë° íšŒì „ ë°©í–¥ ì„¤ì • ---
+    bUseControllerRotationYaw = true; // 1ì¸ì¹­ì€ ì‹œì„ ê³¼ ëª¸í†µ ë°©í–¥ì„ ì¼ì¹˜ì‹œí‚¤ê¸° ìœ„í•´ trueë¡œ ì„¤ì •
 }
 
 // Called when the game starts or when spawned
@@ -44,18 +44,18 @@ void ABaseCharacter::BeginPlay()
         UE_LOG(LogTemp, Log, TEXT("Controller"));
     }
 
-	// ¡Ú Å¬¶óÀÌ¾ğÆ®µç ¼­¹öµç '·ÎÄÃ ÇÃ·¹ÀÌ¾î'ÀÎ °æ¿ì¿¡¸¸ ÀÔ·Â ¸ÅÇÎÀ» Ãß°¡ÇØ¾ß ÇÕ´Ï´Ù.
+	// â˜… í´ë¼ì´ì–¸íŠ¸ë“  ì„œë²„ë“  'ë¡œì»¬ í”Œë ˆì´ì–´'ì¸ ê²½ìš°ì—ë§Œ ì…ë ¥ ë§¤í•‘ì„ ì¶”ê°€í•´ì•¼ í•©ë‹ˆë‹¤.
     if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
     {
         UE_LOG(LogTemp, Log, TEXT("True"));
-        // ÀÌ Ä³¸¯ÅÍ¸¦ Á¶Á¾ÇÏ´Â ·ÎÄÃ ÇÃ·¹ÀÌ¾îÀÎÁö È®ÀÎ (AI³ª ´Ù¸¥ ÇÃ·¹ÀÌ¾î ¼ÒÀ¯ÀÏ ¶§ ¿À·ù ¹æÁö)
+        // ì´ ìºë¦­í„°ë¥¼ ì¡°ì¢…í•˜ëŠ” ë¡œì»¬ í”Œë ˆì´ì–´ì¸ì§€ í™•ì¸ (AIë‚˜ ë‹¤ë¥¸ í”Œë ˆì´ì–´ ì†Œìœ ì¼ ë•Œ ì˜¤ë¥˜ ë°©ì§€)
         if (PlayerController->IsLocalController())
         {
             if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
             {
                 if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
                 {
-                    // ¿¡µğÅÍ¿¡¼­ UPROPERTY·Î IMC¸¦ ÇÒ´çÇØ µĞ °æ¿ì (¿¹: DefaultMappingContext)
+                    // ì—ë””í„°ì—ì„œ UPROPERTYë¡œ IMCë¥¼ í• ë‹¹í•´ ë‘” ê²½ìš° (ì˜ˆ: DefaultMappingContext)
                     if (DefaultMappingContext)
                     {
                         Subsystem->AddMappingContext(DefaultMappingContext, 0);
@@ -70,7 +70,7 @@ void ABaseCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
 
-    // ¼­¹ö ±ÇÇÑ¿¡¼­ AbilityInputBindings¿¡ µî·ÏµÈ ¸ğµç ½ºÅ³µéÀ» ASC¿¡ ºÎ¿©ÇÕ´Ï´Ù.
+    // ì„œë²„ ê¶Œí•œì—ì„œ AbilityInputBindingsì— ë“±ë¡ëœ ëª¨ë“  ìŠ¤í‚¬ë“¤ì„ ASCì— ë¶€ì—¬í•©ë‹ˆë‹¤.
     if (HasAuthority())
     {
         APlayerSessionState* SessionState = GetPlayerState<APlayerSessionState>();
@@ -86,7 +86,7 @@ void ABaseCharacter::PossessedBy(AController* NewController)
                 {
                     if (Binding.AbilityClass)
                     {
-                        // ¹è¿­ ¼ø¼­´ë·Î °íÀ¯ InputID ºÎ¿© (0, 1, 2, ...)
+                        // ë°°ì—´ ìˆœì„œëŒ€ë¡œ ê³ ìœ  InputID ë¶€ì—¬ (0, 1, 2, ...)
                         ASC->GiveAbility(FGameplayAbilitySpec(Binding.AbilityClass, 1, InputID, this));
                     }
                     ++InputID;
@@ -95,7 +95,7 @@ void ABaseCharacter::PossessedBy(AController* NewController)
         }
     }
 
-    // ¼­¹ö Ãø¿¡¼­ ÄÁÆ®·Ñ·¯ ¼ÒÀ¯°¡ ³¡³µÀ» ¶§ ¹ÙÀÎµù ½ÇÇà
+    // ì„œë²„ ì¸¡ì—ì„œ ì»¨íŠ¸ë¡¤ëŸ¬ ì†Œìœ ê°€ ëë‚¬ì„ ë•Œ ë°”ì¸ë”© ì‹¤í–‰
     BindAttributeDelegates();
 }
 
@@ -113,25 +113,25 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 
     if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
-        // ÀüÈÄ ÀÌµ¿ ¹ÙÀÎµù (W, S)
+        // ì „í›„ ì´ë™ ë°”ì¸ë”© (W, S)
         if (IA_MoveForward)
         {
             EnhancedInputComponent->BindAction(IA_MoveForward, ETriggerEvent::Triggered, this, &ABaseCharacter::MoveForward);
         }
 
-        // ÁÂ¿ì ÀÌµ¿ ¹ÙÀÎµù (A, D)
+        // ì¢Œìš° ì´ë™ ë°”ì¸ë”© (A, D)
         if (IA_MoveRight)
         {
             EnhancedInputComponent->BindAction(IA_MoveRight, ETriggerEvent::Triggered, this, &ABaseCharacter::MoveRight);
         }
 
-        // Turn (ÁÂ¿ì) ¹ÙÀÎµù
+        // Turn (ì¢Œìš°) ë°”ì¸ë”©
         if (IA_Turn)
         {
             EnhancedInputComponent->BindAction(IA_Turn, ETriggerEvent::Triggered, this, &ABaseCharacter::Turn);
         }
 
-        // LookUp (»óÇÏ) ¹ÙÀÎµù
+        // LookUp (ìƒí•˜) ë°”ì¸ë”©
         if (IA_LookUp)
         {
             EnhancedInputComponent->BindAction(IA_LookUp, ETriggerEvent::Triggered, this, &ABaseCharacter::LookUp);
@@ -153,7 +153,7 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
         {
             if (Binding.InputAction && Binding.AbilityClass)
             {
-                // ´©¸¦ ¶§: È°¼ºÈ­ ½Ãµµ + Pressed »óÅÂ µî·Ï
+                // ëˆ„ë¥¼ ë•Œ: í™œì„±í™” ì‹œë„ + Pressed ìƒíƒœ ë“±ë¡
                 EnhancedInputComponent->BindAction(
                     Binding.InputAction,
                     ETriggerEvent::Started,
@@ -162,7 +162,7 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
                     InputID
                 );
 
-                // ¶¿ ¶§: ÇØ´ç InputID¸¦ °¡Áø È°¼º ¾îºô¸®Æ¼ÀÇ InputReleased Äİ¹é È£Ãâ
+                // ë—„ ë•Œ: í•´ë‹¹ InputIDë¥¼ ê°€ì§„ í™œì„± ì–´ë¹Œë¦¬í‹°ì˜ InputReleased ì½œë°± í˜¸ì¶œ
                 EnhancedInputComponent->BindAction(
                     Binding.InputAction,
                     ETriggerEvent::Completed,
@@ -178,7 +178,7 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 
 UAbilitySystemComponent* ABaseCharacter::GetAbilitySystemComponent() const
 {
-    // --- Ä³¸¯ÅÍ º»ÀÎ ´ë½Å PlayerSessionStateÀÇ ASC¸¦ ¸®ÅÏÇÏµµ·Ï º¯°æ ---
+    // --- ìºë¦­í„° ë³¸ì¸ ëŒ€ì‹  PlayerSessionStateì˜ ASCë¥¼ ë¦¬í„´í•˜ë„ë¡ ë³€ê²½ ---
     if (APlayerSessionState* SessionState = GetPlayerState<APlayerSessionState>())
     {
         return SessionState->GetAbilitySystemComponent();
@@ -186,7 +186,7 @@ UAbilitySystemComponent* ABaseCharacter::GetAbilitySystemComponent() const
     return nullptr;
 }
 
-// 2. ÀüÁø/ÈÄÁø Ã³¸® ÇÔ¼ö (Axis 1D °ª È°¿ë)
+// 2. ì „ì§„/í›„ì§„ ì²˜ë¦¬ í•¨ìˆ˜ (Axis 1D ê°’ í™œìš©)
 void ABaseCharacter::MoveForward(const FInputActionValue& Value)
 {
     const float DirectionValue = Value.Get<float>();
@@ -201,7 +201,7 @@ void ABaseCharacter::MoveForward(const FInputActionValue& Value)
     }
 }
 
-// 3. ÁÂ¿ì ÀÌµ¿ Ã³¸® ÇÔ¼ö (Axis 1D °ª È°¿ë)
+// 3. ì¢Œìš° ì´ë™ ì²˜ë¦¬ í•¨ìˆ˜ (Axis 1D ê°’ í™œìš©)
 void ABaseCharacter::MoveRight(const FInputActionValue& Value)
 {
     const float DirectionValue = Value.Get<float>();
@@ -234,27 +234,27 @@ void ABaseCharacter::LookUp(const FInputActionValue& Value)
     }
 }
 
-// ¿¹½Ã: Ä³¸¯ÅÍ°¡ ÄÁÆ®·Ñ·¯¸¦ ¼ÒÀ¯ÇÏ°Å³ª ASC°¡ ÃÊ±âÈ­µÉ ¶§ È£ÃâµÇ´Â ÇÔ¼ö ³»ºÎ¿¡¼­ ¹ÙÀÎµù ½ÇÇà
+// ì˜ˆì‹œ: ìºë¦­í„°ê°€ ì»¨íŠ¸ë¡¤ëŸ¬ë¥¼ ì†Œìœ í•˜ê±°ë‚˜ ASCê°€ ì´ˆê¸°í™”ë  ë•Œ í˜¸ì¶œë˜ëŠ” í•¨ìˆ˜ ë‚´ë¶€ì—ì„œ ë°”ì¸ë”© ì‹¤í–‰
 void ABaseCharacter::BindAttributeDelegates()
 {
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
     if (!ASC) return;
 
-    // ASC·ÎºÎÅÍ UBaseAttributeSet °¡Á®¿À±â
+    // ASCë¡œë¶€í„° UBaseAttributeSet ê°€ì ¸ì˜¤ê¸°
     const UBaseAttributeSet* BaseAttrSet = ASC->GetSet<UBaseAttributeSet>();
     if (BaseAttrSet)
     {
-        // MovementSpeed ¼Ó¼º º¯È­¸¦ °¨ÁöÇÏ´Â µ¨¸®°ÔÀÌÆ® ±¸µ¶
+        // MovementSpeed ì†ì„± ë³€í™”ë¥¼ ê°ì§€í•˜ëŠ” ë¸ë¦¬ê²Œì´íŠ¸ êµ¬ë…
         ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetMovementSpeedAttribute()).AddUObject(this, &ABaseCharacter::OnMovementSpeedChanged);
     }
 }
 
-// ¼Ó¼ºÀÌ º¯°æµÉ ¶§ ÀÚµ¿ È£ÃâµÇ¾î ½ÇÁ¦ ¹«ºê¸ÕÆ® ¼Óµµ¿¡ Àû¿ë
+// ì†ì„±ì´ ë³€ê²½ë  ë•Œ ìë™ í˜¸ì¶œë˜ì–´ ì‹¤ì œ ë¬´ë¸Œë¨¼íŠ¸ ì†ë„ì— ì ìš©
 void ABaseCharacter::OnMovementSpeedChanged(const FOnAttributeChangeData& Data)
 {
     if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
-        // Data.NewValue´Â º¯°æµÈ MovementSpeedÀÇ »õ·Î¿î °ªÀÔ´Ï´Ù.
+        // Data.NewValueëŠ” ë³€ê²½ëœ MovementSpeedì˜ ìƒˆë¡œìš´ ê°’ì…ë‹ˆë‹¤.
         MoveComp->MaxWalkSpeed = Data.NewValue;
     }
 }
@@ -299,7 +299,7 @@ void ABaseCharacter::StopSprint(const FInputActionValue& Value)
     Server_ApplyGameplayEffect(SprintGameplayEffectClass, false);
 }
 
-// --- ¼­¹ö RPC ½ÇÁ¦ µ¿ÀÛ ±¸Çö ---
+// --- ì„œë²„ RPC ì‹¤ì œ ë™ì‘ êµ¬í˜„ ---
 void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGameplayEffect> EffectClass, bool bApply)
 {
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
@@ -313,7 +313,7 @@ void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGame
     }
     else
     {
-        // Á¦°ÅÇÒ ¶§ ÇÚµé ¹æ½ÄÀÌ°Å³ª ¼Ò½º ÀÌÆåÆ® ¹æ½Ä »ç¿ë
+        // ì œê±°í•  ë•Œ í•¸ë“¤ ë°©ì‹ì´ê±°ë‚˜ ì†ŒìŠ¤ ì´í™íŠ¸ ë°©ì‹ ì‚¬ìš©
         ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
     }
 }
@@ -323,8 +323,8 @@ void ABaseCharacter::AbilityInputPressed(int32 InputID)
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
     if (!ASC) return;
 
-    // InputID°¡ ÀÏÄ¡ÇÏ´Â ¾îºô¸®Æ¼¸¦ Ã£¾Æ Pressed »óÅÂ·Î µî·Ï.
-    // ¾ÆÁ÷ È°¼ºÈ­ ¾È µÈ ¾îºô¸®Æ¼¶ó¸é ³»ºÎÀûÀ¸·Î TryActivateAbility±îÁö ÀÚµ¿À¸·Î Ã³¸®ÇØÁÜ
+    // InputIDê°€ ì¼ì¹˜í•˜ëŠ” ì–´ë¹Œë¦¬í‹°ë¥¼ ì°¾ì•„ Pressed ìƒíƒœë¡œ ë“±ë¡.
+    // ì•„ì§ í™œì„±í™” ì•ˆ ëœ ì–´ë¹Œë¦¬í‹°ë¼ë©´ ë‚´ë¶€ì ìœ¼ë¡œ TryActivateAbilityê¹Œì§€ ìë™ìœ¼ë¡œ ì²˜ë¦¬í•´ì¤Œ
     ASC->AbilityLocalInputPressed(InputID);
 }
 
@@ -333,6 +333,6 @@ void ABaseCharacter::AbilityInputReleased(int32 InputID)
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
     if (!ASC) return;
 
-    // InputID°¡ ÀÏÄ¡ÇÏ´Â "È°¼º ÁßÀÎ" ¾îºô¸®Æ¼ÀÇ InputReleased()¸¦ È£Ãâ
+    // InputIDê°€ ì¼ì¹˜í•˜ëŠ” "í™œì„± ì¤‘ì¸" ì–´ë¹Œë¦¬í‹°ì˜ InputReleased()ë¥¼ í˜¸ì¶œ
     ASC->AbilityLocalInputReleased(InputID);
 }

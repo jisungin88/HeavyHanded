@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -14,11 +14,11 @@ struct FAbilityInputBinding
 	GENERATED_BODY()
 
 public:
-	// ¿¡µğÅÍ¿¡¼­ ÁöÁ¤ÇÒ ÀÔ·Â ¾×¼Ç (¿¹: IA_Interact)
+	// ì—ë””í„°ì—ì„œ ì§€ì •í•  ì…ë ¥ ì•¡ì…˜ (ì˜ˆ: IA_Interact)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
 	TObjectPtr<class UInputAction> InputAction;
 
-	// ±× ÀÔ·Â¿¡ ´ëÀÀÇÒ ¾îºô¸®Æ¼ Å¬·¡½º (¿¹: GAB_Interact)
+	// ê·¸ ì…ë ¥ì— ëŒ€ì‘í•  ì–´ë¹Œë¦¬í‹° í´ë˜ìŠ¤ (ì˜ˆ: GAB_Interact)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Input")
 	TSubclassOf<class UGameplayAbility> AbilityClass;
 };
@@ -37,7 +37,7 @@ public:
 	// Sets default values for this character's properties
 	ABaseCharacter();
 
-	// IAbilitySystemInterface ÇÊ¼ö ±¸Çö
+	// IAbilitySystemInterface í•„ìˆ˜ êµ¬í˜„
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -46,7 +46,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 
-	// --- Ä«¸Ş¶ó ¹× ½ÃÁ¡ ÄÄÆ÷³ÍÆ® ---
+	// --- ì¹´ë©”ë¼ ë° ì‹œì  ì»´í¬ë„ŒíŠ¸ ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
 
@@ -54,7 +54,7 @@ protected:
 	TObjectPtr<UCameraComponent> FollowCamera;
 
 	// --- Enhanced Input Actions ---
-	// ¿¡µğÅÍ¿¡¼­ ºí·çÇÁ¸°Æ®·Î »ı¼ºÇÑ Input Action ¿¡¼ÂÀ» ÇÒ´çÇÒ ¼ö ÀÖ½À´Ï´Ù.
+	// ì—ë””í„°ì—ì„œ ë¸”ë£¨í”„ë¦°íŠ¸ë¡œ ìƒì„±í•œ Input Action ì—ì…‹ì„ í• ë‹¹í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInputAction> IA_MoveForward;
 
@@ -76,38 +76,38 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input") 
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
-	// --- ÀÔ·Â Ã³¸® ÇÔ¼ö (Enhanced Input ¹æ½Ä) ---
-	// 2Â÷¿ø Ãà ÀÔ·Â (WASD ÀÌµ¿ µî)
+	// --- ì…ë ¥ ì²˜ë¦¬ í•¨ìˆ˜ (Enhanced Input ë°©ì‹) ---
+	// 2ì°¨ì› ì¶• ì…ë ¥ (WASD ì´ë™ ë“±)
 	void MoveForward(const FInputActionValue& Value);
 	void MoveRight(const FInputActionValue& Value);
 
-	// ¸¶¿ì½º È¸Àü ÀÔ·Â µî
+	// ë§ˆìš°ìŠ¤ íšŒì „ ì…ë ¥ ë“±
 	void Turn(const FInputActionValue& Value);
 	void LookUp(const FInputActionValue& Value);
 
 
 protected:
-	// Å¬¶óÀÌ¾ğÆ®°¡ ÀÔ·ÂÇßÀ» ¶§ ¼­¹ö·Î ¿äÃ»À» º¸³»´Â ÇÔ¼ö
+	// í´ë¼ì´ì–¸íŠ¸ê°€ ì…ë ¥í–ˆì„ ë•Œ ì„œë²„ë¡œ ìš”ì²­ì„ ë³´ë‚´ëŠ” í•¨ìˆ˜
 	UFUNCTION(Server, Reliable)
 	void Server_ApplyGameplayEffect(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
 
-	// 2. ¾ğ¸®¾ó ºôµå ½Ã½ºÅÛÀÌ Ã£´Â ³»ºÎ ±¸ÇöÃ¼ ÇÔ¼ö (_Implementation ÇÊ¼ö ºÙÀÌ±â)
+	// 2. ì–¸ë¦¬ì–¼ ë¹Œë“œ ì‹œìŠ¤í…œì´ ì°¾ëŠ” ë‚´ë¶€ êµ¬í˜„ì²´ í•¨ìˆ˜ (_Implementation í•„ìˆ˜ ë¶™ì´ê¸°)
 	//void Server_ApplyGameplayEffect_Implementation(TSubclassOf<class UGameplayEffect> EffectClass, bool bApply);
 
-	// ±âÁ¸ ÀÔ·Â ÇÔ¼ö ¼öÁ¤
+	// ê¸°ì¡´ ì…ë ¥ í•¨ìˆ˜ ìˆ˜ì •
 	virtual void StartCrouch(const FInputActionValue& Value);
 	virtual void StopCrouch(const FInputActionValue& Value);
 	virtual void StartSprint(const FInputActionValue& Value);
 	virtual void StopSprint(const FInputActionValue& Value);
 
 protected:
-	// MovementSpeed ¼Ó¼ºÀÌ º¯ÇÒ ¶§ È£ÃâµÉ Äİ¹é ÇÔ¼ö
+	// MovementSpeed ì†ì„±ì´ ë³€í•  ë•Œ í˜¸ì¶œë  ì½œë°± í•¨ìˆ˜
 	virtual void OnMovementSpeedChanged(const struct FOnAttributeChangeData& Data);
 
-	// ASC ÃÊ±âÈ­ ½Ã ¼Ó¼º ¹ÙÀÎµùÀ» ¼öÇàÇÒ ÇÔ¼ö
+	// ASC ì´ˆê¸°í™” ì‹œ ì†ì„± ë°”ì¸ë”©ì„ ìˆ˜í–‰í•  í•¨ìˆ˜
 	void BindAttributeDelegates();
 
-	// ÀÔ·Â¿¡ µû¶ó Àû¿ëÇÒ ´Ş¸®±â/¾É±â Gameplay Effect Å¬·¡½º (ºí·çÇÁ¸°Æ®¿¡¼­ ÁöÁ¤)
+	// ì…ë ¥ì— ë”°ë¼ ì ìš©í•  ë‹¬ë¦¬ê¸°/ì•‰ê¸° Gameplay Effect í´ë˜ìŠ¤ (ë¸”ë£¨í”„ë¦°íŠ¸ì—ì„œ ì§€ì •)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
 	TSubclassOf<class UGameplayEffect> SprintGameplayEffectClass;
 
@@ -119,26 +119,26 @@ protected:
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 
 protected:
-	// ¡Ú [ÅëÇÕµÊ] ¿¡µğÅÍ µğÅ×ÀÏ ÆĞ³Î¿¡¼­ ÀÔ·Â°ú ½ºÅ³À» 1:1·Î ¸ÅÇÎÇÏ´Â ¸®½ºÆ® (DefaultAbilities »èÁ¦µÊ)
+	// â˜… [í†µí•©ë¨] ì—ë””í„° ë””í…Œì¼ íŒ¨ë„ì—ì„œ ì…ë ¥ê³¼ ìŠ¤í‚¬ì„ 1:1ë¡œ ë§¤í•‘í•˜ëŠ” ë¦¬ìŠ¤íŠ¸ (DefaultAbilities ì‚­ì œë¨)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Abilities")
 	TArray<FAbilityInputBinding> AbilityInputBindings;
 
-	// ÀÎÇÁ¶ó ÀÔ·Â °¨Áö ½Ã ½ÇÇàµÉ Äİ¹é ÇÔ¼ö
+	// ì¸í”„ë¼ ì…ë ¥ ê°ì§€ ì‹œ ì‹¤í–‰ë  ì½œë°± í•¨ìˆ˜
 	//void AbilityInputPressed(TSubclassOf<class UGameplayAbility> AbilityClass);
 	void AbilityInputPressed(int32 InputID);
 	void AbilityInputReleased(int32 InputID);
 
 protected:
-	// ÇöÀç ¼Õ¿¡ µé°í ÀÖ´Â ¾×ÅÍ
+	// í˜„ì¬ ì†ì— ë“¤ê³  ìˆëŠ” ì•¡í„°
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction")
 	TObjectPtr<AActor> HeldActor = nullptr;
 
 public:
-	// HeldActor¸¦ ¹İÈ¯ÇÏ´Â ÇÔ¼ö
+	// HeldActorë¥¼ ë°˜í™˜í•˜ëŠ” í•¨ìˆ˜
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
 
-	// HeldActor¸¦ ¼³Á¤ÇÏ´Â ÇÔ¼ö
+	// HeldActorë¥¼ ì„¤ì •í•˜ëŠ” í•¨ìˆ˜
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	void SetHeldActor(AActor* NewHeldActor) { HeldActor = NewHeldActor; }
 

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -15,7 +15,7 @@ class HEAVYHANDED_API UBaseGameplayAbility : public UGameplayAbility
 	GENERATED_BODY()
 
 protected:
-	// ¿¡µğÅÍ(ºí·çÇÁ¸°Æ®)¿¡¼­ ½ºÅ³¸¶´Ù ´Ù¸¥ ¸ùÅ¸ÁÖ¸¦ ÁöÁ¤ÇÒ ¼ö ÀÖµµ·Ï ¿ÀÇÂÇÕ´Ï´Ù.
+	// ì—ë””í„°(ë¸”ë£¨í”„ë¦°íŠ¸)ì—ì„œ ìŠ¤í‚¬ë§ˆë‹¤ ë‹¤ë¥¸ ëª½íƒ€ì£¼ë¥¼ ì§€ì •í•  ìˆ˜ ìˆë„ë¡ ì˜¤í”ˆí•©ë‹ˆë‹¤.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> SkillMontage;
 
@@ -23,7 +23,7 @@ protected:
 	ABaseCharacter* GetBaseCharacterFromActorInfo() const;
 
 protected:
-	// ¸ùÅ¸ÁÖ °ü·Ã Äİ¹é ÇÔ¼öµé (UFUNCTION ÇÊ¼ö)
+	// ëª½íƒ€ì£¼ ê´€ë ¨ ì½œë°± í•¨ìˆ˜ë“¤ (UFUNCTION í•„ìˆ˜)
 	UFUNCTION()
 	virtual void OnMontageCompleted();
 
@@ -35,10 +35,10 @@ protected:
 
 	UFUNCTION()
 	virtual void OnMontageCancelled();
-	// ... ±âÁ¸ ÄÚµå
+	// ... ê¸°ì¡´ ì½”ë“œ
 
 protected:
-	// Å¬¶óÀÌ¾ğÆ®¿¡¼­ ¼­¹ö ASC·Î Gameplay Event ÅÂ±×¸¦ Àü¼ÛÇÏ´Â °øÅë ÇÔ¼ö
+	// í´ë¼ì´ì–¸íŠ¸ì—ì„œ ì„œë²„ ASCë¡œ Gameplay Event íƒœê·¸ë¥¼ ì „ì†¡í•˜ëŠ” ê³µí†µ í•¨ìˆ˜
 	UFUNCTION(BlueprintCallable, Category = "GAS|Ability")
 	void SendGameplayEventToASCOnServer(FGameplayTag EventTag, const FGameplayEventData& Payload);
 

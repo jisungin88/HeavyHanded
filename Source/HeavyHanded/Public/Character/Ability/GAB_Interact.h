@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -17,10 +17,10 @@ public:
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
 
 protected:
-    // »óÈ£ÀÛ¿ë ·¹ÀÌÄ³½ºÆ® ¹× ·ÎÁ÷ ¼öÇà ÇÔ¼ö
+    // ìƒí˜¸ì‘ìš© ë ˆì´ìºìŠ¤íŠ¸ ë° ë¡œì§ ìˆ˜í–‰ í•¨ìˆ˜
     void PerformInteraction();
 
-    // ¸ùÅ¸ÁÖ°¡ ³¡³µÀ» ¶§ È£ÃâµÉ Äİ¹é ÇÔ¼ö
+    // ëª½íƒ€ì£¼ê°€ ëë‚¬ì„ ë•Œ í˜¸ì¶œë  ì½œë°± í•¨ìˆ˜
     UFUNCTION()
     void OnMontageFinished();
 };

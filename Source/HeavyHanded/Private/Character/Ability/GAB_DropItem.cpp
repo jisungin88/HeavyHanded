@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/Ability/GAB_DropItem.h"
@@ -10,31 +10,31 @@ void UGAB_DropItem::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
 
-    // 2. ¼­¹ö ±ÇÇÑ Ã¼Å© (¼­¹ö¿¡¼­¸¸ ¹°¸®/»óÅÂ º¯°æ)
+    // 2. ì„œë²„ ê¶Œí•œ ì²´í¬ (ì„œë²„ì—ì„œë§Œ ë¬¼ë¦¬/ìƒíƒœ ë³€ê²½)
     if (Character && Character->HasAuthority())
     {
         AActor* HeldActor = Character->GetHeldActor();
         if (HeldActor)
         {
-            // [Ä³¸¯ÅÍÀÇ Multicast_DropItem¿¡ ÀÖ´ø ·ÎÁ÷À» ¿©±â¿¡ Á÷Á¢ ±¸Çö]
+            // [ìºë¦­í„°ì˜ Multicast_DropItemì— ìˆë˜ ë¡œì§ì„ ì—¬ê¸°ì— ì§ì ‘ êµ¬í˜„]
 
-            // 1) ¼Õ¿¡¼­ ¶¼¾î³»±â
+            // 1) ì†ì—ì„œ ë–¼ì–´ë‚´ê¸°
             FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
             HeldActor->DetachFromActor(DetachRules);
 
-            // 2) ¹°¸® ÄÑ±â
+            // 2) ë¬¼ë¦¬ ì¼œê¸°
             if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
             {
                 PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
                 PrimComp->SetSimulatePhysics(true);
             }
 
-            // 3) Ä³¸¯ÅÍ º¯¼ö ÃÊ±âÈ­
+            // 3) ìºë¦­í„° ë³€ìˆ˜ ì´ˆê¸°í™”
             Character->SetHeldActor(nullptr);
 
             UE_LOG(LogTemp, Log, TEXT("DropItem logic moved to Ability!"));
         }
     }
-	// 3. ¾îºô¸®Æ¼ÀÇ ¿ªÇÒÀ» ´ÙÇßÀ¸¹Ç·Î Áï½Ã Á¾·áÇÕ´Ï´Ù.
+	// 3. ì–´ë¹Œë¦¬í‹°ì˜ ì—­í• ì„ ë‹¤í–ˆìœ¼ë¯€ë¡œ ì¦‰ì‹œ ì¢…ë£Œí•©ë‹ˆë‹¤.
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 }

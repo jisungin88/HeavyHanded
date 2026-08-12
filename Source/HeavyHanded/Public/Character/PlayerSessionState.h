@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -20,11 +20,11 @@ class HEAVYHANDED_API APlayerSessionState : public APlayerState, public IAbility
 public:
     APlayerSessionState();
 
-    // GAS ÀÎÅÍÆäÀÌ½º ±¸Çö (ÇÃ·¹ÀÌ¾î°¡ ¼¼¼Ç ·¹º§/½ºÅÈÀ» °¡Áö¹Ç·Î ¿©±â¼­ ASC¸¦ Á¦°ø)
+    // GAS ì¸í„°í˜ì´ìŠ¤ êµ¬í˜„ (í”Œë ˆì´ì–´ê°€ ì„¸ì…˜ ë ˆë²¨/ìŠ¤íƒ¯ì„ ê°€ì§€ë¯€ë¡œ ì—¬ê¸°ì„œ ASCë¥¼ ì œê³µ)
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
     FORCEINLINE UBaseAttributeSet* GetBaseAttributeSet() const { return BaseAttributeSet; }
 
-    // [ÇÊ¼ö] ÇÃ·¹ÀÌ¾î ¼¼¼Ç µ¥ÀÌÅÍ Getter / Setter
+    // [í•„ìˆ˜] í”Œë ˆì´ì–´ ì„¸ì…˜ ë°ì´í„° Getter / Setter
     UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
     int32 GetGold() const { return Gold; }
 
@@ -38,26 +38,26 @@ public:
     void SetSelectedCharacterID(int32 NewCharacterID);
 
 protected:
-    // ³×Æ®¿öÅ© µ¿±âÈ­ º¯¼ö µî·Ï (Replication)
+    // ë„¤íŠ¸ì›Œí¬ ë™ê¸°í™” ë³€ìˆ˜ ë“±ë¡ (Replication)
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-    // --- GAS ÄÄÆ÷³ÍÆ® ---
+    // --- GAS ì»´í¬ë„ŒíŠ¸ ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UAbilitySystemComponent> AbilitySystemComp;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UBaseAttributeSet> BaseAttributeSet;
 
-    // --- ÇÙ½É ¼¼¼Ç µ¥ÀÌÅÍ (¸ÖÆ¼ÇÃ·¹ÀÌ µ¿±âÈ­ Àû¿ë) ---
+    // --- í•µì‹¬ ì„¸ì…˜ ë°ì´í„° (ë©€í‹°í”Œë ˆì´ ë™ê¸°í™” ì ìš©) ---
 
-    // ÇÃ·¹ÀÌ¾î ¼ÒÀ¯ ÁÖÈ­ (°ñµå)
+    // í”Œë ˆì´ì–´ ì†Œìœ  ì£¼í™” (ê³¨ë“œ)
     UPROPERTY(ReplicatedUsing = OnRep_Gold, BlueprintReadOnly, Category = "PlayerSession|Data")
     int32 Gold;
 
     UFUNCTION()
     virtual void OnRep_Gold();
 
-    // ·Îºñ¿¡¼­ ¼±ÅÃÇÑ Ä³¸¯ÅÍ °íÀ¯ ¹øÈ£ (¶Ç´Â Å¸ÀÔ)
+    // ë¡œë¹„ì—ì„œ ì„ íƒí•œ ìºë¦­í„° ê³ ìœ  ë²ˆí˜¸ (ë˜ëŠ” íƒ€ì…)
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "PlayerSession|Data")
     int32 SelectedCharacterID;
 };

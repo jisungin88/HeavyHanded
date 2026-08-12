@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Character/Ability/GAB_Interact.h"
 #include "GameFramework/Character.h"
@@ -15,7 +15,7 @@ void UGAB_Interact::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 {
     Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
-    // 2. ¼­¹ö ±ÇÇÑ Ã¼Å© (»óÈ£ÀÛ¿ë ÆÇÁ¤Àº ¼­¹ö¿¡¼­ ¼öÇà)
+    // 2. ì„œë²„ ê¶Œí•œ ì²´í¬ (ìƒí˜¸ì‘ìš© íŒì •ì€ ì„œë²„ì—ì„œ ìˆ˜í–‰)
     if (ActorInfo->IsNetAuthority())
     {
         PerformInteraction();
@@ -24,7 +24,7 @@ void UGAB_Interact::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 
 void UGAB_Interact::OnMontageFinished()
 {
-    // ÇöÀç È°¼ºÈ­µÈ ½ºÆå ÇÚµé°ú ¾×ÅÍ Á¤º¸¸¦ ¾ÈÀüÇÏ°Ô ³Ñ°Ü¼­ ¾îºô¸®Æ¼ Á¾·á
+    // í˜„ì¬ í™œì„±í™”ëœ ìŠ¤í™ í•¸ë“¤ê³¼ ì•¡í„° ì •ë³´ë¥¼ ì•ˆì „í•˜ê²Œ ë„˜ê²¨ì„œ ì–´ë¹Œë¦¬í‹° ì¢…ë£Œ
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
@@ -49,7 +49,7 @@ void UGAB_Interact::PerformInteraction()
     QueryParams.AddIgnoredActor(Character);
 
 
-    // ¶óÀÎ ´ë½Å ¾à°£ÀÇ ¹İ°æÀ» ÁØ ½ºÇÇ¾î Æ®·¹ÀÌ½º (ÆÇÁ¤ ¿©À¯)
+    // ë¼ì¸ ëŒ€ì‹  ì•½ê°„ì˜ ë°˜ê²½ì„ ì¤€ ìŠ¤í”¼ì–´ íŠ¸ë ˆì´ìŠ¤ (íŒì • ì—¬ìœ )
     bool bHit = GetWorld()->SweepSingleByChannel(
         HitResult,
         StartLocation,
@@ -74,23 +74,23 @@ void UGAB_Interact::PerformInteraction()
     {
         AActor* HitActor = HitResult.GetActor();
 
-        // 1. "Item" ÅÂ±×°¡ ºÙ¾îÀÖ´Â °æ¿ì
+        // 1. "Item" íƒœê·¸ê°€ ë¶™ì–´ìˆëŠ” ê²½ìš°
         if (HitActor->ActorHasTag(FName("Item")))
         {
             UE_LOG(LogTemp, Log, TEXT("Item Get: %s"), *HitActor->GetName());
 
 
-            // ÀÌ¹Ì ¹º°¡ µé°í ÀÖÁö ¾Ê´Ù¸é Áı¾î µé±â ½ÇÇà
+            // ì´ë¯¸ ë­”ê°€ ë“¤ê³  ìˆì§€ ì•Šë‹¤ë©´ ì§‘ì–´ ë“¤ê¸° ì‹¤í–‰
             if (!Character->GetHeldActor())
             {
-                // 1. ¹°¸® ½Ã¹Ä·¹ÀÌ¼Ç ¹× Äİ¸®Àü ²ô±â
+                // 1. ë¬¼ë¦¬ ì‹œë®¬ë ˆì´ì…˜ ë° ì½œë¦¬ì „ ë„ê¸°
                 if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HitActor->GetRootComponent()))
                 {
                     PrimComp->SetSimulatePhysics(false);
                     PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
                 }
 
-                // 2. Ä³¸¯ÅÍ ¼Õ ¼ÒÄÏ¿¡ ºÎÂø
+                // 2. ìºë¦­í„° ì† ì†Œì¼“ì— ë¶€ì°©
                 HitActor->AttachToComponent(
                     Character->GetMesh(),
                     FAttachmentTransformRules::SnapToTargetNotIncludingScale,
@@ -105,12 +105,12 @@ void UGAB_Interact::PerformInteraction()
                 UE_LOG(LogTemp, Warning, TEXT("Item ded"));
             }
         }
-        // 2. "Door" ÅÂ±×°¡ ºÙ¾îÀÖ´Â °æ¿ì
+        // 2. "Door" íƒœê·¸ê°€ ë¶™ì–´ìˆëŠ” ê²½ìš°
         else if (HitActor->ActorHasTag(FName("Door")))
         {
             UE_LOG(LogTemp, Log, TEXT("Door Open/Close: %s"), *HitActor->GetName());
         }
-        // 3. ÅÂ±×°¡ ¾ø°Å³ª ´Ù¸¥ »ç¹°ÀÌ ¸ÂÀº °æ¿ì
+        // 3. íƒœê·¸ê°€ ì—†ê±°ë‚˜ ë‹¤ë¥¸ ì‚¬ë¬¼ì´ ë§ì€ ê²½ìš°
         else
         {
             UE_LOG(LogTemp, Warning, TEXT("No: %s"), *HitActor->GetName());

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/PlayerSessionState.h"
@@ -8,19 +8,19 @@
 
 APlayerSessionState::APlayerSessionState()
 {
-    // GAS ÄÄÆ÷³ÍÆ® »ı¼º ¹× ¸ÖÆ¼ÇÃ·¹ÀÌ È¯°æ Mixed ¸ğµå ¼³Á¤
+    // GAS ì»´í¬ë„ŒíŠ¸ ìƒì„± ë° ë©€í‹°í”Œë ˆì´ í™˜ê²½ Mixed ëª¨ë“œ ì„¤ì •
     AbilitySystemComp = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
     AbilitySystemComp->SetIsReplicated(true);
     AbilitySystemComp->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
-    // ·¹º§ µîÀÇ ¼Ó¼ºÀ» ´ãÀ» AttributeSet »ı¼º
+    // ë ˆë²¨ ë“±ì˜ ì†ì„±ì„ ë‹´ì„ AttributeSet ìƒì„±
     BaseAttributeSet = CreateDefaultSubobject<UBaseAttributeSet>(TEXT("BaseAttributeSet"));
 
-    // ÃÊ±â°ª ¼³Á¤
+    // ì´ˆê¸°ê°’ ì„¤ì •
     Gold = 0;
     SelectedCharacterID = 0;
 
-    // ³×Æ®¿öÅ© ¾÷µ¥ÀÌÆ® ºóµµ ¼³Á¤ (¿øÈ°ÇÑ µ¿±âÈ­)
+    // ë„¤íŠ¸ì›Œí¬ ì—…ë°ì´íŠ¸ ë¹ˆë„ ì„¤ì • (ì›í™œí•œ ë™ê¸°í™”)
     NetUpdateFrequency = 100.0f;
 }
 
@@ -29,7 +29,7 @@ UAbilitySystemComponent* APlayerSessionState::GetAbilitySystemComponent() const
     return AbilitySystemComp;
 }
 
-// º¯¼ö ³×Æ®¿öÅ© µ¿±âÈ­ ¼³Á¤ (¼­¹ö -> Å¬¶óÀÌ¾ğÆ® ÀÚµ¿ º¹Á¦)
+// ë³€ìˆ˜ ë„¤íŠ¸ì›Œí¬ ë™ê¸°í™” ì„¤ì • (ì„œë²„ -> í´ë¼ì´ì–¸íŠ¸ ìë™ ë³µì œ)
 void APlayerSessionState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -40,11 +40,11 @@ void APlayerSessionState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 
 void APlayerSessionState::AddGold(int32 Amount)
 {
-    // ¼¼¼Ç µ¥ÀÌÅÍ º¯°æÀº ¼­¹ö¿¡¼­¸¸ ±ÇÇÑÀ» °¡Áü
+    // ì„¸ì…˜ ë°ì´í„° ë³€ê²½ì€ ì„œë²„ì—ì„œë§Œ ê¶Œí•œì„ ê°€ì§
     if (HasAuthority())
     {
         Gold += Amount;
-        // ½Ì±ÛÇÃ·¹ÀÌ³ª ¼­¹ö È­¸é¿¡¼­´Â OnRepÀÌ ÀÚµ¿ È£ÃâµÇÁö ¾ÊÀ¸¹Ç·Î ÇÊ¿ä½Ã UI °»½Å ¹ÙÀÎµù Ã³¸® Ãß°¡ °¡´É
+        // ì‹±ê¸€í”Œë ˆì´ë‚˜ ì„œë²„ í™”ë©´ì—ì„œëŠ” OnRepì´ ìë™ í˜¸ì¶œë˜ì§€ ì•Šìœ¼ë¯€ë¡œ í•„ìš”ì‹œ UI ê°±ì‹  ë°”ì¸ë”© ì²˜ë¦¬ ì¶”ê°€ ê°€ëŠ¥
     }
 }
 
@@ -58,5 +58,5 @@ void APlayerSessionState::SetSelectedCharacterID(int32 NewCharacterID)
 
 void APlayerSessionState::OnRep_Gold()
 {
-    // Å¬¶óÀÌ¾ğÆ®¿¡¼­ °ñµå°¡ µ¿±âÈ­µÇ¾úÀ» ¶§ ÇÊ¿äÇÑ Ã³¸® (UI °»½Å µî)¸¦ ¿©±â¼­ ¼öÇàÇÒ ¼ö ÀÖ½À´Ï´Ù.
+    // í´ë¼ì´ì–¸íŠ¸ì—ì„œ ê³¨ë“œê°€ ë™ê¸°í™”ë˜ì—ˆì„ ë•Œ í•„ìš”í•œ ì²˜ë¦¬ (UI ê°±ì‹  ë“±)ë¥¼ ì—¬ê¸°ì„œ ìˆ˜í–‰í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.
 }

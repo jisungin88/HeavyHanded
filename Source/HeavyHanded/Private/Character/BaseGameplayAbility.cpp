@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/BaseGameplayAbility.h"
@@ -21,7 +21,7 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         return;
     }
 
-    // 2. ÅÂ½ºÅ© »ı¼º
+    // 2. íƒœìŠ¤í¬ ìƒì„±
     UAbilityTask_PlayMontageAndWait* MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
         this,
         NAME_None,
@@ -30,7 +30,7 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         NAME_None,
         false);
 
-    // 3. µ¨¸®°ÔÀÌÆ® ¹ÙÀÎµù
+    // 3. ë¸ë¦¬ê²Œì´íŠ¸ ë°”ì¸ë”©
     if (MontageTask)
     {
         MontageTask->OnCompleted.AddDynamic(this, &UBaseGameplayAbility::OnMontageCompleted);
@@ -38,7 +38,7 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         MontageTask->OnInterrupted.AddDynamic(this, &UBaseGameplayAbility::OnMontageInterrupted);
         MontageTask->OnCancelled.AddDynamic(this, &UBaseGameplayAbility::OnMontageCancelled);
 
-        // 4. Áß¿ä: ÅÂ½ºÅ© ½ÃÀÛ
+        // 4. ì¤‘ìš”: íƒœìŠ¤í¬ ì‹œì‘
         MontageTask->ReadyForActivation();
     }
 
@@ -47,13 +47,13 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
     //    ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
     //    if (Character && Character->GetMesh() && Character->GetMesh()->GetAnimInstance())
     //    {
-    //        // ¸ùÅ¸ÁÖ¸¦ Àç»ıÇÏ°í Àç»ıµÈ ±æÀÌ¸¦ °¡Á®¿Ã ¼öµµ ÀÖ½À´Ï´Ù.
+    //        // ëª½íƒ€ì£¼ë¥¼ ì¬ìƒí•˜ê³  ì¬ìƒëœ ê¸¸ì´ë¥¼ ê°€ì ¸ì˜¬ ìˆ˜ë„ ìˆìŠµë‹ˆë‹¤.
     //        Character->PlayAnimMontage(SkillMontage);
     //    }
     //}
 }
 
-// ¸ùÅ¸ÁÖ°¡ ³¡³µÀ» ¶§ ¾îºô¸®Æ¼ Á¾·á
+// ëª½íƒ€ì£¼ê°€ ëë‚¬ì„ ë•Œ ì–´ë¹Œë¦¬í‹° ì¢…ë£Œ
 void UBaseGameplayAbility::OnMontageCompleted()
 {
     EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
@@ -61,7 +61,7 @@ void UBaseGameplayAbility::OnMontageCompleted()
 
 void UBaseGameplayAbility::OnMontageBlendOut()
 {
-    // »óÈ²¿¡ µû¶ó BlendOut¿¡¼­ Á¾·áÇÒÁö Completed¿¡¼­ Á¾·áÇÒÁö °áÁ¤
+    // ìƒí™©ì— ë”°ë¼ BlendOutì—ì„œ ì¢…ë£Œí• ì§€ Completedì—ì„œ ì¢…ë£Œí• ì§€ ê²°ì •
     EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
 }
 
@@ -86,7 +86,7 @@ void UBaseGameplayAbility::SendGameplayEventToASCOnServer(FGameplayTag EventTag,
 
     if (ActorInfo.AvatarActor.IsValid())
     {
-        // GAS ºí·çÇÁ¸°Æ® ¶óÀÌºê·¯¸®°¡ Á¦°øÇÏ´Â Ç¥ÁØ ÀÌº¥Æ® Àü¼Û ÇÔ¼ö »ç¿ë (³»ºÎÀûÀ¸·Î ³×Æ®¿öÅ· ÀÚµ¿ Ã³¸®)
+        // GAS ë¸”ë£¨í”„ë¦°íŠ¸ ë¼ì´ë¸ŒëŸ¬ë¦¬ê°€ ì œê³µí•˜ëŠ” í‘œì¤€ ì´ë²¤íŠ¸ ì „ì†¡ í•¨ìˆ˜ ì‚¬ìš© (ë‚´ë¶€ì ìœ¼ë¡œ ë„¤íŠ¸ì›Œí‚¹ ìë™ ì²˜ë¦¬)
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
             ActorInfo.AvatarActor.Get(),
             EventTag,
@@ -95,7 +95,7 @@ void UBaseGameplayAbility::SendGameplayEventToASCOnServer(FGameplayTag EventTag,
     }
 }
 
-//»èÁ¦ ¿¹Á¤
+//ì‚­ì œ ì˜ˆì •
 ABaseCharacter* UBaseGameplayAbility::GetBaseCharacterFromActorInfo() const
 {
     if (!CurrentActorInfo) return nullptr;

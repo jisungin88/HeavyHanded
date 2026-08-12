@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+Ôªø// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -26,12 +26,12 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-    // √º∑¬
+    // Ï≤¥Î†•
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_Health)
     FGameplayAttributeData Health;
     ATTRIBUTE_ACCESSORS(UBaseAttributeSet, Health)
 
-    // ¿Ãµø º”µµ
+    // Ïù¥Îèô ÏÜçÎèÑ
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_MovementSpeed)
     FGameplayAttributeData MovementSpeed;
     ATTRIBUTE_ACCESSORS(UBaseAttributeSet, MovementSpeed)

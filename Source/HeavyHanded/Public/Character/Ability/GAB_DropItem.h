@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -14,7 +14,7 @@ class HEAVYHANDED_API UGAB_DropItem : public UBaseGameplayAbility
 {
 	GENERATED_BODY()
 public:
-	// ¾îºô¸®Æ¼°¡ ½ÇÇàµÉ ¶§ È£ÃâµÇ´Â ÇÔ¼ö
+	// ì–´ë¹Œë¦¬í‹°ê°€ ì‹¤í–‰ë  ë•Œ í˜¸ì¶œë˜ëŠ” í•¨ìˆ˜
 	virtual void ActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
 		const FGameplayAbilityActorInfo* ActorInfo,

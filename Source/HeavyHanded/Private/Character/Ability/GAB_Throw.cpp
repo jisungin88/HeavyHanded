@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/Ability/GAB_Throw.h"
@@ -16,10 +16,10 @@ void UGAB_Throw::ActivateAbility(
 	const FGameplayAbilityActivationInfo ActivationInfo,
 	const FGameplayEventData* TriggerEventData)
 {
-	// 1. ºÎ¸ğÀÇ ActivateAbility È£Ãâ (¸ùÅ¸ÁÖ Àç»ı ·ÎÁ÷ÀÌ ¿©±â¿¡ ÀÖÀ½)
+	// 1. ë¶€ëª¨ì˜ ActivateAbility í˜¸ì¶œ (ëª½íƒ€ì£¼ ì¬ìƒ ë¡œì§ì´ ì—¬ê¸°ì— ìˆìŒ)
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
-	// 2. Ä³¸¯ÅÍ È®ÀÎ
+	// 2. ìºë¦­í„° í™•ì¸
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
 	if (!Character || !Character->GetHeldActor())
 	{
@@ -27,7 +27,7 @@ void UGAB_Throw::ActivateAbility(
 		return;
 	}
 
-	// ²Ú ´©¸£°í ÀÖ´Â µ¿¾È ±ËÀûÀ» ½Ç½Ã°£À¸·Î ±×·ÁÁÙ Å¸ÀÌ¸Ó ½ÃÀÛ (Å¬¶óÀÌ¾ğÆ®/¼­¹ö °øÅë Â÷Â¡ ¿¬Ãâ)
+	// ê¾¹ ëˆ„ë¥´ê³  ìˆëŠ” ë™ì•ˆ ê¶¤ì ì„ ì‹¤ì‹œê°„ìœ¼ë¡œ ê·¸ë ¤ì¤„ íƒ€ì´ë¨¸ ì‹œì‘ (í´ë¼ì´ì–¸íŠ¸/ì„œë²„ ê³µí†µ ì°¨ì§• ì—°ì¶œ)
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
@@ -47,7 +47,7 @@ void UGAB_Throw::InputReleased(
 {
 	Super::InputReleased(Handle, ActorInfo, ActivationInfo);
 
-	// Â÷Â¡ ½Ã°¢È­ ¹× Å¸ÀÌ¸Ó Á¤¸®
+	// ì°¨ì§• ì‹œê°í™” ë° íƒ€ì´ë¨¸ ì •ë¦¬
 	ClearTrajectoryPreview();
 
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
@@ -57,7 +57,7 @@ void UGAB_Throw::InputReleased(
 		return;
 	}
 
-	// 1. Å¬¶óÀÌ¾ğÆ®¶ó¸é ºÎ¸ğÀÇ ÇïÆÛ¸¦ ÅëÇØ ¼­¹ö·Î ÀÌº¥Æ® Àü¼Û
+	// 1. í´ë¼ì´ì–¸íŠ¸ë¼ë©´ ë¶€ëª¨ì˜ í—¬í¼ë¥¼ í†µí•´ ì„œë²„ë¡œ ì´ë²¤íŠ¸ ì „ì†¡
 	if (!ActorInfo->IsNetAuthority())
 	{
 		FGameplayEventData Payload;
@@ -68,17 +68,17 @@ void UGAB_Throw::InputReleased(
 		return;
 	}
 
-	// 2. ¼­¹ö ±ÇÇÑ¿¡¼­ÀÇ ½ÇÁ¦ ´øÁö±â (¹°¸® ºÎ¿©)
+	// 2. ì„œë²„ ê¶Œí•œì—ì„œì˜ ì‹¤ì œ ë˜ì§€ê¸° (ë¬¼ë¦¬ ë¶€ì—¬)
 	if (AActor* HeldActor = Character->GetHeldActor())
 	{
 		FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
 		HeldActor->DetachFromActor(DetachRules);
 
-		// ¡Ú ÇÙ½É: ´Ù½Ã »óÈ£ÀÛ¿ë(Áı±â)ÀÌ °¡´ÉÇÏµµ·Ï Äİ¸®Àü°ú ¹°¸® º¹±¸
+		// â˜… í•µì‹¬: ë‹¤ì‹œ ìƒí˜¸ì‘ìš©(ì§‘ê¸°)ì´ ê°€ëŠ¥í•˜ë„ë¡ ì½œë¦¬ì „ê³¼ ë¬¼ë¦¬ ë³µêµ¬
 		if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
 		{
-			PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); // Äİ¸®Àü ´Ù½Ã ÄÑ±â!
-			PrimComp->SetSimulatePhysics(true);                                // ¹°¸® ÄÑ±â
+			PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); // ì½œë¦¬ì „ ë‹¤ì‹œ ì¼œê¸°!
+			PrimComp->SetSimulatePhysics(true);                                // ë¬¼ë¦¬ ì¼œê¸°
 
 			FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
 			if (!LaunchVelocity.IsNearlyZero())
@@ -87,7 +87,7 @@ void UGAB_Throw::InputReleased(
 			}
 		}
 
-		// Ä³¸¯ÅÍ°¡ µé°í ÀÖ´Â »óÅÂ ÇØÁ¦
+		// ìºë¦­í„°ê°€ ë“¤ê³  ìˆëŠ” ìƒíƒœ í•´ì œ
 		Character->SetHeldActor(nullptr);
 	}
 
@@ -116,7 +116,7 @@ void UGAB_Throw::UpdateTrajectoryPreview()
 	Params.bTraceWithCollision = true;
 	Params.SimFrequency = 15.0f;
 
-	// ÀÚµ¿ µğ¹ö±× µå·Î¿ì´Â ²ô°í, Á÷Á¢ ¼±À» ±×¸± °ÍÀÌ¹Ç·Î None
+	// ìë™ ë””ë²„ê·¸ ë“œë¡œìš°ëŠ” ë„ê³ , ì§ì ‘ ì„ ì„ ê·¸ë¦´ ê²ƒì´ë¯€ë¡œ None
 	Params.DrawDebugType = EDrawDebugTrace::None;
 
 	FPredictProjectilePathResult Result;
@@ -128,7 +128,7 @@ void UGAB_Throw::UpdateTrajectoryPreview()
 		return;
 	}
 
-	// °æ·Î Æ÷ÀÎÆ®µéÀ» ¼ø¼­´ë·Î ÀÌ¾î¼­ ¸Å²öÇÑ ¼±À¸·Î ±×¸²
+	// ê²½ë¡œ í¬ì¸íŠ¸ë“¤ì„ ìˆœì„œëŒ€ë¡œ ì´ì–´ì„œ ë§¤ëˆí•œ ì„ ìœ¼ë¡œ ê·¸ë¦¼
 	for (int32 i = 0; i < Result.PathData.Num() - 1; ++i)
 	{
 		const FVector& PointA = Result.PathData[i].Location;
@@ -137,7 +137,7 @@ void UGAB_Throw::UpdateTrajectoryPreview()
 		DrawDebugLine(World, PointA, PointB, FColor::Yellow, false, TrajectoryUpdateInterval, 0, 2.0f);
 	}
 
-	// ¹º°¡¿¡ ºÎµúÇû´Ù¸é ±× ÂøÅº ÁöÁ¡¿¡ Ç¥½Ã
+	// ë­”ê°€ì— ë¶€ë”ªí˜”ë‹¤ë©´ ê·¸ ì°©íƒ„ ì§€ì ì— í‘œì‹œ
 	if (Result.HitResult.bBlockingHit)
 	{
 		DrawDebugSphere(World, Result.HitResult.Location, 12.0f, 12, FColor::Red, false, TrajectoryUpdateInterval);
@@ -154,7 +154,7 @@ void UGAB_Throw::ClearTrajectoryPreview()
 
 void UGAB_Throw::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-	// ½ºÅ³ÀÌ ¾î¶² ÀÌÀ¯·Îµç ³¡³¯ ¶§ Å¸ÀÌ¸Ó¿Í ±×·ÁÁø ±ËÀûÀÌ ³²Áö ¾Êµµ·Ï È®½ÇÇÏ°Ô Á¤¸®
+	// ìŠ¤í‚¬ì´ ì–´ë–¤ ì´ìœ ë¡œë“  ëë‚  ë•Œ íƒ€ì´ë¨¸ì™€ ê·¸ë ¤ì§„ ê¶¤ì ì´ ë‚¨ì§€ ì•Šë„ë¡ í™•ì‹¤í•˜ê²Œ ì •ë¦¬
 	ClearTrajectoryPreview();
 
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
