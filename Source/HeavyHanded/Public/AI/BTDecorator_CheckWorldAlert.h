@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTDecorator.h"
@@ -14,8 +14,11 @@ class UBTDecorator_CheckWorldAlert : public UBTDecorator
 public:
 	UBTDecorator_CheckWorldAlert();
 
-	UPROPERTY(EditAnywhere, Category = "Condition")
-	float AlertThreshold = 67.f; // 예: 경계(Alerted) 단계 이상
+	// 0~100 퍼센트. AGuardAIController::GetWorldAlertLevel() 이 UAlertComponent 의
+	// 0~1 게이지를 퍼센트로 바꿔 돌려주므로 Alert.ini 의 단계 숫자를 그대로 쓰면 된다.
+	//   Calm 0~33 / Suspicious 34~66 / Alerted 67~99 / Alarm 100
+	UPROPERTY(EditAnywhere, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+	float AlertThreshold = 67.f; // 경계(Alerted) 단계 이상
 
 protected:
 	virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;

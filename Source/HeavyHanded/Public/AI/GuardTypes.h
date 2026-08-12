@@ -1,7 +1,12 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GuardTypes.generated.h"
+
+// 경비 AI 공통 로그 카테고리. 정의는 GuardAIController.cpp.
+// 이 경로는 실패해도 예외가 나지 않고 "가만히 서 있는다"로만 드러나므로,
+// 조용히 return 하는 지점마다 이유를 남긴다.
+DECLARE_LOG_CATEGORY_EXTERN(LogGuardAI, Log, All);
 
 // 경비 개체 종류. 동일 BT를 상속하되 서브트리·파라미터 분기에 사용한다.
 // GuardAIController::GuardType (UPROPERTY)로만 보관하며, Blackboard에는 복제하지 않는다.
