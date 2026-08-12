@@ -18,13 +18,13 @@ struct FRoomListData
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    FString RoomName;
+    FString RoomName="";
 
     UPROPERTY(BlueprintReadOnly)
-    int32 CurrentPlayers;
+    int32 CurrentPlayers=0;
 
     UPROPERTY(BlueprintReadOnly)
-    int32 MaxPlayers;
+    int32 MaxPlayers=0;
 
 
     FOnlineSessionSearchResult SessionResult;

@@ -12,50 +12,26 @@ void ATitlePlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (IOnlineSubsystem* OSS = IOnlineSubsystem::Get())
-    {
-        SessionInterface = OSS->GetSessionInterface();
+	if (IOnlineSubsystem* OSS = IOnlineSubsystem::Get())
+	{
+		SessionInterface = OSS->GetSessionInterface();
 		SessionDebug(TEXT("OSS"), OSS != nullptr);
-    }
+	}
 
 
-    // PlayerController 시작 시 현재 세션 상태 확인
-	// BeginPlay가 정상적으로 호출되었는지 확인
-	SessionDebug("===== TitlePlayerController BeginPlay =====", true);
-
-
-	//SessionInterface가 정상적으로 초기화되었는지 확인
-    //GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-    //    SessionInterface.IsValid()
-    //    ? TEXT("BeginPlay: SessionInterface OK")
-    //    : TEXT("BeginPlay: SessionInterface INVALID"));
-    //UE_LOG(LogTemp, Warning,
-    //    TEXT("BeginPlay: SessionInterface = %s"),
-    //    SessionInterface.IsValid() ? TEXT("OK") : TEXT("INVALID"));
 
 	SessionDebug("SessionInterface", SessionInterface.IsValid());
 	if (!SessionInterface.IsValid()) { return; }
 
 
-    const bool bCanCreateSession =
-        SessionInterface.IsValid() &&
-        SessionInterface->GetNamedSession(NAME_GameSession) == nullptr;
+	const bool bCanCreateSession =
+		SessionInterface.IsValid() &&
+		SessionInterface->GetNamedSession(NAME_GameSession) == nullptr;
 
-	//OnSessionDebug.Broadcast(TEXT("게임 세션 존재"),bHasSession);
-	//
-	//
-    //GEngine->AddOnScreenDebugMessage(-1, 5.0f,
-    //    bHasSession ? FColor::Red : FColor::Green,
-    //    bHasSession
-    //    ? TEXT("BeginPlay: GameSession EXISTS")
-    //    : TEXT("BeginPlay: GameSession NOT FOUND"));
-	//
-    //UE_LOG(LogTemp, Warning,
-    //    TEXT("BeginPlay: GameSession = %s"),
-    //    bHasSession ? TEXT("EXISTS") : TEXT("NOT FOUND"));
 
 
 	SessionDebug("BeginPlay: bCanCreateSession", bCanCreateSession);
+
 
 }
 
@@ -82,48 +58,14 @@ void ATitlePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATitlePlayerController::TitleCreateSession
     (const FString& RoomName, int maxPlayer, bool isPublic)
 {
-    IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
-	SessionDebug(TEXT("OSS"), OSS != nullptr);
+
+	// CreateSession 호출 여부 확인
+	SessionDebug(TEXT("TitleCreateSession ================="), true);
 
 
-    // CreateSession 호출 여부 확인
-    GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan,
-        TEXT("===== TitleCreateSession CALLED ====="));
-    UE_LOG(LogTemp, Warning, TEXT("===== TitleCreateSession CALLED ====="));
+	
 
 
-    //if (OSS)
-    //{
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("OSS = %s"),
-    //        *OSS->GetSubsystemName().ToString());
-	//
-	//	OnSessionDebug.Broadcast(TEXT("OSS"), true);
-    //}
-    //else
-    //{
-	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-	//		TEXT("OSS NULL"));
-    //    UE_LOG(LogTemp, Error, TEXT("OSS NULL"));
-	//	OnSessionDebug.Broadcast(TEXT("OSS"), false);
-    //}
-
-	SessionDebug("SessionInterface", SessionInterface.IsValid());
-	if (!SessionInterface.IsValid()) { return; }
-
-	//if (!SessionInterface.IsValid())
-	//{
-	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("SessionInterface = INVALID"));
-	//	OnSessionDebug.Broadcast(TEXT("SessionInterface = INVALID"), false);
-	//	UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
-	//	return;
-	//}
-	//else
-	//{
-	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("SessionInterface = VALID"));
-	//	OnSessionDebug.Broadcast(TEXT("SessionInterface = VALID"), true);
-	//	UE_LOG(LogTemp, Warning, TEXT("SessionInterface = VALID"));
-	//}
 
 
 
@@ -170,16 +112,16 @@ void ATitlePlayerController::TitleCreateSession
 
     
     // 비공개 방만 코드 생성
-    if (!isPublic)
-    {
-        FString RoomCode = GenerateRoomCode();
-
-        Settings.Set(
-            FName(TEXT("ROOM_CODE")),
-            RoomCode,
-            EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
-        );
-    }
+    // if (!isPublic)
+    // {
+    //     FString RoomCode = GenerateRoomCode();
+	// 
+    //     Settings.Set(
+    //         FName(TEXT("ROOM_CODE")),
+    //         RoomCode,
+    //         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
+    //     );
+    // }
     
 
 
@@ -448,16 +390,17 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
  		bool bHasRoomName = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_NAME")), RoomName);
 		SessionDebug(TEXT("ROOM_NAME Found"), bHasRoomName);
 
-		bool bHasRoomCode = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_CODE")), RoomCode);
-		SessionDebug(TEXT("ROOM_CODE Found"), bHasRoomCode);
+		//bool bHasRoomCode = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_CODE")), RoomCode);
+		//SessionDebug(TEXT("ROOM_CODE Found"), bHasRoomCode);
 
 
 
-        // 비공개 방 제외
-        if (bHasRoomCode)
-        {
-            continue;
-        }
+		//임시 제거
+        ///// // 비공개 방 제외
+        ///// if (bHasRoomCode)
+        ///// {
+        /////     continue;
+        ///// }
 
 
 		SessionDebug(FString::Printf(TEXT("Public Room Name = %s"), *RoomName), true);
@@ -477,8 +420,20 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
         NewRoom.SessionResult = Result;
 
 
+
+
         RoomList.Add(NewRoom);
         PublicSessionResults.Add(Result);
+
+
+		SessionDebug(FString::Printf(
+			TEXT("Players: %d / %d, Open: %d"),
+			Result.Session.SessionSettings.NumPublicConnections -
+			Result.Session.NumOpenPublicConnections,
+			Result.Session.SessionSettings.NumPublicConnections,
+			Result.Session.NumOpenPublicConnections
+		), true);
+
 
     } //for
 
@@ -665,7 +620,7 @@ void ATitlePlayerController::SessionDebug(const FString& Message, bool bSuccess)
 
 	OnSessionDebug.Broadcast(Message, bSuccess);
 
-	UE_LOG(LogTemp, Warning, TEXT("[SessionDebug] %s"), *Message);
+	//UE_LOG(LogTemp, Warning, TEXT("[SessionDebug] %s"), *Message);
 }
 
 void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
