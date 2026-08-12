@@ -5,25 +5,10 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Character/GuardCharacter.h"
+#include "AI/GuardBlackboardKeys.h"
 // TODO: 실제 GameState 클래스명 및 소속 폴더로 교체
 // (예: Core 폴더에 있다면 "Core/HeistGameState.h")
 // #include "Core/HeistGameState.h"
-
-namespace GuardAIKeys
-{
-	static const FName TargetActor(TEXT("TargetActor"));
-	static const FName LastKnownLocation(TEXT("LastKnownLocation"));
-	static const FName PatrolLocation(TEXT("PatrolLocation"));
-	static const FName CanSeeTarget(TEXT("CanSeeTarget"));
-	static const FName IsInAttackRange(TEXT("IsInAttackRange"));
-	static const FName SoundTargetActor(TEXT("SoundTargetActor"));
-	static const FName WanderLocation(TEXT("WanderLocation"));
-	static const FName DetectionGauge(TEXT("DetectionGauge"));
-	static const FName InvestigateLocation(TEXT("InvestigateLocation"));
-	static const FName SearchStartTime(TEXT("SearchStartTime"));
-	static const FName LastSeenTime(TEXT("LastSeenTime"));
-	static const FName HasLineOfFireOnTarget(TEXT("HasLineOfFireOnTarget"));
-}
 
 AGuardAIController::AGuardAIController()
 {

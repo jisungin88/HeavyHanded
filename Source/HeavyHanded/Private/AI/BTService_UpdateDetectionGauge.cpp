@@ -2,6 +2,7 @@
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AITypes.h"
+#include "AI/GuardBlackboardKeys.h"
 
 UBTService_UpdateDetectionGauge::UBTService_UpdateDetectionGauge()
 {
@@ -26,12 +27,12 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		return;
 	}
 
-	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(TEXT("CanSeeTarget"));
-	const float CurrentGauge = BlackboardComp->GetValueAsFloat(TEXT("DetectionGauge"));
+	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);
 
 	const float Delta = bCanSeeTarget ? (GaugeIncreaseRate * DeltaSeconds) : (-GaugeDecreaseRate * DeltaSeconds);
 	const float NewGauge = FMath::Clamp(CurrentGauge + Delta, 0.f, 100.f);
-	BlackboardComp->SetValueAsFloat(TEXT("DetectionGauge"), NewGauge);
+	BlackboardComp->SetValueAsFloat(GuardAIKeys::DetectionGauge, NewGauge);
 
 	// 게이지가 이번 틱에 막 100을 넘겼고(직전 틱엔 100 미만), 타겟이 안 보이는 상황이면
 	// "조사 시작 시각"을 기록한다. 이후엔 게이지 값과 무관하게 이 시각 기준으로만
@@ -44,11 +45,11 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	// "마지막으로 확실히 본 시점/위치"로 남는다.
 	if (bCanSeeTarget && NewGauge >= 100.f)
 	{
-		const FVector LastKnown = BlackboardComp->GetValueAsVector(TEXT("LastKnownLocation"));
+		const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
 		if (FAISystem::IsValidLocation(LastKnown))
 		{
-			BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), AIController->GetWorld()->GetTimeSeconds());
-			BlackboardComp->SetValueAsVector(TEXT("InvestigateLocation"), LastKnown);
+			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, AIController->GetWorld()->GetTimeSeconds());
+			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastKnown);
 		}
 	}
 

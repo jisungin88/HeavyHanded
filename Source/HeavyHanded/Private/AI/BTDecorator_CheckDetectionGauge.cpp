@@ -1,5 +1,6 @@
 ﻿#include "AI/BTDecorator_CheckDetectionGauge.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "AI/GuardBlackboardKeys.h"
 
 UBTDecorator_CheckDetectionGauge::UBTDecorator_CheckDetectionGauge()
 {
@@ -14,5 +15,5 @@ bool UBTDecorator_CheckDetectionGauge::CalculateRawConditionValue(UBehaviorTreeC
 		return false;
 	}
 
-	return BlackboardComp->GetValueAsFloat(TEXT("DetectionGauge")) >= GaugeThreshold;
+	return BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= GaugeThreshold;
 }
