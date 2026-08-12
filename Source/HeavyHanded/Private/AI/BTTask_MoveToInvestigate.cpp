@@ -3,6 +3,7 @@
 #include "AITypes.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "AI/GuardTypes.h"
 
 UBTTask_MoveToInvestigate::UBTTask_MoveToInvestigate()
 {
@@ -43,6 +44,8 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 
 	default:
 		// 경로를 못 냈다 - NavMesh 밖이거나 도달 불가능한 지점.
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] 조사 지점 %s 로 경로를 내지 못했다 (NavMesh 밖?)."),
+			*GetNameSafe(AIController->GetPawn()), *InvestigateLocation.ToCompactString());
 		return EBTNodeResult::Failed;
 	}
 }

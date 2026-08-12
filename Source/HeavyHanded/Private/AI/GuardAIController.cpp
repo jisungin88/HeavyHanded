@@ -10,6 +10,8 @@
 // (예: Core 폴더에 있다면 "Core/HeistGameState.h")
 // #include "Core/HeistGameState.h"
 
+DEFINE_LOG_CATEGORY(LogGuardAI);
+
 AGuardAIController::AGuardAIController()
 {
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
@@ -41,11 +43,22 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 	if (!IsValid(BehaviorTreeAsset))
 	{
+		UE_LOG(LogGuardAI, Error,
+			TEXT("[%s] BehaviorTreeAsset 이 비어 있다. BT 시작과 Perception 바인딩을 모두 건너뛴다. "
+				 "BP_GuardAIController 의 Guard|AI > Behavior Tree Asset 을 확인할 것."),
+			*GetNameSafe(InPawn));
 		return;
 	}
 
 	UBlackboardComponent* BlackboardComp = nullptr;
 	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
+
+	if (!IsValid(BlackboardComp))
+	{
+		UE_LOG(LogGuardAI, Error,
+			TEXT("[%s] Blackboard 생성 실패. BT_Guards 에 Blackboard Asset 이 물려 있는지 확인할 것."),
+			*GetNameSafe(InPawn));
+	}
 
 	// SearchStartTime/LastSeenTime 기본값이 0.0이면, 게임 시작 직후 몇 초 동안
 	// "한 번도 감지 안 했는데 타임아웃 조건이 우연히 참"이 되는 문제가 생길 수 있다.
@@ -91,6 +104,12 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
+		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 %s: %s"),
+			*GetNameSafe(GetPawn()),
+			Stimulus.WasSuccessfullySensed() ? TEXT("획득") : TEXT("상실"),
+			*GetNameSafe(Actor));
+
 		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
 		if (Stimulus.WasSuccessfullySensed())
 		{
@@ -138,9 +157,27 @@ void AGuardAIController::SelectNextPatrolPoint()
 	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
 	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
 
-	const int32 PointCount = IsValid(GuardPawn) ? GuardPawn->GetPatrolPointCount() : 0;
-	if (!IsValid(GuardPawn) || !IsValid(BlackboardComp) || PointCount == 0)
+	if (!IsValid(GuardPawn))
 	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] AGuardCharacter 가 아니라 순찰 지점을 읽을 수 없다 (현재 폰: %s)."),
+			*GetName(), *GetNameSafe(GetPawn()));
+		return;
+	}
+
+	if (!IsValid(BlackboardComp))
+	{
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Blackboard 가 없어 PatrolLocation 을 쓸 수 없다."), *GetName());
+		return;
+	}
+
+	const int32 PointCount = GuardPawn->GetPatrolPointCount();
+	if (PointCount == 0)
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] PatrolPoints 가 비어 있다. EditInstanceOnly 라 레벨에 '배치된' 액터에만 값이 붙는다 "
+				 "— 스폰된 경비라면 여기서 항상 비어 있다."),
+			*GetNameSafe(GuardPawn));
 		return;
 	}
 
@@ -200,5 +237,16 @@ void AGuardAIController::SelectNextPatrolPoint()
 	if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, NextLocation))
 	{
 		BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, NextLocation);
+
+		// 정상 동작이면 순찰 지점에 도착할 때마다 한 번씩만 찍힌다.
+		// 초당 수십 줄이 쏟아진다면 브랜치가 abort/restart 를 반복하고 있다는 뜻이다.
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 순찰 지점 %d 선택: %s"),
+			*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString());
+	}
+	else
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] 순찰 지점 %d 의 위치를 얻지 못했다 (배열 항목이 비어 있는지 확인)."),
+			*GetNameSafe(GuardPawn), CurrentPatrolIndex);
 	}
 }
