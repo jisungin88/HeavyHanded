@@ -30,8 +30,18 @@ public:
 
 	// 다음 순찰 지점을 골라 Blackboard의 PatrolLocation에 써넣는다.
 	// Patrol 브랜치 진입 시 BTTask_SelectNextPatrolPoint가 호출한다.
+	//
+	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않고 그대로 유지한다.
+	// 이 함수는 브랜치에 진입할 때마다 불리는데, 시야 획득/상실로 순찰이
+	// abort 됐다 재개될 때마다 지점을 건너뛰면 순찰 경로가 망가진다.
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	void SelectNextPatrolPoint();
+
+	// 이 거리(2D) 안이면 현재 순찰 지점에 도착한 것으로 본다.
+	// BT 의 Move To 노드 Acceptable Radius 보다 조금 크게 잡을 것 —
+	// 작으면 도착 판정이 안 나 같은 지점을 무한히 다시 지정한다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Patrol", meta = (ClampMin = "0.0", Units = "cm"))
+	float PatrolArrivalRadius = 120.f;
 
 protected:
 	virtual void OnPossess(APawn* InPawn) override;

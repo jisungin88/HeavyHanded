@@ -184,6 +184,28 @@ void AGuardAIController::SelectNextPatrolPoint()
 		return;
 	}
 
+	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않는다.
+	//
+	// 이 함수는 순찰 브랜치에 진입할 때마다 호출되는데, 시야 획득으로 순찰이
+	// abort 되고 상실 후 재개되는 것도 "새 진입"이다. 진입마다 전진시키면
+	// 경비가 플레이어를 한 번 볼 때마다 순찰 지점을 하나씩 건너뛴다.
+	if (CurrentPatrolIndex >= 0)
+	{
+		FVector CurrentTarget;
+		if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, CurrentTarget))
+		{
+			// Z 는 무시한다 - 지점 액터가 바닥에서 떠 있어도 도착 판정이 되도록.
+			const float DistToCurrent = FVector::Dist2D(GuardPawn->GetActorLocation(), CurrentTarget);
+			if (DistToCurrent > PatrolArrivalRadius)
+			{
+				// 가던 길을 계속 간다. Blackboard 값은 다시 써준다 —
+				// 조사 브랜치를 거치는 동안 다른 값으로 덮였을 수 있다.
+				BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, CurrentTarget);
+				return;
+			}
+		}
+	}
+
 	// 첫 호출(-1)은 항상 0번 지점에서 시작.
 	if (CurrentPatrolIndex < 0)
 	{
