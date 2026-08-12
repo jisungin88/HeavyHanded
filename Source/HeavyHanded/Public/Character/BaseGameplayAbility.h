@@ -4,7 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Abilities/GameplayAbility.h"
+#include "HAL/IConsoleManager.h"
 #include "BaseGameplayAbility.generated.h"
+
+#if ENABLE_DRAW_DEBUG
+// [디버그 전용] 어빌리티 시각화 스위치. 정의는 BaseGameplayAbility.cpp 참조.
+extern TAutoConsoleVariable<int32> CVarAbilityDebug;
+#endif
 
 /**
  * 

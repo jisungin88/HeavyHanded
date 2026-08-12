@@ -60,15 +60,21 @@ void UGAB_Interact::PerformInteraction()
         QueryParams
     );
 
-    DrawDebugSphere(GetWorld(), StartLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
-    DrawDebugSphere(GetWorld(), EndLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
-    DrawDebugLine(GetWorld(), StartLocation, bHit ? HitResult.Location : EndLocation,
-        bHit ? FColor::Green : FColor::Red, false, 2.0f, 0, 1.5f);
-  
-    if (bHit)
+#if ENABLE_DRAW_DEBUG
+    // [디버그 전용] 상호작용 스윕 시각화. hh.Ability.Debug 1
+    if (CVarAbilityDebug.GetValueOnGameThread() > 0)
     {
-        DrawDebugSphere(GetWorld(), HitResult.Location, 10.0f, 12, FColor::Blue, false, 2.0f);
+        DrawDebugSphere(GetWorld(), StartLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
+        DrawDebugSphere(GetWorld(), EndLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
+        DrawDebugLine(GetWorld(), StartLocation, bHit ? HitResult.Location : EndLocation,
+            bHit ? FColor::Green : FColor::Red, false, 2.0f, 0, 1.5f);
+
+        if (bHit)
+        {
+            DrawDebugSphere(GetWorld(), HitResult.Location, 10.0f, 12, FColor::Blue, false, 2.0f);
+        }
     }
+#endif
 
     if (bHit && HitResult.GetActor())
     {

@@ -8,6 +8,21 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 
+#if ENABLE_DRAW_DEBUG
+// ──────────────────────────────────────────────────────────────
+// [디버그 전용] 시각화 스위치
+//
+// ECVF_Cheat 라 쉬핑 빌드에서는 콘솔로 켤 수 없고,
+// ENABLE_DRAW_DEBUG 가 0이면 그리기 코드 자체가 컴파일에서 빠진다.
+// 게임 로직이 이 값을 읽어서는 안 된다 — 빌드 구성에 따라 동작이 달라진다.
+// ──────────────────────────────────────────────────────────────
+TAutoConsoleVariable<int32> CVarAbilityDebug(
+	  TEXT("hh.Ability.Debug"),
+	  0,
+	  TEXT("0 = 끔, 1 = 상호작용 스윕, 2 = + 던지기 궤적"),
+	  ECVF_Cheat);
+#endif
+
 UBaseGameplayAbility::UBaseGameplayAbility()
 {
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;

@@ -4,6 +4,7 @@
 #include "Character/Ability/GAB_Throw.h"
 #include "Character/BaseCharacter.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 UGAB_Throw::UGAB_Throw()
 {
@@ -27,8 +28,11 @@ void UGAB_Throw::ActivateAbility(
 		return;
 	}
 
-	// 꾹 누르고 있는 동안 궤적을 실시간으로 그려줄 타이머 시작 (클라이언트/서버 공통 차징 연출)
-	if (UWorld* World = GetWorld())
+	// 꾹 누르고 있는 동안 궤적을 실시간으로 그려줄 타이머 시작.
+	// 미리보기는 조준하는 본인 화면에만 필요하므로, 데디케이티드 서버와
+	// 원격 프록시에서는 타이머 자체를 돌리지 않는다.
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() != NM_DedicatedServer && Character->IsLocallyControlled())
 	{
 		World->GetTimerManager().SetTimer(
 			TrajectoryUpdateTimerHandle,
@@ -96,6 +100,14 @@ void UGAB_Throw::InputReleased(
 
 void UGAB_Throw::UpdateTrajectoryPreview()
 {
+#if ENABLE_DRAW_DEBUG
+	// [디버그 전용] 던지기 궤적 시각화. hh.Ability.Debug 2
+	// 꺼져 있으면 경로 예측 계산까지 통째로 건너뛴다.
+	if (CVarAbilityDebug.GetValueOnGameThread() < 2)
+	{
+		return;
+	}
+
 	ACharacter* Character = Cast<ACharacter>(GetAvatarActorFromActorInfo());
 	if (!Character)
 	{
@@ -142,6 +154,7 @@ void UGAB_Throw::UpdateTrajectoryPreview()
 	{
 		DrawDebugSphere(World, Result.HitResult.Location, 12.0f, 12, FColor::Red, false, TrajectoryUpdateInterval);
 	}
+#endif   // ENABLE_DRAW_DEBUG
 }
 
 void UGAB_Throw::ClearTrajectoryPreview()
