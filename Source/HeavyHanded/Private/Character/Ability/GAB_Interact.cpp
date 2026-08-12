@@ -5,6 +5,54 @@
 #include "DrawDebugHelpers.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Character/BaseCharacter.h"
+#include "GameplayTagAssetInterface.h"
+#include "GameplayTagContainer.h"
+
+namespace
+{
+	// 노획물 판정은 Loot.Type 하위 태그로 한다 — Config/Tags/Loot.ini (담당: 김민준).
+	// HasTag 는 부모 매칭이라 Loot.Type.Heavy 등 하위 태그가 전부 걸린다.
+	const FName LootTypeRootTagName(TEXT("Loot.Type"));
+
+	// TODO(임시 폴백): 김민준의 ALootBase / ICarryable 이 develop 에 머지되면 제거한다.
+	//   현재 프로젝트에는 IGameplayTagAssetInterface 를 구현한 액터가 하나도 없어서
+	//   (Source/HeavyHanded/*/Loot/ 는 .gitkeep 뿐) GameplayTag 판정만 남기면
+	//   테스트 맵에서 아무것도 집히지 않는다.
+	const FName LegacyItemActorTagName(TEXT("Item"));
+
+	// TODO: 문 상호작용은 오유석 담당 영역이고 대응 GameplayTag 가 아직 없다.
+	//   (Hazard.Cycle.FireDoor 는 방화문 전용이라 일반 문에는 못 쓴다)
+	const FName LegacyDoorActorTagName(TEXT("Door"));
+
+	// 집을 수 있는 노획물인지 판정
+	bool IsCarryableLoot(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		if (const IGameplayTagAssetInterface* TagOwner = Cast<const IGameplayTagAssetInterface>(Actor))
+		{
+			// 태그 매니저 초기화 이후에 조회해야 하므로 정적 초기화로 캐싱하지 않는다
+			const FGameplayTag LootTypeRoot =
+				FGameplayTag::RequestGameplayTag(LootTypeRootTagName, /*ErrorIfNotFound*/ false);
+
+			if (LootTypeRoot.IsValid())
+			{
+				FGameplayTagContainer OwnedTags;
+				TagOwner->GetOwnedGameplayTags(OwnedTags);
+
+				if (OwnedTags.HasTag(LootTypeRoot))
+				{
+					return true;
+				}
+			}
+		}
+
+		return Actor->ActorHasTag(LegacyItemActorTagName);
+	}
+}
 
 UGAB_Interact::UGAB_Interact()
 {
@@ -80,8 +128,8 @@ void UGAB_Interact::PerformInteraction()
     {
         AActor* HitActor = HitResult.GetActor();
 
-        // 1. "Item" 태그가 붙어있는 경우
-        if (HitActor->ActorHasTag(FName("Item")))
+        // 1. 집을 수 있는 노획물인 경우 (Loot.Type 하위 태그)
+        if (IsCarryableLoot(HitActor))
         {
             UE_LOG(LogTemp, Log, TEXT("Item Get: %s"), *HitActor->GetName());
 
@@ -106,8 +154,8 @@ void UGAB_Interact::PerformInteraction()
                 UE_LOG(LogTemp, Warning, TEXT("Item ded"));
             }
         }
-        // 2. "Door" 태그가 붙어있는 경우
-        else if (HitActor->ActorHasTag(FName("Door")))
+        // 2. "Door" 태그가 붙어있는 경우 (아직 GameplayTag 대응 없음 — 위 TODO 참조)
+        else if (HitActor->ActorHasTag(LegacyDoorActorTagName))
         {
             UE_LOG(LogTemp, Log, TEXT("Door Open/Close: %s"), *HitActor->GetName());
         }
