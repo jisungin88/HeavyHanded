@@ -5,6 +5,7 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Character/GuardCharacter.h"
+#include "Noise/PerceptionMeterComponent.h"
 // TODO: 실제 GameState 클래스명 및 소속 폴더로 교체
 // (예: Core 폴더에 있다면 "Core/HeistGameState.h")
 // #include "Core/HeistGameState.h"
@@ -60,9 +61,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	UBlackboardComponent* BlackboardComp = nullptr;
 	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
 
-	// SearchStartTime/LastSeenTime 기본값이 0.0이면, 게임 시작 직후 몇 초 동안
-	// "한 번도 감지 안 했는데 타임아웃 조건이 우연히 참"이 되는 문제가 생길 수 있다.
-	// 아주 먼 과거 값으로 초기화해 실제로 감지되기 전까지는 항상 타임아웃이 만료된 상태로 둔다.
 	if (IsValid(BlackboardComp))
 	{
 		constexpr float FarPast = -100000.f;
@@ -70,17 +68,27 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 		BlackboardComp->SetValueAsFloat(TEXT("LastSeenTime"), FarPast);
 	}
 
-	// SelfActor / GuardType / AIState는 더 이상 Blackboard에 두지 않는다.
-	// - Self는 OwnerComp.GetAIOwner()->GetPawn()으로 즉시 조회 가능
-	// - GuardType은 이 컨트롤러의 UPROPERTY(GuardType)를 Cast<AGuardAIController>로 직접 참조
-	// - 상태(Patrol/Investigate/Pursue)는 BT의 어느 브랜치가 실행 중인지 자체로 표현 (Decorator가 CanSeeTarget/DetectionGauge를 직접 판정)
-
 	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
 
-	// 시작 시 첫 순찰 지점을 미리 채워둔다 (비어있는 채로 Move To가 실행되는 것을 방지).
+	// ↓↓↓ 여기에 새로 추가 (지난번 작업에서 이미 넣으신 그 블록 바로 여기) ↓↓↓
+	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn))
+	{
+		if (UPerceptionMeterComponent* Meter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>())
+		{
+			Meter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
+			UE_LOG(LogTemp, Warning, TEXT("PerceptionMeter bound successfully!"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("PerceptionMeter component NOT FOUND on GuardPawn!"));
+		}
+	}
+	// ↑↑↑ 여기까지 ↑↑↑
+
+	// 시작 시 첫 순찰 지점을 미리 채워둔다
 	SelectNextPatrolPoint();
 
-	// RunBehaviorTree(BehaviorTreeAsset);
+	RunBehaviorTree(BehaviorTreeAsset);
 }
 
 void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
@@ -123,6 +131,30 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
 			BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), GetWorld()->GetTimeSeconds());
 		}
+	}
+}
+
+void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
+{
+	//GuardAIController.cpp의 HandlePerceptionFull 함수 맨 위에 임시 로그 추가:
+	UE_LOG(LogTemp, Warning, TEXT("HandlePerceptionFull CALLED! Location: %s"), *LastNoiseLocation.ToString());
+
+	// 인지 게이지 판정은 서버 권위이므로 이 콜백도 서버에서만 의미가 있다 (OnTargetPerceptionUpdated와 동일한 이유)
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
+	{
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastNoiseLocation);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+	}
+
+	// 리셋하지 않으면 래치가 풀리지 않아 경비가 영원히 100%에 박힌다 (PerceptionMeterComponent.h 참고)
+	if (PerceptionMeter)
+	{
+		PerceptionMeter->ResetPerception();
 	}
 }
 

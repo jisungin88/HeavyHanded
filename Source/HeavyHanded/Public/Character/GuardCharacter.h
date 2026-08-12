@@ -5,12 +5,16 @@
 #include "AI/GuardTypes.h"
 #include "GuardCharacter.generated.h"
 
+class UPerceptionMeterComponent;
+
 UCLASS()
 class AGuardCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
 public:
+	AGuardCharacter();
+
 	// 레벨에 배치된 경비 인스턴스마다 서로 다른 순찰 경로를 지정할 수 있도록
 	// EditInstanceOnly로 노출한다 (블루프린트 기본값이 아니라, 레벨의 각 배치본에서 직접 설정).
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Guard|Patrol")
@@ -27,4 +31,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
+
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
+
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
 };

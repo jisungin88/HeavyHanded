@@ -10,6 +10,7 @@ class UBlackboardComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 class UAISenseConfig_Hearing;
+class UPerceptionMeterComponent;
 class AActor;
 
 UCLASS()
@@ -40,12 +41,21 @@ protected:
 	UFUNCTION()
 	void OnTargetPerceptionUpdated(AActor* Actor, struct FAIStimulus Stimulus);
 
+	// UPerceptionMeterComponent::OnPerceptionFull 콜백. 인지 게이지가 100%에 도달하면
+	// 마지막 소음 지점으로 조사를 시작하도록 Blackboard를 갱신하고 게이지를 리셋한다.
+	UFUNCTION()
+	void HandlePerceptionFull(FVector LastNoiseLocation);
+
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|AI")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
 private:
 	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
+
+	// OnPossess 때 빙의한 폰에서 가져와 바인딩해 둔다. HandlePerceptionFull 에서 ResetPerception 에 쓴다
+	UPROPERTY()
+	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
 
 	// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
 	int32 CurrentPatrolIndex = -1;
