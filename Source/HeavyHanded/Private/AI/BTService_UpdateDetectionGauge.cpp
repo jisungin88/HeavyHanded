@@ -30,29 +30,49 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);
+	const float Now = AIController->GetWorld()->GetTimeSeconds();
 
-	// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
-	// 플레이어가 거리를 두고 움직일 이유가 없어진다.
-	const float RateMultiplier = bCanSeeTarget ? GetDistanceRateMultiplier(*AIController, *BlackboardComp) : 1.f;
+	// 감소 유예 판정은 반드시 LastSeenTime 을 갱신하기 "전에" 한다.
+	//
+	// 유예가 없으면 시야가 끊기는 순간 게이지가 100 아래로 떨어져
+	// Check Detection Gauge 가 먼저 무너지고, 추격 유예(LastSeenTime 기준)가
+	// 판정에 개입할 틈이 없다. 유예 동안 게이지를 100 에 붙들어두면
+	// 추격 종료 시점을 Check Search Timeout 이 온전히 결정한다.
+	const float TimeSinceLastSeen = Now - BlackboardComp->GetValueAsFloat(GuardAIKeys::LastSeenTime);
+	const bool bInDecayGrace = !bCanSeeTarget && (TimeSinceLastSeen < DecayGraceSeconds);
 
-	const float Delta = bCanSeeTarget
-		? (GaugeIncreaseRate * RateMultiplier * DeltaSeconds)
-		: (-GaugeDecreaseRate * DeltaSeconds);
+	float Delta = 0.f;
+	if (bCanSeeTarget)
+	{
+		// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
+		// 플레이어가 거리를 두고 움직일 이유가 없어진다.
+		Delta = GaugeIncreaseRate * GetDistanceRateMultiplier(*AIController, *BlackboardComp) * DeltaSeconds;
+	}
+	else if (!bInDecayGrace)
+	{
+		Delta = -GaugeDecreaseRate * DeltaSeconds;
+	}
+	// 유예 중에는 Delta = 0 - 게이지를 그대로 유지한다.
+
 	const float NewGauge = FMath::Clamp(CurrentGauge + Delta, 0.f, 100.f);
 	BlackboardComp->SetValueAsFloat(GuardAIKeys::DetectionGauge, NewGauge);
 
-	// 보고 있는 동안 "마지막으로 본 시각"을 계속 밀어준다.
+	// 보고 있는 동안 "마지막으로 본 시각/위치"를 계속 밀어준다.
 	//
 	// OnTargetPerceptionUpdated 는 지각 상태가 바뀔 때만 발화하므로, 계속 보고 있어도
-	// LastSeenTime 은 획득 순간 한 번만 기록되고 멈춘다. 그러면 추격 브랜치의
-	// Check Search Timeout(1.5초)이 게이지가 차기(2.5초)도 전에 만료되어 추격 조건이
-	// 영원히 성립하지 않는다. 갱신 주체는 매 틱 도는 이 서비스여야 한다.
+	// 이 값들은 획득 순간 한 번만 기록되고 멈춘다. 갱신 주체는 매 틱 도는 이 서비스다.
 	//
-	// 시야를 잃는 순간 갱신이 멈추면서 값이 그대로 얼어붙고, 그 시점부터 1.5초의
-	// 유예가 흐른다 - 데코레이터가 원래 의도한 동작이 그때 성립한다.
+	// 시야를 잃는 순간 갱신이 멈추면서 값이 그 자리에 얼어붙는다. 추격 브랜치가
+	// TargetActor 대신 LastKnownLocation 으로 이동하면, 보이는 동안은 실시간 추적과
+	// 같고 놓친 뒤에는 마지막으로 본 자리까지만 가게 된다 - 벽 너머를 꿰뚫어보지 않는다.
 	if (bCanSeeTarget)
 	{
-		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, AIController->GetWorld()->GetTimeSeconds());
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, Now);
+
+		if (const AActor* Target = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)))
+		{
+			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Target->GetActorLocation());
+		}
 	}
 
 	// 임계값 통과는 상태 전환점이라 한 번씩만 남긴다 (매 틱 로그는 의미가 없다).
@@ -78,7 +98,7 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
 		if (FAISystem::IsValidLocation(LastKnown))
 		{
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, AIController->GetWorld()->GetTimeSeconds());
+			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, Now);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastKnown);
 		}
 	}

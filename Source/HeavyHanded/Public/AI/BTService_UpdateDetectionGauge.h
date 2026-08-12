@@ -23,6 +23,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Detection")
 	float GaugeDecreaseRate = 15.f; // 초당 감소량 (반경 이탈 시). 거리 무관.
 
+	// 시야를 잃어도 이 시간 동안은 게이지를 유지한다(감소 시작을 미룬다).
+	//
+	// 없으면 시야가 끊기는 즉시 게이지가 임계값 아래로 떨어져 Check Detection Gauge 가
+	// 먼저 무너지고, 추격 유예(Check Search Timeout, LastSeenTime 기준)가 판정에
+	// 개입할 틈이 없다. 추격 유예와 같거나 조금 크게 두는 것이 자연스럽다.
+	UPROPERTY(EditAnywhere, Category = "Detection", meta = (ClampMin = "0.0", Units = "s"))
+	float DecayGraceSeconds = 4.f;
+
 	// --- 거리에 따른 포착 속도 ---
 	// 상승량에만 곱해진다. NearDistance 이내는 NearRateMultiplier 고정,
 	// FarDistance 이상은 FarRateMultiplier 고정, 그 사이는 선형 보간.
