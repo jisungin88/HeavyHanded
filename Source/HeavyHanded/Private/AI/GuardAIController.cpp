@@ -105,10 +105,32 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
 		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 %s: %s"),
-			*GetNameSafe(GetPawn()),
-			Stimulus.WasSuccessfullySensed() ? TEXT("획득") : TEXT("상실"),
-			*GetNameSafe(Actor));
+		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
+		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
+		const float NowSeconds = GetWorld()->GetTimeSeconds();
+
+		if (Stimulus.WasSuccessfullySensed())
+		{
+			if (SightLostAtTime >= 0.f)
+			{
+				UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (직전 상실이 %.2f초 지속)"),
+					*GetNameSafe(GetPawn()), *GetNameSafe(Actor), NowSeconds - SightLostAtTime);
+			}
+			else
+			{
+				UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (최초)"),
+					*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
+			}
+
+			SightLostAtTime = -1.f;
+		}
+		else
+		{
+			SightLostAtTime = NowSeconds;
+
+			UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 상실: %s"),
+				*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
+		}
 
 		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
 		if (Stimulus.WasSuccessfullySensed())

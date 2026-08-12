@@ -97,6 +97,10 @@ private:
 	// 음수는 "아직 한 번도 고른 적 없음".
 	float LastPatrolSelectTime = -1.f;
 
+	// 진단용. 시야를 잃은 시각. 되찾을 때 상실이 몇 초 지속됐는지 찍는다.
+	// 음수는 "현재 상실 상태가 아님".
+	float SightLostAtTime = -1.f;
+
 	// 이번 조사에서 지금까지 고른 지점 수. 0 = 마지막 목격 지점 자체.
 	// -1 은 "이번 조사에서 아직 아무것도 고르지 않음".
 	int32 CurrentSearchStep = -1;
