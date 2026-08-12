@@ -349,83 +349,179 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(ABaseCharacter, HeldActor);
 }
 
-void ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
+bool ABaseCharacter::CanCarryActor(const AActor* Target) const
 {
-    // 운반 상태의 소유권은 서버에 있다. 클라이언트가 직접 바꾸면
-    // 다음 복제 때 덮어써지면서 물리 상태만 어긋난다.
-    if (!HasAuthority() || HeldActor == NewHeldActor)
+    if (!IsValid(Target))
+    {
+        return false;
+    }
+
+    const USceneComponent* Root = Target->GetRootComponent();
+    if (!Root)
+    {
+        UE_LOG(LogCarry, Warning, TEXT("%s 에 루트 컴포넌트가 없어 운반할 수 없다."), *GetNameSafe(Target));
+        return false;
+    }
+
+    // Static 모빌리티 컴포넌트는 Movable 부모에 붙일 수 없고 물리도 켤 수 없다.
+    if (Root->Mobility != EComponentMobility::Movable)
+    {
+        UE_LOG(LogCarry, Warning,
+            TEXT("%s 의 Mobility 가 Movable 이 아니라 운반할 수 없다. "
+                 "레벨에서 해당 액터의 Transform > Mobility 를 Movable 로 바꿀 것."),
+            *GetNameSafe(Target));
+        return false;
+    }
+
+    // 방금 내가 던진 물건은 잠깐 못 잡는다. 던지고 곧바로 낚아채는 반복으로
+    // 중량형의 2인 필수 규칙과 착지 소음·파손 판정을 우회하는 것을 막는다.
+    if (Target == RecentlyThrownActor && RecentlyThrownTime >= 0.f)
+    {
+        const float Elapsed = GetWorld()->GetTimeSeconds() - RecentlyThrownTime;
+        if (Elapsed < RecatchBlockSeconds)
+        {
+            UE_LOG(LogCarry, Log,
+                TEXT("%s 는 방금 던진 물건이라 %.2f초 뒤에야 다시 잡을 수 있다."),
+                *GetNameSafe(Target), RecatchBlockSeconds - Elapsed);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void ABaseCharacter::BlockRecatch(AActor* ThrownActor)
+{
+    if (!HasAuthority() || !IsValid(ThrownActor))
     {
         return;
     }
 
-    AActor* PreviousHeldActor = HeldActor;
-    HeldActor = NewHeldActor;
+    RecentlyThrownActor = ThrownActor;
+    RecentlyThrownTime = GetWorld()->GetTimeSeconds();
+}
 
-    if (IsValid(NewHeldActor))
+void ABaseCharacter::ApplyCarryState(AActor* Target, bool bCarried)
+{
+    if (!IsValid(Target))
     {
-        UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
-            *GetNameSafe(NewHeldActor),
-            NewHeldActor->GetIsReplicated() ? TEXT("O") : TEXT("X"),
-            NewHeldActor->IsReplicatingMovement() ? TEXT("O") : TEXT("X"));
+        return;
+    }
 
-        // 복제되지 않는 액터는 클라이언트에서 HeldActor 참조 자체가 풀리지 않는다.
-        // OnRep 이 null 을 받게 되어 물리 게이팅도 부착도 일어나지 않는다.
-        if (!NewHeldActor->GetIsReplicated())
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+
+    if (bCarried)
+    {
+        // 순서가 중요하다. 물리를 먼저 끄지 않으면 부착이 거부된다 —
+        // 런타임에는 시뮬레이션 중인 바디를 웰드 없이 붙일 수 없다
+        // (엔진 SceneComponent.cpp:2151, 이중 트랜스폼 갱신 방지).
+        // 던진 직후의 아이템이 다시 집히지 않던 원인이 이것이었다.
+        if (PrimComp)
         {
-            UE_LOG(LogCarry, Warning,
-                TEXT("[서버] %s 는 복제되지 않는 액터다. 클라이언트에서는 손에 붙지 않는다 — "
-                     "해당 블루프린트의 Class Defaults > Replication > Replicates 를 켤 것."),
-                *GetNameSafe(NewHeldActor));
+            PrimComp->SetSimulatePhysics(false);
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
+
+        Target->AttachToComponent(
+            GetMesh(),
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+            CarrySocketName);
     }
     else
     {
+        Target->DetachFromActor(FDetachmentTransformRules(EDetachmentRule::KeepWorld, true));
+
+        if (PrimComp)
+        {
+            // 콜리전을 먼저 켜야 물리 바디가 올바른 상태로 깨어난다
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            PrimComp->SetSimulatePhysics(true);
+        }
+    }
+}
+
+bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
+{
+    // 운반 상태의 소유권은 서버에 있다. 클라이언트가 직접 바꾸면
+    // 다음 복제 때 덮어써지면서 물리 상태만 어긋난다.
+    if (!HasAuthority())
+    {
+        return false;
+    }
+
+    if (HeldActor == NewHeldActor)
+    {
+        return true;
+    }
+
+    // 들고 있던 것을 먼저 놓는다.
+    if (AActor* PreviousHeldActor = HeldActor)
+    {
+        ApplyCarryState(PreviousHeldActor, false);
         UE_LOG(LogCarry, Log, TEXT("[서버] 운반 해제: %s"), *GetNameSafe(PreviousHeldActor));
     }
 
-    // 서버는 OnRep 이 호출되지 않으므로 같은 처리를 직접 해준다
-    ApplyCarryPhysicsState(PreviousHeldActor, false);
-    ApplyCarryPhysicsState(HeldActor, true);
+    HeldActor = nullptr;
+
+    if (!NewHeldActor)
+    {
+        return true;
+    }
+
+    if (!CanCarryActor(NewHeldActor))
+    {
+        return false;
+    }
+
+    ApplyCarryState(NewHeldActor, true);
+
+    // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
+    // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
+    // 그 상태로 던지면 엉뚱한 곳에 임펄스가 들어간다.
+    const USceneComponent* NewRoot = NewHeldActor->GetRootComponent();
+    if (!NewRoot || NewRoot->GetAttachParent() != GetMesh())
+    {
+        UE_LOG(LogCarry, Warning,
+            TEXT("[서버] %s 부착에 실패해 운반 상태로 넘기지 않는다. (직전 AttachTo 경고 확인)"),
+            *GetNameSafe(NewHeldActor));
+
+        // 물리를 되돌려 원래 상태로 남긴다.
+        ApplyCarryState(NewHeldActor, false);
+        return false;
+    }
+
+    HeldActor = NewHeldActor;
+
+    UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
+        *GetNameSafe(NewHeldActor),
+        NewHeldActor->GetIsReplicated() ? TEXT("O") : TEXT("X"),
+        NewHeldActor->IsReplicatingMovement() ? TEXT("O") : TEXT("X"));
+
+    // 복제되지 않는 액터는 클라이언트에서 HeldActor 참조 자체가 풀리지 않는다.
+    if (!NewHeldActor->GetIsReplicated())
+    {
+        UE_LOG(LogCarry, Warning,
+            TEXT("[서버] %s 는 복제되지 않는 액터다. 클라이언트에서는 손에 붙지 않는다 — "
+                 "해당 액터의 Replicates(StaticMeshActor 는 Static Mesh Replicate Movement)를 켤 것."),
+            *GetNameSafe(NewHeldActor));
+    }
+
+    return true;
 }
 
 void ABaseCharacter::OnRep_HeldActor(AActor* PreviousHeldActor)
 {
-    // 여기서 HeldActor 가 null 이면 참조가 풀리지 않은 것 = 아이템이 복제되지 않는다.
-    // 참조는 풀렸는데 부착 부모가 비어 있으면 AttachmentReplication 이 도착하지 않은 것이다.
+    // 클라이언트도 서버와 똑같은 순서를 다시 밟는다.
+    // 엔진의 AttachmentReplication 에 기대지 않는다 — 캐릭터와 아이템은 서로 다른
+    // 액터 채널이라 도착 순서가 보장되지 않고, 부착이 먼저 오면 그 시점엔 아직
+    // 물리가 켜져 있어 부착이 거부될 수 있다.
+    ApplyCarryState(PreviousHeldActor, false);
+    ApplyCarryState(HeldActor, true);
+
     const USceneComponent* HeldRoot = IsValid(HeldActor) ? HeldActor->GetRootComponent() : nullptr;
 
     UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_HeldActor: %s -> %s | 부착 부모=%s"),
         *GetNameSafe(PreviousHeldActor),
         *GetNameSafe(HeldActor),
         HeldRoot ? *GetNameSafe(HeldRoot->GetAttachParent()) : TEXT("(루트 없음/참조 안 풀림)"));
-
-    ApplyCarryPhysicsState(PreviousHeldActor, false);
-    ApplyCarryPhysicsState(HeldActor, true);
-}
-
-void ABaseCharacter::ApplyCarryPhysicsState(AActor* Target, bool bCarried)
-{
-    if (!Target)
-    {
-        return;
-    }
-
-    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Target->GetRootComponent());
-    if (!PrimComp)
-    {
-        return;
-    }
-
-    if (bCarried)
-    {
-        // 손에 붙는 동안은 물리를 멈추고 트레이스에서도 빠진다
-        PrimComp->SetSimulatePhysics(false);
-        PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    }
-    else
-    {
-        // 콜리전을 먼저 켜야 물리 바디가 올바른 상태로 깨어난다
-        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        PrimComp->SetSimulatePhysics(true);
-    }
 }

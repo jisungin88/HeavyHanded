@@ -22,13 +22,7 @@ void UGAB_DropItem::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
         AActor* HeldActor = Character->GetHeldActor();
         if (HeldActor)
         {
-            // [캐릭터의 Multicast_DropItem에 있던 로직을 여기에 직접 구현]
-
-            // 1) 손에서 떼어내기
-            FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
-            HeldActor->DetachFromActor(DetachRules);
-
-            // 2) 캐릭터 변수 초기화 — 물리/콜리전 복구까지 함께 처리된다
+            // 분리와 물리/콜리전 복구까지 SetHeldActor 가 처리한다.
             Character->SetHeldActor(nullptr);
 
             UE_LOG(LogTemp, Log, TEXT("DropItem logic moved to Ability!"));

@@ -83,11 +83,7 @@ void UGAB_Throw::InputReleased(
 	// 2. 서버 권한에서의 실제 던지기 (물리 부여)
 	if (AActor* HeldActor = Character->GetHeldActor())
 	{
-		FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
-		HeldActor->DetachFromActor(DetachRules);
-
-		// 들고 있는 상태 해제. 다시 상호작용(집기)이 가능하도록
-		// 콜리전과 물리를 되살리는 것까지 여기서 처리된다.
+		// 들고 있는 상태 해제. 분리와 물리/콜리전 복구까지 여기서 처리된다.
 		Character->SetHeldActor(nullptr);
 
 		// 물리가 켜진 뒤에야 임펄스가 먹는다 — 순서를 바꾸지 말 것
@@ -99,6 +95,10 @@ void UGAB_Throw::InputReleased(
 				PrimComp->AddImpulse(LaunchVelocity, NAME_None, true);
 			}
 		}
+
+		// 던지자마자 다시 낚아채는 것을 잠깐 막는다. 던진 본인에게만 적용되므로
+		// 동료에게 패스하는 것은 그대로 가능하다.
+		Character->BlockRecatch(HeldActor);
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
