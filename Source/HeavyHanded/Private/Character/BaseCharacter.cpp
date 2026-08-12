@@ -13,6 +13,10 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Net/UnrealNetwork.h"
 
+// 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
+// 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
+DEFINE_LOG_CATEGORY_STATIC(LogCarry, Log, All);
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
@@ -357,6 +361,28 @@ void ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     AActor* PreviousHeldActor = HeldActor;
     HeldActor = NewHeldActor;
 
+    if (IsValid(NewHeldActor))
+    {
+        UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
+            *GetNameSafe(NewHeldActor),
+            NewHeldActor->GetIsReplicated() ? TEXT("O") : TEXT("X"),
+            NewHeldActor->IsReplicatingMovement() ? TEXT("O") : TEXT("X"));
+
+        // 복제되지 않는 액터는 클라이언트에서 HeldActor 참조 자체가 풀리지 않는다.
+        // OnRep 이 null 을 받게 되어 물리 게이팅도 부착도 일어나지 않는다.
+        if (!NewHeldActor->GetIsReplicated())
+        {
+            UE_LOG(LogCarry, Warning,
+                TEXT("[서버] %s 는 복제되지 않는 액터다. 클라이언트에서는 손에 붙지 않는다 — "
+                     "해당 블루프린트의 Class Defaults > Replication > Replicates 를 켤 것."),
+                *GetNameSafe(NewHeldActor));
+        }
+    }
+    else
+    {
+        UE_LOG(LogCarry, Log, TEXT("[서버] 운반 해제: %s"), *GetNameSafe(PreviousHeldActor));
+    }
+
     // 서버는 OnRep 이 호출되지 않으므로 같은 처리를 직접 해준다
     ApplyCarryPhysicsState(PreviousHeldActor, false);
     ApplyCarryPhysicsState(HeldActor, true);
@@ -364,6 +390,15 @@ void ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
 
 void ABaseCharacter::OnRep_HeldActor(AActor* PreviousHeldActor)
 {
+    // 여기서 HeldActor 가 null 이면 참조가 풀리지 않은 것 = 아이템이 복제되지 않는다.
+    // 참조는 풀렸는데 부착 부모가 비어 있으면 AttachmentReplication 이 도착하지 않은 것이다.
+    const USceneComponent* HeldRoot = IsValid(HeldActor) ? HeldActor->GetRootComponent() : nullptr;
+
+    UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_HeldActor: %s -> %s | 부착 부모=%s"),
+        *GetNameSafe(PreviousHeldActor),
+        *GetNameSafe(HeldActor),
+        HeldRoot ? *GetNameSafe(HeldRoot->GetAttachParent()) : TEXT("(루트 없음/참조 안 풀림)"));
+
     ApplyCarryPhysicsState(PreviousHeldActor, false);
     ApplyCarryPhysicsState(HeldActor, true);
 }
