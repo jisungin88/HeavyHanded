@@ -1,4 +1,4 @@
-#include "AI/BTDecorator_CheckDetectionGauge.h"
+﻿#include "AI/BTDecorator_CheckDetectionGauge.h"
 #include "BehaviorTree/BlackboardComponent.h"
 
 UBTDecorator_CheckDetectionGauge::UBTDecorator_CheckDetectionGauge()

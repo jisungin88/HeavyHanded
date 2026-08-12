@@ -1,4 +1,4 @@
-#include "Character/GuardCharacter.h"
+﻿#include "Character/GuardCharacter.h"
 
 bool AGuardCharacter::GetPatrolLocation(int32 Index, FVector& OutLocation) const
 {

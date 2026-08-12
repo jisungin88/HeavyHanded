@@ -1,4 +1,4 @@
-#include "AI/BTTask_SelectNextPatrolPoint.h"
+﻿#include "AI/BTTask_SelectNextPatrolPoint.h"
 #include "AI/GuardAIController.h"
 
 UBTTask_SelectNextPatrolPoint::UBTTask_SelectNextPatrolPoint()
