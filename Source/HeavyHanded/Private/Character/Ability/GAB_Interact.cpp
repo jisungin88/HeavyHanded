@@ -63,10 +63,23 @@ void UGAB_Interact::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 {
     Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
+    // Commit 실패 등으로 Super 에서 이미 종료됐으면 더 진행하지 않는다.
+    if (!IsActive())
+    {
+        return;
+    }
+
     // 2. 서버 권한 체크 (상호작용 판정은 서버에서 수행)
     if (ActorInfo->IsNetAuthority())
     {
         PerformInteraction();
+    }
+
+    // 몽타주가 없으면 어빌리티를 끝내줄 콜백이 없다.
+    // 상호작용은 한 번에 끝나는 동작이므로 여기서 바로 종료한다.
+    if (!IsPlayingSkillMontage())
+    {
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
     }
 }
 
@@ -88,23 +101,32 @@ void UGAB_Interact::PerformInteraction()
 
     if (!Character) return;
 
-    FVector StartLocation = Character->GetActorLocation();
-    FVector ForwardVector = Character->GetActorForwardVector();
-    FVector EndLocation = StartLocation + (ForwardVector * 300.0f);
+    // 캡슐 중심에서 액터 전방으로 훑으면 시선 피치가 반영되지 않는다.
+    // (bUseControllerRotationYaw 만 켜져 있어 액터 전방은 항상 수평이다)
+    // 그러면 가슴 높이 띠만 검사하게 되어 바닥에 놓인 물건은 영영 집을 수 없다 —
+    // 던진 아이템을 다시 못 줍던 원인이 이것이었다.
+    //
+    // GetActorEyesViewPoint 는 서버에서도 원격 클라이언트의 시선을 돌려준다
+    // (피치가 RemoteViewPitch 로 복제된다. 정밀도는 낮지만 상호작용 판정엔 충분하다).
+    FVector EyeLocation;
+    FRotator EyeRotation;
+    Character->GetActorEyesViewPoint(EyeLocation, EyeRotation);
+
+    const FVector StartLocation = EyeLocation;
+    const FVector EndLocation = StartLocation + EyeRotation.Vector() * InteractionRange;
 
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(Character);
 
-
     // 라인 대신 약간의 반경을 준 스피어 트레이스 (판정 여유)
-    bool bHit = GetWorld()->SweepSingleByChannel(
+    const bool bHit = GetWorld()->SweepSingleByChannel(
         HitResult,
         StartLocation,
         EndLocation,
         FQuat::Identity,
         ECC_Visibility,
-        FCollisionShape::MakeSphere(50.0f),
+        FCollisionShape::MakeSphere(InteractionRadius),
         QueryParams
     );
 
@@ -112,8 +134,8 @@ void UGAB_Interact::PerformInteraction()
     // [디버그 전용] 상호작용 스윕 시각화. hh.Ability.Debug 1
     if (CVarAbilityDebug.GetValueOnGameThread() > 0)
     {
-        DrawDebugSphere(GetWorld(), StartLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
-        DrawDebugSphere(GetWorld(), EndLocation, 50.0f, 12, FColor::Yellow, false, 2.0f);
+        DrawDebugSphere(GetWorld(), StartLocation, InteractionRadius, 12, FColor::Yellow, false, 2.0f);
+        DrawDebugSphere(GetWorld(), EndLocation, InteractionRadius, 12, FColor::Yellow, false, 2.0f);
         DrawDebugLine(GetWorld(), StartLocation, bHit ? HitResult.Location : EndLocation,
             bHit ? FColor::Green : FColor::Red, false, 2.0f, 0, 1.5f);
 
