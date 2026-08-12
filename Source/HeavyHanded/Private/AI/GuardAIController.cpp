@@ -6,9 +6,7 @@
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Character/GuardCharacter.h"
 #include "AI/GuardBlackboardKeys.h"
-// TODO: 실제 GameState 클래스명 및 소속 폴더로 교체
-// (예: Core 폴더에 있다면 "Core/HeistGameState.h")
-// #include "Core/HeistGameState.h"
+#include "Alert/AlertComponent.h"
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -144,11 +142,16 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 float AGuardAIController::GetWorldAlertLevel() const
 {
-	// TODO: 임시 구현. 정식 버전에서는 UAlertComponent::GetAlertGauge()로 교체.
-	// if (const AHeistGameState* GS = GetWorld()->GetGameState<AHeistGameState>())
-	// {
-	//     return GS->WorldAlertLevel;
-	// }
+	// UAlertComponent 는 GameState 에 런타임 부착되며 0~1 게이지를 들고 있다.
+	// 여기서는 0~100 퍼센트로 바꿔 돌려준다 - Alert.ini 가 단계를 퍼센트로
+	// 문서화하고 있어(Calm 0~33 / Suspicious 34~66 / Alerted 67~99 / Alarm 100)
+	// BTDecorator_CheckWorldAlert 의 임계값을 기획서 숫자 그대로 쓸 수 있다.
+	if (const UAlertComponent* Alert = UAlertComponent::Get(this))
+	{
+		return Alert->GetAlertGauge01() * 100.f;
+	}
+
+	// GameState 에 아직 컴포넌트가 없다(리슨 서버 시작 직후 등). 경계도 0 으로 취급.
 	return 0.f;
 }
 

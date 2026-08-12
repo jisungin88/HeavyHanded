@@ -31,7 +31,13 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);
 
-	const float Delta = bCanSeeTarget ? (GaugeIncreaseRate * DeltaSeconds) : (-GaugeDecreaseRate * DeltaSeconds);
+	// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
+	// 플레이어가 거리를 두고 움직일 이유가 없어진다.
+	const float RateMultiplier = bCanSeeTarget ? GetDistanceRateMultiplier(*AIController, *BlackboardComp) : 1.f;
+
+	const float Delta = bCanSeeTarget
+		? (GaugeIncreaseRate * RateMultiplier * DeltaSeconds)
+		: (-GaugeDecreaseRate * DeltaSeconds);
 	const float NewGauge = FMath::Clamp(CurrentGauge + Delta, 0.f, 100.f);
 	BlackboardComp->SetValueAsFloat(GuardAIKeys::DetectionGauge, NewGauge);
 
@@ -80,4 +86,28 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	// 상태 전환은 더 이상 여기서 하지 않는다.
 	// Pursue 브랜치는 CanSeeTarget == true 인 동안 게이지가 100에서 유지되므로 그대로 게이지 판정 사용.
 	// Investigate 브랜치는 위에서 기록한 SearchStartTime을 BTDecorator_CheckSearchTimeout이 판정한다.
+}
+
+float UBTService_UpdateDetectionGauge::GetDistanceRateMultiplier(
+	const AAIController& AIController, const UBlackboardComponent& BlackboardComp) const
+{
+	const APawn* GuardPawn = AIController.GetPawn();
+	const AActor* Target = Cast<AActor>(BlackboardComp.GetValueAsObject(GuardAIKeys::TargetActor));
+
+	if (!IsValid(GuardPawn) || !IsValid(Target))
+	{
+		// 시야는 잡혔는데 TargetActor 가 아직 안 채워진 틱. 보정 없이 기본 속도로 둔다.
+		return 1.f;
+	}
+
+	if (FarDistance <= NearDistance)
+	{
+		// 잘못 설정된 구간. 보간이 성립하지 않으므로 가까운 쪽 계수로 고정한다.
+		return NearRateMultiplier;
+	}
+
+	const float Distance = FVector::Dist(GuardPawn->GetActorLocation(), Target->GetActorLocation());
+	const float Alpha = FMath::Clamp(FMath::GetRangePct(NearDistance, FarDistance, Distance), 0.f, 1.f);
+
+	return FMath::Lerp(NearRateMultiplier, FarRateMultiplier, Alpha);
 }
