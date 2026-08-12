@@ -239,9 +239,19 @@ void AGuardAIController::SelectNextPatrolPoint()
 		BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, NextLocation);
 
 		// 정상 동작이면 순찰 지점에 도착할 때마다 한 번씩만 찍힌다.
-		// 초당 수십 줄이 쏟아진다면 브랜치가 abort/restart 를 반복하고 있다는 뜻이다.
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 순찰 지점 %d 선택: %s"),
-			*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString());
+		// 호출 간격(dt)이 프레임 단위이고 폰이 제자리면 브랜치가 abort/restart 를
+		// 반복하는 것이고, dt 가 수 초 단위면 실제로 걸어서 도착하고 있는 것이다.
+		const float Now = GetWorld()->GetTimeSeconds();
+		const float DeltaSinceLast = (LastPatrolSelectTime < 0.f) ? -1.f : (Now - LastPatrolSelectTime);
+		LastPatrolSelectTime = Now;
+
+		const FVector PawnLocation = GuardPawn->GetActorLocation();
+
+		UE_LOG(LogGuardAI, Log,
+			TEXT("[%s] 순찰 지점 %d 선택: %s | dt=%.3fs | 폰 위치 %s | 남은 거리 %.0f"),
+			*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString(),
+			DeltaSinceLast, *PawnLocation.ToCompactString(),
+			FVector::Dist(PawnLocation, NextLocation));
 	}
 	else
 	{

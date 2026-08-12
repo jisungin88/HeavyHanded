@@ -61,4 +61,8 @@ private:
 
 	// PingPong 패턴에서 현재 진행 방향 (true=정방향/증가, false=역방향/감소)
 	bool bPatrolMovingForward = true;
+
+	// 진단용. 순찰 지점 선택 간격을 로그에 남겨 abort/restart 폭주를 구분한다.
+	// 음수는 "아직 한 번도 고른 적 없음".
+	float LastPatrolSelectTime = -1.f;
 };
