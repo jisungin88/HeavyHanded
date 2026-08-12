@@ -27,30 +27,75 @@ void ATitlePlayerController::BeginPlay()
 	const bool bCanCreateSession =
 		SessionInterface.IsValid() &&
 		SessionInterface->GetNamedSession(NAME_GameSession) == nullptr;
-
-
-
+	
+	
+	
 	SessionDebug("BeginPlay: bCanCreateSession", bCanCreateSession);
+
+
+
+
+	//// 클라이언트에서는 NAME_GameSession을 직접 관리하지 않음
+	//if (!HasAuthority())
+	//{
+	//	SessionDebug(TEXT("Client: Skip GameSession Check"), true);
+	//	return;
+	//}
+	//
+	//// 여기부터 서버/호스트 전용
+	//FNamedOnlineSession* Session =
+	//	SessionInterface->GetNamedSession(NAME_GameSession);
+	//
+	//if (Session)
+	//{
+	//	SessionDebug(TEXT("Host: GameSession EXISTS"), true);
+	//}
+	//else
+	//{
+	//	SessionDebug(TEXT("Host: GameSession NOT FOUND"), true);
+	//}
+
+
+
 
 
 }
 
 void ATitlePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (SessionInterface.IsValid())
-	{
-		FNamedOnlineSession* Session =
-			SessionInterface->GetNamedSession(NAME_GameSession);
+	/////if (SessionInterface.IsValid())
+	/////{
+	/////	FNamedOnlineSession* Session =
+	/////		SessionInterface->GetNamedSession(NAME_GameSession);
+	/////
+	/////	if (Session)
+	/////	{
+	/////		UE_LOG(LogTemp, Warning, TEXT("EndPlay: Destroying GameSession"));
+	/////
+	/////		SessionInterface->DestroySession(NAME_GameSession);
+	/////	}
+	/////}
+	/////
+	/////Super::EndPlay(EndPlayReason);
 
-		if (Session)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("EndPlay: Destroying GameSession"));
-
-			SessionInterface->DestroySession(NAME_GameSession);
-		}
-	}
+		// 클라이언트는 GameSession을 직접 Destroy하지 않음
+	//if (HasAuthority() && SessionInterface.IsValid())
+	//{
+	//	FNamedOnlineSession* Session =
+	//		SessionInterface->GetNamedSession(NAME_GameSession);
+	//
+	//	if (Session)
+	//	{
+	//		UE_LOG(LogTemp, Warning,
+	//			TEXT("EndPlay: Host destroying GameSession"));
+	//
+	//		SessionInterface->DestroySession(NAME_GameSession);
+	//	}
+	//}
 
 	Super::EndPlay(EndPlayReason);
+
+
 }
 
 
