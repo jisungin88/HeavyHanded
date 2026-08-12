@@ -20,6 +20,14 @@ void UGAB_Throw::ActivateAbility(
 	// 1. 부모의 ActivateAbility 호출 (몽타주 재생 로직이 여기에 있음)
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
+	// Commit 실패나 몽타주 재생 실패로 Super 에서 이미 종료됐으면 더 진행하지 않는다.
+	// 이 어빌리티는 InputReleased 를 기다리므로, 끝난 상태에서 타이머만 남으면
+	// 궤적만 그려지고 던지기는 영영 실행되지 않는다.
+	if (!IsActive())
+	{
+		return;
+	}
+
 	// 2. 캐릭터 확인
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
 	if (!Character || !Character->GetHeldActor())

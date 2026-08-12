@@ -8,6 +8,12 @@ void UGAB_DropItem::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 {
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
+	// Commit 실패 등으로 Super 에서 이미 종료됐으면 더 진행하지 않는다.
+	if (!IsActive())
+	{
+		return;
+	}
+
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
 
     // 2. 서버 권한 체크 (서버에서만 물리/상태 변경)
