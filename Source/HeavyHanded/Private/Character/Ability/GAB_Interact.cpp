@@ -89,20 +89,15 @@ void UGAB_Interact::PerformInteraction()
             // 이미 뭔가 들고 있지 않다면 집어 들기 실행
             if (!Character->GetHeldActor())
             {
-                // 1. 물리 시뮬레이션 및 콜리전 끄기
-                if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HitActor->GetRootComponent()))
-                {
-                    PrimComp->SetSimulatePhysics(false);
-                    PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                }
-
-                // 2. 캐릭터 손 소켓에 부착
+                // 1. 캐릭터 손 소켓에 부착
                 HitActor->AttachToComponent(
                     Character->GetMesh(),
                     FAttachmentTransformRules::SnapToTargetNotIncludingScale,
                     FName("Hand_R_Socket")
                 );
 
+                // 2. 물리/콜리전 끄기는 SetHeldActor 가 처리한다.
+                //    클라이언트에서는 OnRep_HeldActor 가 같은 처리를 해준다.
                 Character->SetHeldActor(HitActor);
                 UE_LOG(LogTemp, Log, TEXT("Item Interact success: %s"), *HitActor->GetName());
             }

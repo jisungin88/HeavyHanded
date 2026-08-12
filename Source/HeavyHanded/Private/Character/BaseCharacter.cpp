@@ -11,6 +11,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Net/UnrealNetwork.h"
 
 // Sets default values
 ABaseCharacter::ABaseCharacter()
@@ -335,4 +336,61 @@ void ABaseCharacter::AbilityInputReleased(int32 InputID)
 
     // InputID가 일치하는 "활성 중인" 어빌리티의 InputReleased()를 호출
     ASC->AbilityLocalInputReleased(InputID);
+}
+
+void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(ABaseCharacter, HeldActor);
+}
+
+void ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
+{
+    // 운반 상태의 소유권은 서버에 있다. 클라이언트가 직접 바꾸면
+    // 다음 복제 때 덮어써지면서 물리 상태만 어긋난다.
+    if (!HasAuthority() || HeldActor == NewHeldActor)
+    {
+        return;
+    }
+
+    AActor* PreviousHeldActor = HeldActor;
+    HeldActor = NewHeldActor;
+
+    // 서버는 OnRep 이 호출되지 않으므로 같은 처리를 직접 해준다
+    ApplyCarryPhysicsState(PreviousHeldActor, false);
+    ApplyCarryPhysicsState(HeldActor, true);
+}
+
+void ABaseCharacter::OnRep_HeldActor(AActor* PreviousHeldActor)
+{
+    ApplyCarryPhysicsState(PreviousHeldActor, false);
+    ApplyCarryPhysicsState(HeldActor, true);
+}
+
+void ABaseCharacter::ApplyCarryPhysicsState(AActor* Target, bool bCarried)
+{
+    if (!Target)
+    {
+        return;
+    }
+
+    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+    if (!PrimComp)
+    {
+        return;
+    }
+
+    if (bCarried)
+    {
+        // 손에 붙는 동안은 물리를 멈추고 트레이스에서도 빠진다
+        PrimComp->SetSimulatePhysics(false);
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    else
+    {
+        // 콜리전을 먼저 켜야 물리 바디가 올바른 상태로 깨어난다
+        PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        PrimComp->SetSimulatePhysics(true);
+    }
 }

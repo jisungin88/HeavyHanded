@@ -78,21 +78,19 @@ void UGAB_Throw::InputReleased(
 		FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
 		HeldActor->DetachFromActor(DetachRules);
 
-		// ★ 핵심: 다시 상호작용(집기)이 가능하도록 콜리전과 물리 복구
+		// 들고 있는 상태 해제. 다시 상호작용(집기)이 가능하도록
+		// 콜리전과 물리를 되살리는 것까지 여기서 처리된다.
+		Character->SetHeldActor(nullptr);
+
+		// 물리가 켜진 뒤에야 임펄스가 먹는다 — 순서를 바꾸지 말 것
 		if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
 		{
-			PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); // 콜리전 다시 켜기!
-			PrimComp->SetSimulatePhysics(true);                                // 물리 켜기
-
-			FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
+			const FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
 			if (!LaunchVelocity.IsNearlyZero())
 			{
 				PrimComp->AddImpulse(LaunchVelocity, NAME_None, true);
 			}
 		}
-
-		// 캐릭터가 들고 있는 상태 해제
-		Character->SetHeldActor(nullptr);
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);

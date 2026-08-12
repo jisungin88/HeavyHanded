@@ -22,14 +22,7 @@ void UGAB_DropItem::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
             FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
             HeldActor->DetachFromActor(DetachRules);
 
-            // 2) 물리 켜기
-            if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
-            {
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                PrimComp->SetSimulatePhysics(true);
-            }
-
-            // 3) 캐릭터 변수 초기화
+            // 2) 캐릭터 변수 초기화 — 물리/콜리전 복구까지 함께 처리된다
             Character->SetHeldActor(nullptr);
 
             UE_LOG(LogTemp, Log, TEXT("DropItem logic moved to Ability!"));

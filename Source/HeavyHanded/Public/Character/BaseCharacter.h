@@ -40,6 +40,7 @@ public:
 	// IAbilitySystemInterface 필수 구현
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	// Called when the game starts or when spawned
@@ -129,18 +130,29 @@ protected:
 	void AbilityInputReleased(int32 InputID);
 
 protected:
-	// 현재 손에 들고 있는 액터
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction")
+	// 현재 손에 들고 있는 액터.
+	// 부착 자체는 액터 리플리케이션이 옮겨주지만, 물리/콜리전 토글은 복제되지
+	// 않는 로컬 호출이라 OnRep 에서 클라이언트도 같은 상태를 만들어줘야 한다.
+	UPROPERTY(ReplicatedUsing = OnRep_HeldActor, VisibleAnywhere, BlueprintReadOnly, Category = "Interaction")
 	TObjectPtr<AActor> HeldActor = nullptr;
+
+	UFUNCTION()
+	virtual void OnRep_HeldActor(AActor* PreviousHeldActor);
 
 public:
 	// HeldActor를 반환하는 함수
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
 
-	// HeldActor를 설정하는 함수
+	// HeldActor를 설정하는 함수. 서버 권한에서만 동작하며 물리/콜리전
+	// 게이팅까지 함께 처리한다. 부착/분리는 호출하는 쪽 책임이다.
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
-	void SetHeldActor(AActor* NewHeldActor) { HeldActor = NewHeldActor; }
+	void SetHeldActor(AActor* NewHeldActor);
+
+	// 운반 중에는 물리와 콜리전을 끄고, 놓을 때 되돌린다.
+	// 서버 로직과 OnRep 이 같은 경로를 쓰도록 여기 한 곳에만 둔다.
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void ApplyCarryPhysicsState(AActor* Target, bool bCarried);
 
 public:	
 	// Called every frame
