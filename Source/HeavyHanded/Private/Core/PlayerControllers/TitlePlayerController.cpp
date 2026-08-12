@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Core/PlayerControllers/TitlePlayerController.h"
@@ -15,70 +15,124 @@ void ATitlePlayerController::BeginPlay()
     if (IOnlineSubsystem* OSS = IOnlineSubsystem::Get())
     {
         SessionInterface = OSS->GetSessionInterface();
+		SessionDebug(TEXT("OSS"), OSS != nullptr);
     }
 
 
-    // PlayerController ½ÃÀÛ ½Ã ÇöÀç ¼¼¼Ç »óÅÂ È®ÀÎ
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
-        TEXT("===== TitlePlayerController BeginPlay ====="));
-    UE_LOG(LogTemp, Warning, TEXT("===== TitlePlayerController BeginPlay ====="));
+    // PlayerController ì‹œìž‘ ì‹œ í˜„ìž¬ ì„¸ì…˜ ìƒíƒœ í™•ì¸
+	// BeginPlayê°€ ì •ìƒì ìœ¼ë¡œ í˜¸ì¶œë˜ì—ˆëŠ”ì§€ í™•ì¸
+	SessionDebug("===== TitlePlayerController BeginPlay =====", true);
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-        SessionInterface.IsValid()
-        ? TEXT("BeginPlay: SessionInterface OK")
-        : TEXT("BeginPlay: SessionInterface INVALID"));
-    UE_LOG(LogTemp, Warning,
-        TEXT("BeginPlay: SessionInterface = %s"),
-        SessionInterface.IsValid() ? TEXT("OK") : TEXT("INVALID"));
 
-    const bool bHasSession =
+	//SessionInterfaceê°€ ì •ìƒì ìœ¼ë¡œ ì´ˆê¸°í™”ë˜ì—ˆëŠ”ì§€ í™•ì¸
+    //GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+    //    SessionInterface.IsValid()
+    //    ? TEXT("BeginPlay: SessionInterface OK")
+    //    : TEXT("BeginPlay: SessionInterface INVALID"));
+    //UE_LOG(LogTemp, Warning,
+    //    TEXT("BeginPlay: SessionInterface = %s"),
+    //    SessionInterface.IsValid() ? TEXT("OK") : TEXT("INVALID"));
+
+	SessionDebug("SessionInterface", SessionInterface.IsValid());
+	if (!SessionInterface.IsValid()) { return; }
+
+
+    const bool bCanCreateSession =
         SessionInterface.IsValid() &&
-        SessionInterface->GetNamedSession(NAME_GameSession) != nullptr;
+        SessionInterface->GetNamedSession(NAME_GameSession) == nullptr;
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f,
-        bHasSession ? FColor::Red : FColor::Green,
-        bHasSession
-        ? TEXT("BeginPlay: GameSession EXISTS")
-        : TEXT("BeginPlay: GameSession NOT FOUND"));
+	//OnSessionDebug.Broadcast(TEXT("ê²Œìž„ ì„¸ì…˜ ì¡´ìž¬"),bHasSession);
+	//
+	//
+    //GEngine->AddOnScreenDebugMessage(-1, 5.0f,
+    //    bHasSession ? FColor::Red : FColor::Green,
+    //    bHasSession
+    //    ? TEXT("BeginPlay: GameSession EXISTS")
+    //    : TEXT("BeginPlay: GameSession NOT FOUND"));
+	//
+    //UE_LOG(LogTemp, Warning,
+    //    TEXT("BeginPlay: GameSession = %s"),
+    //    bHasSession ? TEXT("EXISTS") : TEXT("NOT FOUND"));
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("BeginPlay: GameSession = %s"),
-        bHasSession ? TEXT("EXISTS") : TEXT("NOT FOUND"));
 
+	SessionDebug("BeginPlay: bCanCreateSession", bCanCreateSession);
 
 }
 
+void ATitlePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (SessionInterface.IsValid())
+	{
+		FNamedOnlineSession* Session =
+			SessionInterface->GetNamedSession(NAME_GameSession);
 
-// »ý¼º
+		if (Session)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EndPlay: Destroying GameSession"));
+
+			SessionInterface->DestroySession(NAME_GameSession);
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+
+// ìƒì„±
 void ATitlePlayerController::TitleCreateSession
     (const FString& RoomName, int maxPlayer, bool isPublic)
 {
     IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
+	SessionDebug(TEXT("OSS"), OSS != nullptr);
 
 
-    // CreateSession È£Ãâ ¿©ºÎ È®ÀÎ
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+    // CreateSession í˜¸ì¶œ ì—¬ë¶€ í™•ì¸
+    GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan,
         TEXT("===== TitleCreateSession CALLED ====="));
     UE_LOG(LogTemp, Warning, TEXT("===== TitleCreateSession CALLED ====="));
 
 
-    if (OSS)
-    {
-        UE_LOG(LogTemp, Warning,
-            TEXT("OSS = %s"),
-            *OSS->GetSubsystemName().ToString());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("OSS NULL"));
-    }
+    //if (OSS)
+    //{
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("OSS = %s"),
+    //        *OSS->GetSubsystemName().ToString());
+	//
+	//	OnSessionDebug.Broadcast(TEXT("OSS"), true);
+    //}
+    //else
+    //{
+	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+	//		TEXT("OSS NULL"));
+    //    UE_LOG(LogTemp, Error, TEXT("OSS NULL"));
+	//	OnSessionDebug.Broadcast(TEXT("OSS"), false);
+    //}
+
+	SessionDebug("SessionInterface", SessionInterface.IsValid());
+	if (!SessionInterface.IsValid()) { return; }
+
+	//if (!SessionInterface.IsValid())
+	//{
+	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("SessionInterface = INVALID"));
+	//	OnSessionDebug.Broadcast(TEXT("SessionInterface = INVALID"), false);
+	//	UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
+	//	return;
+	//}
+	//else
+	//{
+	//	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("SessionInterface = VALID"));
+	//	OnSessionDebug.Broadcast(TEXT("SessionInterface = VALID"), true);
+	//	UE_LOG(LogTemp, Warning, TEXT("SessionInterface = VALID"));
+	//}
 
 
-    if (!SessionInterface.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
-        return;
-    }
+
+	// ê¸°ì¡´ GameSessionì´ ìžˆëŠ”ì§€ í™•ì¸
+	FNamedOnlineSession* ExistingSession =
+		SessionInterface->GetNamedSession(NAME_GameSession);
+
+	SessionDebug(TEXT("Existing GameSession"),ExistingSession == nullptr);
+
 
 
     CreateHandle =
@@ -87,7 +141,13 @@ void ATitlePlayerController::TitleCreateSession
                 this,
                 &ATitlePlayerController::TitleOnCreateSessionComplete));
 
-    UE_LOG(LogTemp, Warning, TEXT("Create Delegate Added"));
+	SessionDebug("Create Delegate Added", CreateHandle.IsValid());
+	if (!CreateHandle.IsValid()) { return; }
+
+
+	// GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("Create Delegate = ADDED"));
+	// UE_LOG(LogTemp, Warning, TEXT("Create Delegate Added"));
+	// OnSessionDebug.Broadcast(TEXT("Create Delegate = ADDED"), true);
 
 
 
@@ -109,7 +169,7 @@ void ATitlePlayerController::TitleCreateSession
     );
 
     
-    // ºñ°ø°³ ¹æ¸¸ ÄÚµå »ý¼º
+    // ë¹„ê³µê°œ ë°©ë§Œ ì½”ë“œ ìƒì„±
     if (!isPublic)
     {
         FString RoomCode = GenerateRoomCode();
@@ -130,15 +190,42 @@ void ATitlePlayerController::TitleCreateSession
                 &ATitlePlayerController::TitleOnStartSessionComplete));
 
 
+	SessionDebug("Start Delegate Added", StartHandle.IsValid());
+	if (!StartHandle.IsValid()) { return; }
+
+
+
+	// ê¸°ì¡´ ì„¸ì…˜ì´ ìžˆìœ¼ë©´ ì‚­ì œ í›„ ë‹¤ì‹œ ìƒì„±
+	if (ExistingSession)
+	{
+		DestroyHandle =
+			SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(
+				FOnDestroySessionCompleteDelegate::CreateUObject(
+					this,
+					&ATitlePlayerController::TitleOnDestroySessionComplete));
+
+		SessionDebug(TEXT("Destroy Delegate Added"), DestroyHandle.IsValid());
+
+		if (!DestroyHandle.IsValid())
+		{
+			bPendingCreateSession = false;
+			return;
+		}
+
+		bool bDestroyStarted =
+			SessionInterface->DestroySession(NAME_GameSession);
+
+		SessionDebug(TEXT("DestroySession"), DestroyHandle.IsValid());
+		return;
+	}
+
 
     bool bCreateStarted = SessionInterface->CreateSession(
         0,
         NAME_GameSession,
         Settings);
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("CreateSession Called = %d"),
-        bCreateStarted);
+	SessionDebug("CreateSession", bCreateStarted);
 
 }
 
@@ -147,54 +234,54 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
 
     if (SessionInterface.IsValid())
     {
-        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(
-            CreateHandle);
+        SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateHandle);
     }
 
 
-    if (!bWasSuccessful)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Session Create Failed"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Session Created"));
+	SessionDebug(TEXT("CreateSession Complete"), bWasSuccessful);
+    if (!bWasSuccessful) { return; }
 
 
 
-    FNamedOnlineSession* Session =
-        SessionInterface->GetNamedSession(NAME_GameSession);
+	FNamedOnlineSession* Session = SessionInterface->GetNamedSession(NAME_GameSession);
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("Session Exists = %s"),
-        Session ? TEXT("YES") : TEXT("NO"));
+	SessionDebug(TEXT("Created Session Exists"), Session != nullptr);
 
-    if (Session)
-    {
-        UE_LOG(LogTemp, Warning,
-            TEXT("Session State = %d"),
-            (int32)Session->SessionState);
+	if (Session)
+	{
+		SessionDebug(TEXT("CS_LAN"), Session->SessionSettings.bIsLANMatch);
+		SessionDebug(TEXT("CS_Advertise"), Session->SessionSettings.bShouldAdvertise);
+		SessionDebug(TEXT("CS_Connections"), Session->SessionSettings.NumPublicConnections > 0);
+	}
 
-        UE_LOG(LogTemp, Warning,
-            TEXT("Advertise = %d"),
-            Session->SessionSettings.bShouldAdvertise);
 
-        UE_LOG(LogTemp, Warning,
-            TEXT("LAN = %d"),
-            Session->SessionSettings.bIsLANMatch);
 
-        UE_LOG(LogTemp, Warning,
-            TEXT("Connections = %d"),
-            Session->SessionSettings.NumPublicConnections);
-
-        UE_LOG(LogTemp, Warning,
-            TEXT("HOST SESSION OK"));
-
-        UE_LOG(LogTemp, Warning,
-            TEXT("Advertise=%d LAN=%d"),
-            Session->SessionSettings.bShouldAdvertise,
-            Session->SessionSettings.bIsLANMatch);
-    }
+    //if (Session)
+    //{
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("Session State = %d"),
+    //        (int32)Session->SessionState);
+	//
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("Advertise = %d"),
+    //        Session->SessionSettings.bShouldAdvertise);
+	//
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("LAN = %d"),
+    //        Session->SessionSettings.bIsLANMatch);
+	//
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("Connections = %d"),
+    //        Session->SessionSettings.NumPublicConnections);
+	//
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("HOST SESSION OK"));
+	//
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("Advertise=%d LAN=%d"),
+    //        Session->SessionSettings.bShouldAdvertise,
+    //        Session->SessionSettings.bIsLANMatch);
+    //}
 
     else
     {
@@ -232,71 +319,57 @@ void ATitlePlayerController::TitleOnStartSessionComplete(FName SessionName, bool
 
 
 
-// °Ë»ö
+// ê²€ìƒ‰
 void ATitlePlayerController::TitleFindSessions()
 {
 
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("===== FindSessions Debug Start ====="));
-
-
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, IsLocalController() ? 
         TEXT("IsLocalController = TRUE") : TEXT("IsLocalController = FALSE"));
 
-    FString NetModeString;
-    switch (GetNetMode())
-    {
-    case NM_Standalone: NetModeString = TEXT("Standalone"); break;
-    case NM_DedicatedServer: NetModeString = TEXT("DedicatedServer"); break;
-    case NM_ListenServer: NetModeString = TEXT("ListenServer"); break;
-    case NM_Client: NetModeString = TEXT("Client"); break;
-    default: NetModeString = TEXT("Unknown"); break;
-    }
+	SessionDebug(TEXT("===== FindSessions CALLED ====="), true);
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-        FString::Printf(TEXT("NetMode = %s"), *NetModeString));
+	FString NetModeString;
+	switch (GetNetMode())
+	{
+	case NM_Standalone: NetModeString = TEXT("Standalone"); break;
+	case NM_DedicatedServer: NetModeString = TEXT("DedicatedServer"); break;
+	case NM_ListenServer: NetModeString = TEXT("ListenServer"); break;
+	case NM_Client: NetModeString = TEXT("Client"); break;
+	default: NetModeString = TEXT("Unknown"); break;
+	}
+	SessionDebug(FString::Printf(TEXT("NetMode = %s"), *NetModeString), true);
+
 
     ULocalPlayer* LP = GetLocalPlayer();
-
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, LP ? 
-        TEXT("LocalPlayer = VALID") : TEXT("LocalPlayer = INVALID"));
+	SessionDebug(TEXT("LocalPlayer"), LP != nullptr);
 
     if (LP)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-            FString::Printf(TEXT("ControllerId = %d"), LP->GetControllerId()));
+		SessionDebug(FString::Printf(TEXT("ControllerId = %d"), LP->GetControllerId()), true);
     }
 
     IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
-
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, OSS ? 
-        *FString::Printf(TEXT("OSS = %s"), *OSS->GetSubsystemName().ToString()) : TEXT("OSS = NULL"));
-
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, SessionInterface.IsValid() ? 
-        
-        TEXT("SessionInterface = VALID") : TEXT("SessionInterface = INVALID"));
+	SessionDebug(TEXT("OSS"), OSS != nullptr);
 
 
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, FString::Printf(TEXT("PlayerController = %s"), *GetName()));
-
-
-
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("===== FindSessions Debug Start ====="));
+    //GEngine->//AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, FString::Printf(TEXT("PlayerController = %s"), *GetName()));
 
 
 
 
 
-    if (!SessionInterface.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("SessionInterface Not Valid"));
-        return;
-    }
+
+	SessionDebug("SessionInterface", SessionInterface.IsValid());
+	if (!SessionInterface.IsValid()) { return; }
+
 
     SessionSearch = MakeShared<FOnlineSessionSearch>();
     SessionSearch->bIsLanQuery = true;
     SessionSearch->MaxSearchResults = 10;
 
+	SessionDebug(TEXT("SessionSearch Created"), SessionSearch.IsValid());
 
     FindHandle = SessionInterface->AddOnFindSessionsCompleteDelegate_Handle(
         FOnFindSessionsCompleteDelegate::CreateUObject(
@@ -305,6 +378,10 @@ void ATitlePlayerController::TitleFindSessions()
         )
     );
 
+	SessionDebug(TEXT("Find Delegate Added"), FindHandle.IsValid());
+
+	if (!FindHandle.IsValid()){return;}
+
     
     int32 LocalPlayerNum = 0;
     
@@ -312,16 +389,19 @@ void ATitlePlayerController::TitleFindSessions()
     {
         LocalPlayerNum = GetLocalPlayer()->GetControllerId();
     }
-    
+	SessionDebug(TEXT("LocalPlayer"), GetLocalPlayer() != nullptr);
+
+
     bool bStarted = SessionInterface->FindSessions(
         LocalPlayerNum,
         SessionSearch.ToSharedRef()
     );
 
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("FindSessions Started = %d"),
-        bStarted);
+
+	SessionDebug(TEXT("FindSessions"), bStarted);
+
+	SessionDebug(TEXT("===== FindSessions CALLED ====="), true);
 
 
 }
@@ -330,25 +410,34 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 {
     if (SessionInterface.IsValid())
     {
-        SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(
-            FindHandle
-        );
+		SessionInterface->ClearOnFindSessionsCompleteDelegate_Handle(FindHandle);
+
+		FindHandle.Reset(); //?
+		SessionDebug(TEXT("Find Delegate Cleared"), true);
     }
 
 
-    if (!bWasSuccessful || !SessionSearch.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Find Session Failed"));
-        return;
-    }
+
+	if (!bWasSuccessful || !SessionSearch.IsValid())
+	{
+		SessionDebug(TEXT("Find Session Failed"), false);
+		return;
+	}
+
+	SessionDebug(TEXT("FindSessions Complete"), bWasSuccessful);
+	SessionDebug(TEXT("SessionSearch Valid"), SessionSearch.IsValid());
 
 
-    UE_LOG(LogTemp, Warning, TEXT("Find Success = %d"), bWasSuccessful);
-    UE_LOG(LogTemp, Warning, TEXT("Results = %d"), SessionSearch->SearchResults.Num());
+
+	SessionDebug(FString::Printf(TEXT("Search Results = %d"),
+		SessionSearch->SearchResults.Num()),
+		SessionSearch->SearchResults.Num()>0);
 
     //RoomList.Empty();
-    RoomList.Reset();
-    PublicSessionResults.Reset();
+	RoomList.Reset();
+	PublicSessionResults.Reset();
+
+
 
     for (const FOnlineSessionSearchResult& Result : SessionSearch->SearchResults)
     {
@@ -356,29 +445,22 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
         FString RoomCode;
 
 
-        Result.Session.SessionSettings.Get(
-            FName(TEXT("ROOM_NAME")),
-            RoomName
-        );
+ 		bool bHasRoomName = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_NAME")), RoomName);
+		SessionDebug(TEXT("ROOM_NAME Found"), bHasRoomName);
+
+		bool bHasRoomCode = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_CODE")), RoomCode);
+		SessionDebug(TEXT("ROOM_CODE Found"), bHasRoomCode);
 
 
-        bool bHasRoomCode =
-            Result.Session.SessionSettings.Get(
-                FName(TEXT("ROOM_CODE")),
-                RoomCode
-            );
 
-
-        // ºñ°ø°³ ¹æ Á¦¿Ü
+        // ë¹„ê³µê°œ ë°© ì œì™¸
         if (bHasRoomCode)
         {
             continue;
         }
 
 
-        UE_LOG(LogTemp, Log,
-            TEXT("Public Room : %s"),
-            *RoomName);
+		SessionDebug(FString::Printf(TEXT("Public Room Name = %s"), *RoomName), true);
     
     
         FRoomListData NewRoom;
@@ -402,22 +484,22 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 
 
 
-    // °Ë»ö ¿Ï·á ÈÄ UI °»½Å ¾Ë¸²
+    // ê²€ìƒ‰ ì™„ë£Œ í›„ UI ê°±ì‹  ì•Œë¦¼
     OnRoomListUpdated.Broadcast(bWasSuccessful);
 
 }
 
 
 
-// Âü°¡
+// ì°¸ê°€
 void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
 {
-    // ¼¼¼Ç Âü°¡ ½ÃÀÛ
+    // ì„¸ì…˜ ì°¸ê°€ ì‹œìž‘
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
         TEXT("===== Join Session Start ====="));
     UE_LOG(LogTemp, Warning, TEXT("===== Join Session Start ====="));
 
-    // SessionInterface À¯È¿¼º È®ÀÎ
+    // SessionInterface ìœ íš¨ì„± í™•ì¸
     if (!SessionInterface.IsValid())
     {
         GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
@@ -430,7 +512,7 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         TEXT("Join: SessionInterface OK"));
     UE_LOG(LogTemp, Warning, TEXT("Join: SessionInterface OK"));
 
-    // °Ë»ö °á°ú ÀÎµ¦½º È®ÀÎ
+    // ê²€ìƒ‰ ê²°ê³¼ ì¸ë±ìŠ¤ í™•ì¸
     if (!PublicSessionResults.IsValidIndex(SearchIndex))
     {
         GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
@@ -443,7 +525,7 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         FString::Printf(TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num()));
     UE_LOG(LogTemp, Warning, TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num());
 
-    // ÇöÀç GameSessionÀÌ ÀÌ¹Ì Á¸ÀçÇÏ´ÂÁö È®ÀÎ
+    // í˜„ìž¬ GameSessionì´ ì´ë¯¸ ì¡´ìž¬í•˜ëŠ”ì§€ í™•ì¸
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
         SessionInterface->GetNamedSession(NAME_GameSession)
         ? TEXT("Join: Existing GameSession")
@@ -453,7 +535,7 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         TEXT("Join: Existing GameSession = %s"),
         SessionInterface->GetNamedSession(NAME_GameSession) ? TEXT("YES") : TEXT("NO"));
 
-    // Join ¿Ï·á µ¨¸®°ÔÀÌÆ® µî·Ï
+    // Join ì™„ë£Œ ë¸ë¦¬ê²Œì´íŠ¸ ë“±ë¡
     JoinHandle =
         SessionInterface->AddOnJoinSessionCompleteDelegate_Handle(
             FOnJoinSessionCompleteDelegate::CreateUObject(
@@ -464,23 +546,23 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         TEXT("Join: Delegate Added"));
     UE_LOG(LogTemp, Warning, TEXT("Join: Delegate Added"));
 
-    // ¼±ÅÃÇÑ ¼¼¼Ç °Ë»ö °á°ú °¡Á®¿À±â
+    // ì„ íƒí•œ ì„¸ì…˜ ê²€ìƒ‰ ê²°ê³¼ ê°€ì ¸ì˜¤ê¸°
     const FOnlineSessionSearchResult& Result =
         PublicSessionResults[SearchIndex];
 
-    // ¼¼¼Ç ID È®ÀÎ
+    // ì„¸ì…˜ ID í™•ì¸
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
         FString::Printf(TEXT("Join: Session ID = %s"), *Result.GetSessionIdStr()));
     UE_LOG(LogTemp, Warning, TEXT("Join: Session ID = %s"), *Result.GetSessionIdStr());
 
-    // ¼±ÅÃÇÑ ¼¼¼Ç¿¡ Âü°¡ ¿äÃ»
+    // ì„ íƒí•œ ì„¸ì…˜ì— ì°¸ê°€ ìš”ì²­
     bool bStarted =
         SessionInterface->JoinSession(
             0,
             NAME_GameSession,
             Result);
 
-    // JoinSession È£Ãâ ÀÚÃ¼°¡ ¼º°øÇß´ÂÁö È®ÀÎ
+    // JoinSession í˜¸ì¶œ ìžì²´ê°€ ì„±ê³µí–ˆëŠ”ì§€ í™•ì¸
     if (bStarted)
     {
         GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
@@ -494,7 +576,7 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
         UE_LOG(LogTemp, Error, TEXT("JoinSession FAILED"));
     }
 
-    // ¼¼¼Ç Âü°¡ ¿äÃ» Á¾·á
+    // ì„¸ì…˜ ì°¸ê°€ ìš”ì²­ ì¢…ë£Œ
     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
         TEXT("===== Join Session End ====="));
     UE_LOG(LogTemp, Warning, TEXT("===== Join Session End ====="));
@@ -570,4 +652,50 @@ FString ATitlePlayerController::GenerateRoomCode()
     }
 
     return Code;
+}
+
+void ATitlePlayerController::SessionDebug(const FString& Message, bool bSuccess)
+{
+	const FColor DebugColor = bSuccess ? FColor::Green : FColor::Red;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, DebugColor, *Message);
+	}
+
+	OnSessionDebug.Broadcast(Message, bSuccess);
+
+	UE_LOG(LogTemp, Warning, TEXT("[SessionDebug] %s"), *Message);
+}
+
+void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
+{
+	if (SessionInterface.IsValid() && DestroyHandle.IsValid())
+	{
+		SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(
+			DestroyHandle);
+
+		DestroyHandle.Reset();
+	}
+
+	SessionDebug(TEXT("DestroySession Complete?"),bWasSuccessful);
+
+	if (!bWasSuccessful)
+	{
+		bPendingCreateSession = false;
+		return;
+	}
+
+	if (bPendingCreateSession)
+	{
+		bPendingCreateSession = false;
+
+		SessionDebug(TEXT("Creating New Session"), true);
+
+		//TitleCreateSessionInternal(
+		//	PendingRoomName,
+		//	PendingMaxPlayer,
+		//	PendingIsPublic);
+	}
+
 }

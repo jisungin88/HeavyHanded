@@ -1,15 +1,20 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Core/PlayerControllers/ShelterPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 
+#include "OnlineSubsystem.h"
+#include "OnlineSubsystemUtils.h"
+
+
 void AShelterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
 }
+
 
 void AShelterPlayerController::ClientReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
 {

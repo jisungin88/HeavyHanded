@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+Ôªø// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -36,6 +36,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSessionCreated, bool, bSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomListUpdated, bool, bSuccess);
 //DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRoomListUpdated);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams
+(FOnSessionDebug, FString, DebugMessage, bool, bSuccess);
+
 /**
  * 
  */
@@ -62,7 +65,8 @@ public:
     // -------------------------------------------------
 
     virtual void BeginPlay() override;
-    
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     // -------------------------------------------------
 
     UFUNCTION(BlueprintCallable)
@@ -102,7 +106,23 @@ private:
     FDelegateHandle JoinHandle;
 
 
-    //∫Ò∞¯∞≥ πÊ ƒ⁄µÂ ª˝º∫
+    //ÎπÑÍ≥µÍ∞ú Î∞© ÏΩîÎìú ÏÉùÏÑ±
     FString GenerateRoomCode();
+
+	UPROPERTY(BlueprintAssignable, Category = "Debug")
+	FOnSessionDebug OnSessionDebug;
+
+	void SessionDebug(const FString& Message, bool bSuccess);
+
+
+
+	bool bPendingCreateSession = false;
+
+	FDelegateHandle DestroyHandle;
+
+	UFUNCTION()
+	void TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
+
+
 	
 };

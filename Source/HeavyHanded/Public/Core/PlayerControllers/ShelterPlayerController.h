@@ -1,10 +1,14 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"
+
 #include "ShelterPlayerController.generated.h"
+
 
 /**
  * 
@@ -17,12 +21,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	const FString&, Message
 );
 
+
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerController : public APlayerController
 {
 	GENERATED_BODY()
 	
-
 
 protected:
 
@@ -31,18 +35,19 @@ protected:
 
 public:
 
-	// Å¬¶óÀÌ¾ğÆ® ¡æ ¼­¹ö
+
+	// í´ë¼ì´ì–¸íŠ¸ â†’ ì„œë²„
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerSendChatMessage(const FString& Message);
 
-	// ¼­¹ö ¡æ ÇØ´ç Å¬¶óÀÌ¾ğÆ®
+	// ì„œë²„ â†’ í•´ë‹¹ í´ë¼ì´ì–¸íŠ¸
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveChatMessage(
 		const FString& PlayerName,
 		const FString& Message
 	);
 
-	// Ã¤ÆÃ UI¿¡¼­ ¹ÙÀÎµù
+	// ì±„íŒ… UIì—ì„œ ë°”ì¸ë”©
 	UPROPERTY(BlueprintAssignable)
 	FOnChatMessageReceived OnChatMessageReceived;
 
