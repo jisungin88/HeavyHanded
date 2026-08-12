@@ -21,6 +21,7 @@ namespace GuardAIKeys
 	static const FName DetectionGauge(TEXT("DetectionGauge"));
 	static const FName InvestigateLocation(TEXT("InvestigateLocation"));
 	static const FName SearchStartTime(TEXT("SearchStartTime"));
+	static const FName LastSeenTime(TEXT("LastSeenTime"));
 	static const FName HasLineOfFireOnTarget(TEXT("HasLineOfFireOnTarget"));
 }
 
@@ -66,8 +67,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	if (IsValid(BlackboardComp))
 	{
 		constexpr float FarPast = -100000.f;
-		BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), FarPast);
-		BlackboardComp->SetValueAsFloat(TEXT("LastSeenTime"), FarPast);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, FarPast);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, FarPast);
 	}
 
 	// SelfActor / GuardType / AIState는 더 이상 Blackboard에 두지 않는다.
@@ -80,7 +81,10 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 시작 시 첫 순찰 지점을 미리 채워둔다 (비어있는 채로 Move To가 실행되는 것을 방지).
 	SelectNextPatrolPoint();
 
-	// RunBehaviorTree(BehaviorTreeAsset);
+	// BP_GuardAIController 는 data only 블루프린트라 그래프에서 대신 호출할 곳이 없고,
+	// bStartAILogicOnPossess 도 BrainComponent 가 있어야 의미가 있다(그 컴포넌트를
+	// 만들어주는 게 바로 이 호출이다). 여기서 부르지 않으면 BT 가 아예 시작되지 않는다.
+	RunBehaviorTree(BehaviorTreeAsset);
 }
 
 void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
@@ -106,6 +110,13 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 		{
 			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+
+			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
+			// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
+			// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
+			// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
+			// 추격 조건이 영구히 거짓이 된다.
+			BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
 		}
 		else
 		{
@@ -121,7 +132,7 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 		{
 			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
-			BlackboardComp->SetValueAsFloat(TEXT("SearchStartTime"), GetWorld()->GetTimeSeconds());
+			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 		}
 	}
 }
