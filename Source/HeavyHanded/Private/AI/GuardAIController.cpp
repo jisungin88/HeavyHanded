@@ -7,6 +7,8 @@
 #include "Character/GuardCharacter.h"
 #include "AI/GuardBlackboardKeys.h"
 #include "Alert/AlertComponent.h"
+#include "AITypes.h"
+#include "NavigationSystem.h"
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -121,11 +123,13 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 			// 추격 조건이 영구히 거짓이 된다.
 			BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
 		}
-		else
-		{
-			// 시야를 잃은 순간 = 수색 타이머 시작점
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
-		}
+		// 시야를 잃었다고 해서 여기서 SearchStartTime 을 쓰지 않는다.
+		//
+		// 쓰면 스쳐 지나가듯 한 번 보이기만 해도 조사가 켜진다. Guard.ini 는
+		// Guard.State.Investigate 를 "인지 게이지가 가득 차" 진입하는 상태로 정의한다.
+		// 그 조건은 BTService_UpdateDetectionGauge 가 게이지 100 인 동안 매 틱
+		// SearchStartTime 을 밀어주는 것으로 이미 만족된다 - 시야를 잃는 순간
+		// 그 값이 얼어붙어 자연스럽게 "수색 시작 시각"이 된다.
 	}
 	else if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
 	{
@@ -138,6 +142,72 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 		}
 	}
+}
+
+bool AGuardAIController::SelectNextSearchPoint()
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const APawn* GuardPawn = GetPawn();
+
+	if (!IsValid(BlackboardComp) || !IsValid(GuardPawn))
+	{
+		return false;
+	}
+
+	const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
+	if (!FAISystem::IsValidLocation(LastKnown))
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] 마지막 목격 위치가 없어 수색을 시작할 수 없다."), *GetNameSafe(GuardPawn));
+		return false;
+	}
+
+	// SearchStartTime 이 바뀌었으면 새 조사다. 훑기 진행도를 초기화한다.
+	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
+	if (!FMath::IsNearlyEqual(SearchStartTime, HandledSearchStartTime))
+	{
+		HandledSearchStartTime = SearchStartTime;
+		CurrentSearchStep = -1;
+	}
+
+	++CurrentSearchStep;
+
+	// 0번째는 마지막 목격 지점 자체. 여기부터 확인하는 게 자연스럽다.
+	if (CurrentSearchStep == 0)
+	{
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastKnown);
+
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 시작 - 마지막 목격 지점 %s"),
+			*GetNameSafe(GuardPawn), *LastKnown.ToCompactString());
+		return true;
+	}
+
+	if (CurrentSearchStep > SearchSweepCount)
+	{
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 종료 - %d개 지점을 훑었다. 순찰로 복귀."),
+			*GetNameSafe(GuardPawn), SearchSweepCount);
+		return false;
+	}
+
+	// 목격 지점 주변에서 실제로 도달 가능한 지점만 고른다.
+	// 무작위 오프셋을 그냥 더하면 벽 너머나 NavMesh 밖이 나와 Move To 가 실패한다.
+	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	FNavLocation SweepPoint;
+
+	if (IsValid(NavSys) && NavSys->GetRandomReachablePointInRadius(LastKnown, SearchSweepRadius, SweepPoint))
+	{
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SweepPoint.Location);
+
+		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 %d/%d - %s"),
+			*GetNameSafe(GuardPawn), CurrentSearchStep, SearchSweepCount,
+			*SweepPoint.Location.ToCompactString());
+		return true;
+	}
+
+	UE_LOG(LogGuardAI, Warning,
+		TEXT("[%s] 목격 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
+		*GetNameSafe(GuardPawn), *LastKnown.ToCompactString(), SearchSweepRadius);
+	return false;
 }
 
 float AGuardAIController::GetWorldAlertLevel() const
