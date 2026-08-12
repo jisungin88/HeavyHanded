@@ -31,9 +31,10 @@ AGuardAIController::AGuardAIController()
 	SetPerceptionComponent(*PerceptionComp);
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡고,
-	// 시야각·거리 등 세부 파라미터는 BP_GuardVariant_* 에서 GuardType별로 override.
-	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-	UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+	// 시야각·거리 등 세부 파라미터는 BP_GuardAIController 및 그 파생 BP 에서
+	// GuardType 별로 override 한다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에 뜬다.
+	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 
 	// 팀 시스템(IGenericTeamAgentInterface)을 별도로 구현하지 않았기 때문에,
 	// 기본 설정(bDetectEnemies만 true)으로는 플레이어가 "중립"으로 판정되어 전혀 감지되지 않는다.

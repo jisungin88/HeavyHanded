@@ -43,8 +43,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|AI")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
+	// 시야/청각 파라미터. 지역 변수로 두면 디테일 패널에 뜨지 않아
+	// 반경·시야각을 전혀 조정할 수 없다(엔진 기본값 고정). 멤버로 들고 있어야
+	// BP_GuardAIController 및 그 파생 BP 에서 GuardType 별로 값을 덮어쓸 수 있다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
+	TObjectPtr<UAISenseConfig_Sight> SightConfig;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
+	TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
+
 private:
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 	// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
