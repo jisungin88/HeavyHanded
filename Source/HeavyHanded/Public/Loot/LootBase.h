@@ -54,6 +54,33 @@ public:
     //~ ICarryable 끝
 
     /**
+     * 지금 이 노획물을 밴에 실었을 때 받는 금액($).
+     *
+     * 파손·유출로 깎이므로 설계값(BaseValue)과 다를 수 있다. 정산·UI 는 항상 이쪽을 본다.
+     * 오라클의 '상시 스캔'(기획서 4-1-3)처럼 클라이언트에서 읽는 곳이 있어 복제한다.
+     */
+    UFUNCTION(BlueprintPure, Category = "Loot|Value")
+    int32 GetCurrentValue() const { return CurrentValue; }
+
+    /** 손상되지 않았을 때의 설계 가치($) */
+    UFUNCTION(BlueprintPure, Category = "Loot|Value")
+    int32 GetBaseValue() const { return BaseValue; }
+
+    /** 가치가 깎였는가 (파손·유출) */
+    UFUNCTION(BlueprintPure, Category = "Loot|Value")
+    bool IsValueLost() const { return CurrentValue < BaseValue; }
+
+    /**
+     * 가치를 비율만큼 깎는다. (서버 전용)
+     *
+     * 불안정형 유출은 일부만, 파손형 파괴는 전부 깎는다. 어느 쪽이든 되돌리지 않는다 —
+     * 쏟은 동전을 주워 담는 규칙은 기획에 없다.
+     *
+     * @param LossRatio  0~1. 1 이면 가치 0
+     */
+    void ApplyValueLoss(float LossRatio);
+
+    /**
      * 던졌을 때의 발사 속도. 조준 방향 + 포물선 성분 + 운반자 속도까지 합친 최종 값이다.
      *
      * 서버의 임펄스와 클라이언트의 궤적 표시가 이 함수 하나를 공유한다.
@@ -164,6 +191,23 @@ protected:
     FName CarrySocketName = TEXT("hand_r");
 
     /**
+     * 손상되지 않았을 때의 가치($). 노획물 종류별로 BP 에서 지정한다.
+     *
+     * 기획서의 목표 금액은 저택 $50,000 / 박물관 $120,000 / 은행 $250,000 이고,
+     * 이 값들은 전부 임시라 플레이테스트로 조정된다. 8단계에서 DataAsset 으로 뺀다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Value",
+        meta = (ClampMin = "0"))
+    int32 BaseValue = 1000;
+
+    /**
+     * 파괴 연출이 끝난 뒤 BP 가 가치 변화를 반영할 훅. (모든 머신)
+     * 숫자 위젯·머티리얼 변화 같은 표시만 한다. 판정은 이미 C++ 에서 끝났다.
+     */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Loot|Value")
+    void OnValueChanged(int32 NewValue, int32 InBaseValue);
+
+    /**
      * 놓을 때 운반자 몸에서 앞으로 띄우는 여유(cm).
      *
      * 두 형상의 반경을 더한 값에 이만큼 더 벌린다. 딱 붙여 놓으면 놓자마자
@@ -233,6 +277,17 @@ protected:
 
     UFUNCTION()
     void OnRep_PrimaryCarrier();
+
+    /**
+     * 현재 가치($). 파손·유출로 깎인다.
+     * BeginPlay 에서 BaseValue 로 초기화된다 — 생성자에서 넣으면 BP 가 BaseValue 를
+     * 바꿔도 따라오지 않는다.
+     */
+    UPROPERTY(ReplicatedUsing = OnRep_CurrentValue, VisibleInstanceOnly, Category = "Loot|Value")
+    int32 CurrentValue = 0;
+
+    UFUNCTION()
+    void OnRep_CurrentValue();
 
     /** 물리 ON/OFF, 콜리전 프로파일, 어태치, 운반자 상호 무시를 소지 상태에 맞춘다. 모든 머신에서 실행된다 */
     virtual void ApplyCarryState();

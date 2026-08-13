@@ -69,6 +69,7 @@ void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 
     // 등록을 빠뜨려도 컴파일 에러가 나지 않고 호스트에서는 멀쩡히 동작한다. 반드시 확인할 것.
     DOREPLIFETIME(ALootBase, PrimaryCarrier);
+    DOREPLIFETIME(ALootBase, CurrentValue);
 }
 
 void ALootBase::BeginPlay()
@@ -77,6 +78,14 @@ void ALootBase::BeginPlay()
 
     // 질량은 소음 크기와 던지기 충격량의 원천이므로 메시 기본값에 맡기지 않는다.
     LootMesh->SetMassOverrideInKg(NAME_None, PhysicsData.MassKg, true);
+
+    // 가치는 서버가 정하고 클라이언트는 복제로 받는다.
+    // 생성자가 아니라 여기서 넣어야 BP 가 지정한 BaseValue 가 반영된다.
+    if (HasAuthority())
+    {
+        CurrentValue = BaseValue;
+        OnRep_CurrentValue();
+    }
 
     // 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
     // 클라이언트마다 물리 결과가 미세하게 달라서, 예측을 켜면 사람마다 다른 결과가 나온다.
@@ -336,6 +345,44 @@ UPrimitiveComponent* ALootBase::GetPhysicsRoot() const
 void ALootBase::OnRep_PrimaryCarrier()
 {
     ApplyCarryState();
+}
+
+// --------------------------------------------------------------------------
+// 가치
+// --------------------------------------------------------------------------
+
+void ALootBase::ApplyValueLoss(float LossRatio)
+{
+    // 가치는 정산에 직결되므로 서버만 정한다. 클라이언트 계산을 신뢰하지 않는다.
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    const int32 PreviousValue = CurrentValue;
+
+    // 이미 깎인 가치를 기준으로 다시 깎는다. 유출이 두 번 나면 두 번 줄어야 한다.
+    CurrentValue = FMath::Clamp(
+        FMath::RoundToInt(CurrentValue * (1.f - FMath::Clamp(LossRatio, 0.f, 1.f))),
+        0, CurrentValue);
+
+    if (CurrentValue == PreviousValue)
+    {
+        return;
+    }
+
+    // 서버에서 값을 직접 바꾸면 RepNotify 가 불리지 않는다. 서버 몫은 손으로 부른다.
+    OnRep_CurrentValue();
+
+    ShowImpactDebug(
+        FString::Printf(TEXT("가치 %d -> %d ($%d 손실)"),
+            PreviousValue, CurrentValue, PreviousValue - CurrentValue),
+        FColor::Green, GetActorLocation());
+}
+
+void ALootBase::OnRep_CurrentValue()
+{
+    OnValueChanged(CurrentValue, BaseValue);
 }
 
 void ALootBase::ApplyCarryState()
