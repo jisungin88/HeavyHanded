@@ -76,20 +76,24 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
 
-	// ↓↓↓ 여기에 새로 추가 (지난번 작업에서 이미 넣으신 그 블록 바로 여기) ↓↓↓
+	// 빙의한 폰의 PerceptionMeterComponent(소음 인지 게이지)를 찾아 OnPerceptionFull 을 구독한다.
+	// 멤버 PerceptionMeter 에도 캐싱해 둬야 한다 - HandlePerceptionFull 에서 게이지를
+	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
+	// 빠뜨리면 항상 nullptr 이라 리셋이 절대 호출되지 않는다. 그러면 래치가 안 풀려
+	// 게이지가 100%에서 그대로 굳어 두 번째 소음부터는 OnPerceptionFull 이 다시 터지지 않는다.
 	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn))
 	{
-		if (UPerceptionMeterComponent* Meter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>())
+		PerceptionMeter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>();
+		if (PerceptionMeter)
 		{
-			Meter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
-			UE_LOG(LogTemp, Warning, TEXT("PerceptionMeter bound successfully!"));
+			PerceptionMeter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
 		}
 		else
 		{
-			UE_LOG(LogTemp, Error, TEXT("PerceptionMeter component NOT FOUND on GuardPawn!"));
+			UE_LOG(LogGuardAI, Error, TEXT("[%s] PerceptionMeterComponent 를 찾지 못했다. GuardCharacter 파생 폰인지 확인할 것."),
+				*GetNameSafe(InPawn));
 		}
 	}
-	// ↑↑↑ 여기까지 ↑↑↑
 
 	// 시작 시 첫 순찰 지점을 미리 채워둔다
 	SelectNextPatrolPoint();
@@ -182,9 +186,6 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 {
-	//GuardAIController.cpp의 HandlePerceptionFull 함수 맨 위에 임시 로그 추가:
-	UE_LOG(LogTemp, Warning, TEXT("HandlePerceptionFull CALLED! Location: %s"), *LastNoiseLocation.ToString());
-
 	// 인지 게이지 판정은 서버 권위이므로 이 콜백도 서버에서만 의미가 있다 (OnTargetPerceptionUpdated와 동일한 이유)
 	if (!HasAuthority())
 	{
