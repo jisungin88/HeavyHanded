@@ -638,7 +638,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
         ShowImpactDebug(
             FString::Printf(TEXT("기각(약함) %.0f < %.0f"),
                 ImpulseMagnitude, PhysicsData.ImpactReportThreshold),
-            FColor::Silver, Hit.ImpactPoint);
+            FColor::Silver, Hit.ImpactPoint, ImpulseMagnitude);
         return;
     }
 
@@ -649,7 +649,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     {
         ShowImpactDebug(
             FString::Printf(TEXT("기각(%.1f초 내 재충돌) %.0f"), ImpactDebounceSeconds, ImpulseMagnitude),
-            FColor::Orange, Hit.ImpactPoint);
+            FColor::Orange, Hit.ImpactPoint, ImpulseMagnitude);
         return;
     }
 
@@ -691,7 +691,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     ShowImpactDebug(
         FString::Printf(TEXT("확정 #%d  임펄스 %.0f  대상 %s  (OnHit 누적 %d회)"),
             DebugConfirmedCount, ImpulseMagnitude, *GetNameSafe(OtherActor), DebugRawHitCount),
-        FColor::Yellow, Event.ImpactPoint);
+        FColor::Yellow, Event.ImpactPoint, ImpulseMagnitude);
 
     // 예약된 원인은 1회성이다. 다음 충돌부터는 일반 충돌로 돌아간다.
     PendingImpactCause = ELootImpactCause::Collision;
@@ -883,9 +883,17 @@ void ALootBase::ShowThrowTrajectory(const FVector& AimDirection, float Duration)
 #endif
 }
 
-void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const
+void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location,
+    float FilterImpulse) const
 {
     if (!bShowImpactDebug)
+    {
+        return;
+    }
+
+    // 구르거나 미세하게 재접촉하는 것까지 전부 찍으면 정작 봐야 할 충돌이 묻힌다.
+    // 음수는 임펄스와 무관한 메시지(버리기 위치 보정 등)라 걸러내지 않는다.
+    if (FilterImpulse >= 0.f && FilterImpulse < DebugMinLogImpulse)
     {
         return;
     }

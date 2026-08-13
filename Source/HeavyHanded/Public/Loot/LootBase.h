@@ -206,6 +206,18 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug")
     bool bDebugEnableTestKeys = false;
 
+    /**
+     * 이 임펄스 미만의 충돌은 디버그 출력에서 뺀다.
+     *
+     * 낙하 1회에 OnHit 이 5~15회 오고 대부분이 임펄스 한 자릿수의 미세 재접촉이다.
+     * 전부 찍으면 정작 봐야 할 충돌이 로그에 묻힌다.
+     * 게이팅 자체와는 무관하다 — 여기서 거르는 것은 '보여 줄 것'뿐이고,
+     * 실제 판정 기준은 ImpactReportThreshold 와 DamageImpulseThreshold 다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug",
+        meta = (ClampMin = "0.0"))
+    float DebugMinLogImpulse = 100.f;
+
     /** [임시] 이 거리 안에 있을 때만 G 키에 반응한다 (cm) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug",
         meta = (ClampMin = "0.0"))
@@ -252,8 +264,13 @@ private:
      */
     void ApplyDropImpulse(const APawn* Carrier);
 
-    /** 로그 + 화면 메시지 + 충돌 지점 구. bShowImpactDebug 가 꺼져 있으면 아무것도 하지 않는다 */
-    void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const;
+    /**
+     * 로그 + 화면 메시지 + 충돌 지점 구. bShowImpactDebug 가 꺼져 있으면 아무것도 하지 않는다.
+     * @param FilterImpulse  이 충격의 임펄스. DebugMinLogImpulse 미만이면 출력하지 않는다.
+     *                       음수를 넘기면 임펄스와 무관한 메시지로 보고 항상 출력한다.
+     */
+    void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location,
+        float FilterImpulse = -1.f) const;
 
     /** [임시] G/T 키를 이 액터에 연결한다. BeginPlay 에서 부른다 */
     void Debug_SetupTestKeys();
