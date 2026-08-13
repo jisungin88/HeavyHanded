@@ -4,6 +4,7 @@
 #include "Core/HeavyHandedTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Loot/LootBase.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -74,6 +75,19 @@ void ULootDurabilityComponent::HandleLootImpact(const FLootImpactEvent& Event)
     // 파괴 방송을 다시 세면 자기 자신을 물고 들어간다.
     if (Event.Cause == ELootImpactCause::Break)
     {
+        return;
+    }
+
+    // 사람 몸에 닿아서는 상하지 않는다. 넘어져서 바닥에 부딪히면 그때 상한다.
+    // 키네마틱 캡슐은 살짝 닿아도 임펄스가 낙하의 몇 배로 튀어서, 임계값으로는 못 가른다.
+    if (bIgnorePawnImpacts && Cast<APawn>(Event.HitActor.Get()))
+    {
+        if (OwnerLoot->IsImpactDebugEnabled() && GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Emerald,
+                FString::Printf(TEXT("[%s] 파손 제외(사람 접촉) 임펄스 %.0f — %s"),
+                    *OwnerLoot->GetName(), Event.ImpulseMagnitude, *GetNameSafe(Event.HitActor.Get())));
+        }
         return;
     }
 

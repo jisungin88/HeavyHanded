@@ -164,6 +164,19 @@ protected:
     FName CarrySocketName = TEXT("hand_r");
 
     /**
+     * 놓을 때 운반자 몸에서 앞으로 띄우는 여유(cm).
+     *
+     * 두 형상의 반경을 더한 값에 이만큼 더 벌린다. 딱 붙여 놓으면 놓자마자
+     * 한 발짝만 움직여도 자기가 놓은 물건에 닿는다.
+     * 파손은 이 거리로 막는 것이 아니다 — 그건 bIgnorePawnImpacts 가 담당한다.
+     * 여기서는 놓은 물건이 발에 차이지 않을 정도만 확보한다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
+        meta = (ClampMin = "0.0"))
+    float ReleaseForwardClearance = 30.f;
+
+
+    /**
      * 같은 대상에 대한 재충돌을 이 시간 동안 무시한다.
      * 임계값만으로는 부족하다 — 세게 떨어지면 강한 충격이 연달아 여러 번 잡힌다.
      */
@@ -227,10 +240,17 @@ private:
     void SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore);
 
     /**
-     * 물리를 켜기 전에 운반자 몸과의 겹침을 푼다. (서버 전용)
-     * 겹친 채로 켜면 물리 엔진이 침투를 해소하며 만든 임펄스가 파손으로 잡힌다.
+     * 물리를 켜기 전에 운반자 몸 밖으로 빼낸다. (서버 전용)
+     * 겹친 채로 켜면 물리 엔진이 침투를 밀어내며 만든 임펄스가 그대로 충돌로 잡히고,
+     * 버린 물건이 엉뚱한 방향으로 튄다.
      */
     void ResolveReleaseOverlap(const APawn* Carrier);
+
+    /**
+     * 버릴 때 보는 방향으로 약하게 밀어 준다. (서버 전용)
+     * 던지기와 같은 경로를 쓰지 않는다 — 버리기는 조준도 궤적 예측도 없고 값도 훨씬 작다.
+     */
+    void ApplyDropImpulse(const APawn* Carrier);
 
     /** 로그 + 화면 메시지 + 충돌 지점 구. bShowImpactDebug 가 꺼져 있으면 아무것도 하지 않는다 */
     void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location) const;

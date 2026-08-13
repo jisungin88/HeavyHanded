@@ -373,7 +373,7 @@ void ALootBase::ApplyCarryState()
 
         LootMesh->SetCollisionProfileName(LootCollisionProfiles::Simulating);
 
-        // 물리를 켜기 전에 운반자와의 겹침을 푼다. 순서가 바뀌면 소용없다.
+        // 물리를 켜기 전에 몸 밖으로 빼낸다. 순서가 바뀌면 소용없다.
         // 위치 보정은 서버가 정하고 클라이언트는 복제로 받는다.
         if (HasAuthority())
         {
@@ -381,6 +381,13 @@ void ALootBase::ApplyCarryState()
         }
 
         LootMesh->SetSimulatePhysics(true);
+
+        // 임펄스는 물리를 켠 뒤에야 먹는다.
+        // 던지기는 OnThrown 이 직접 훨씬 큰 임펄스를 주므로 여기서는 건드리지 않는다.
+        if (HasAuthority() && PendingImpactCause != ELootImpactCause::Throw)
+        {
+            ApplyDropImpulse(PreviousCarrier);
+        }
     }
 }
 
@@ -422,35 +429,126 @@ void ALootBase::ResolveReleaseOverlap(const APawn* Carrier)
         return;
     }
 
-    // ComputePenetration 이 비const 함수라 const 포인터로 받을 수 없다.
-    UPrimitiveComponent* CarrierBody = Cast<UPrimitiveComponent>(Carrier->GetRootComponent());
-    if (!CarrierBody)
+    const UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
 
-    // 소지 중에는 물리가 꺼져 있어 노획물이 운반자 몸 안에 들어가 있어도 아무 일도 없다.
-    // 그 상태로 물리를 켜면 물리 엔진이 겹침을 해소하느라 큰 임펄스를 만들고,
-    // 그게 '세게 부딪혔다'로 잡혀 파손 카운트까지 올라간다. 놓기만 했는데 물건이 상한다.
+    // 던지기는 손 위치에서 출발해야 한다. OnThrown 이 ApplyCarryState 를 부르기 직전에
+    // 원인을 Throw 로 예약해 두므로 그것으로 구분한다. 여기서 위치를 옮기면
+    // 손 높이 기준으로 그린 예측 궤적과 실제 궤적이 어긋난다.
+    // (던지기는 OnThrown 이 ThrowClearance 로 따로 간격을 만든다)
+    if (PendingImpactCause == ELootImpactCause::Throw)
+    {
+        return;
+    }
+
+    const FCollisionShape LootShape = LootMesh->GetCollisionShape();
+
+    FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(LootRelease), /*bTraceComplex=*/false, this);
+    TraceParams.AddIgnoredActor(Carrier);
+
+    // --- 1) 운반자 몸 밖으로 빼낸다 ---------------------------------------
     //
-    // 상호 무시(IgnoreActorWhenMoving)로는 막을 수 없다. 그건 컴포넌트 이동 스윕에만
+    // [핵심] 소지 중 노획물은 운반자 몸 '안'에 들어가 있다. 그 상태로 물리를 켜면
+    // 물리 엔진이 침투를 밀어내며 큰 임펄스를 만들고, 그게 '세게 부딪혔다'로 잡혀
+    // 놓기만 했는데 파손 1회가 쌓인다. 바닥에 떨어져서 나는 파손과는 별개의 사건이다.
+    //
+    // 상호 무시(IgnoreActorWhenMoving)로는 못 막는다. 그건 컴포넌트 이동 스윕에만
     // 적용되고, 시뮬레이션 중인 바디의 접촉은 물리 엔진이 따로 처리하기 때문이다.
     //
-    // 그래서 물리를 켜기 전에 겹침을 직접 푼다. 최소 이동 거리(MTD)만큼만 밀어내므로
-    // 실제로 겹쳐 있을 때만, 필요한 만큼만 움직인다.
-    FMTDResult PenetrationResult;
-    if (!CarrierBody->ComputePenetration(PenetrationResult,
-        LootMesh->GetCollisionShape(), GetActorLocation(), GetActorQuat()))
+    // MTD(ComputePenetration) 단독으로도 못 막는다. 두 형상의 중심이 거의 겹치면
+    // 밀어낼 방향이 정해지지 않아 0 벡터가 나오고, 결국 제자리에 그대로 남는다.
+    // 손 소켓이 없는 폰에 붙으면 노획물이 폰 원점에 정확히 겹치므로 딱 이 경우가 된다.
+    //
+    // 그래서 방향을 우리가 정한다. 운반자 정면으로, 두 형상의 반경 합만큼 빼낸다.
+    // 버리기가 앞으로 던지는 동작이므로 방향도 이쪽이 맞다.
+    FVector ForwardDir = Carrier->GetActorForwardVector();
+    ForwardDir.Z = 0.f;
+    ForwardDir = ForwardDir.GetSafeNormal();
+    if (ForwardDir.IsNearlyZero())
     {
-        // 겹치지 않았다. 손 소켓에 제대로 붙어 있으면 대개 이쪽이다.
+        ForwardDir = FVector::ForwardVector;
+    }
+
+    const float ClearDistance = Carrier->GetSimpleCollisionRadius()
+        + LootMesh->Bounds.SphereRadius + ReleaseForwardClearance;
+
+    const FVector StartLocation = GetActorLocation();
+    FVector PlaceLocation = FVector(Carrier->GetActorLocation().X, Carrier->GetActorLocation().Y, StartLocation.Z)
+        + ForwardDir * ClearDistance;
+
+    // 앞이 벽이면 벽을 뚫고 놓게 된다. 실제로 갈 수 있는 데까지만 간다.
+    // (운반자는 무시 대상이라 운반자 몸에는 걸리지 않는다)
+    FHitResult ClearHit;
+    if (World->SweepSingleByProfile(ClearHit, StartLocation, PlaceLocation, GetActorQuat(),
+        LootCollisionProfiles::Simulating, LootShape, TraceParams))
+    {
+        PlaceLocation = ClearHit.Location;
+    }
+
+    SetActorLocation(PlaceLocation, /*bSweep=*/false);
+
+    // --- 2) 그래도 겹쳐 있으면 마지막으로 밀어낸다 -------------------------
+    //
+    // 좁은 구석처럼 앞으로 뺄 공간이 없어 운반자 몸 안에 머무는 경우가 남는다.
+    // ComputePenetration 이 비const 함수라 const 포인터로 받을 수 없다.
+    if (UPrimitiveComponent* CarrierBody = Cast<UPrimitiveComponent>(Carrier->GetRootComponent()))
+    {
+        FMTDResult PenetrationResult;
+        if (CarrierBody->ComputePenetration(PenetrationResult, LootShape,
+            PlaceLocation, GetActorQuat()))
+        {
+            // 중심이 겹쳐 방향이 0 으로 나오면 MTD 를 믿을 수 없다. 정면으로 밀어낸다.
+            const FVector PushDir = PenetrationResult.Direction.IsNearlyZero()
+                ? ForwardDir : PenetrationResult.Direction;
+
+            PlaceLocation += PushDir * (PenetrationResult.Distance + ReleaseDepenetrationMargin);
+            SetActorLocation(PlaceLocation, /*bSweep=*/false);
+
+            ShowImpactDebug(TEXT("버리기 — MTD 로 추가 이탈"), FColor::Magenta, PlaceLocation);
+        }
+    }
+
+    // 이 값이 0 에 가까우면 몸 밖으로 못 빠져나간 것이다.
+    ShowImpactDebug(
+        FString::Printf(TEXT("버리기 — 몸 밖으로 %.0fcm"), FVector::Dist(StartLocation, PlaceLocation)),
+        FColor::Cyan, PlaceLocation);
+}
+
+void ALootBase::ApplyDropImpulse(const APawn* Carrier)
+{
+    if (!IsValid(Carrier) || PhysicsData.DropSpeed <= 0.f)
+    {
         return;
     }
 
-    // 딱 붙여 놓으면 부동소수 오차로 다시 겹친 것으로 잡힐 수 있어 여유를 조금 준다.
-    const FVector SafeLocation = GetActorLocation()
-        + PenetrationResult.Direction * (PenetrationResult.Distance + ReleaseDepenetrationMargin);
+    // 보는 방향으로 버린다. 액터 정면이 아니라 시선을 쓰는 이유는,
+    // 발밑을 보고 버리면 발밑에 놓이고 앞을 보고 버리면 앞으로 가야 자연스럽기 때문이다.
+    FVector DropDirection = Carrier->GetBaseAimRotation().Vector();
+    if (DropDirection.IsNearlyZero())
+    {
+        DropDirection = Carrier->GetActorForwardVector();
+    }
 
-    SetActorLocation(SafeLocation, /*bSweep=*/false);
+    // 위쪽 성분을 섞어 살짝 떠서 굴러가게 한다. 안 섞으면 바닥으로 미끄러지듯 밀린다.
+    DropDirection = (DropDirection.GetSafeNormal()
+        + FVector::UpVector * PhysicsData.DropUpwardRatio).GetSafeNormal();
+
+    // 임펄스 = 질량 x 목표 속도. 질량을 곱해야 무게와 무관하게 DropSpeed 그대로 나간다.
+    // 던지기와 계산은 같고 값만 훨씬 작다. 버리기는 조준도 궤적 예측도 없다.
+    LootMesh->AddImpulse(DropDirection * PhysicsData.DropSpeed * LootMesh->GetMass());
+
+    if (PhysicsData.DropSpinSpeed > 0.f)
+    {
+        const FVector SpinAxis =
+            FVector::CrossProduct(DropDirection, FVector::UpVector).GetSafeNormal();
+        if (!SpinAxis.IsNearlyZero())
+        {
+            LootMesh->SetPhysicsAngularVelocityInDegrees(SpinAxis * PhysicsData.DropSpinSpeed);
+        }
+    }
 }
 
 void ALootBase::SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore)
@@ -561,6 +659,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
     Event.ImpulseMagnitude = ImpulseMagnitude;
     Event.Cause = PendingImpactCause;
     Event.LootActor = this;
+    Event.HitActor = OtherActor;
     Event.InstigatorPawn = PendingInstigatorPawn;
     Event.ServerTime = Now;
 
@@ -586,9 +685,12 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 
     // 낙하 1회에 OnHit 5~15회가 확정 1회로 묶이는지를 이 비율로 확인한다.
     ++DebugConfirmedCount;
+
+    // 무엇에 부딪혔는지를 같이 찍는다. 임펄스만 봐서는 바닥에 떨어진 것인지
+    // 운반자 몸에 튕긴 것인지 구분할 수 없다.
     ShowImpactDebug(
-        FString::Printf(TEXT("확정 #%d  임펄스 %.0f  (OnHit 누적 %d회)"),
-            DebugConfirmedCount, ImpulseMagnitude, DebugRawHitCount),
+        FString::Printf(TEXT("확정 #%d  임펄스 %.0f  대상 %s  (OnHit 누적 %d회)"),
+            DebugConfirmedCount, ImpulseMagnitude, *GetNameSafe(OtherActor), DebugRawHitCount),
         FColor::Yellow, Event.ImpactPoint);
 
     // 예약된 원인은 1회성이다. 다음 충돌부터는 일반 충돌로 돌아간다.
