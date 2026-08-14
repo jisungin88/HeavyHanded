@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/HeavyHandedTypes.h"
+#include "GameplayTagAssetInterface.h"   // 부모 인터페이스 — 전방 선언 불가
+#include "GameplayTagContainer.h"        // FGameplayTagContainer 를 값으로 보유
 #include "Interfaces/Carryable.h"
 #include "LootBase.generated.h"
 
@@ -30,7 +32,7 @@ struct FPredictProjectilePathResult;
  * 서버 권위 + 클라이언트 보간. 클라이언트 예측은 쓰지 않는다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ALootBase : public AActor, public ICarryable
+class HEAVYHANDED_API ALootBase : public AActor, public ICarryable, public IGameplayTagAssetInterface
 {
     GENERATED_BODY()
 
@@ -38,6 +40,34 @@ public:
     ALootBase();
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+    //~ IGameplayTagAssetInterface — "이것이 무엇인가" 를 다른 파트에 알린다
+    /**
+     * 특성 태그(Loot.Type.*)와 상태 태그(Loot.State.*)를 함께 돌려준다.
+     *
+     * 플레이어 파트의 GAB_Interact 가 Loot.Type 부모 태그 하나로 집기 대상을 판정하고,
+     * 환경 파트의 압력판은 Loot.State.Dropped 를 본다.
+     * 인터페이스로 여는 이유는 그쪽이 ALootBase 를 include 하지 않아도 되게 하기 위해서다.
+     */
+    virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
+    //~ IGameplayTagAssetInterface 끝
+
+    /**
+     * 특성 태그를 추가한다. 컴포넌트가 BeginPlay 에서 자기 태그를 등록한다. (서버 전용)
+     *
+     * 파손형·불안정형은 컴포넌트를 붙이는 것이 곧 선언이므로, 태그를 BP 에서 따로
+     * 지정하게 하면 컴포넌트는 있는데 태그는 없는 상태가 만들어진다.
+     * 중량형은 컴포넌트가 없어 ALootBase 가 WeightClass 를 보고 직접 등록한다.
+     */
+    void AddLootTypeTag(const FGameplayTag& TypeTag);
+
+    /**
+     * 상태 태그를 갈아 끼운다. (서버 전용)
+     *
+     * 상태는 배타적이라 컨테이너가 아니라 하나만 들고 있다 — 들려 있으면서 동시에
+     * 바닥에 놓여 있을 수는 없다. 파괴·유출처럼 되돌아가지 않는 상태도 여기로 들어온다.
+     */
+    void SetLootStateTag(const FGameplayTag& NewState);
 
     //~ ICarryable 시작 — 플레이어는 요청하고, 아이템이 허용/거부한다
     virtual EWeightClass GetWeightClass() const override;
@@ -87,6 +117,22 @@ public:
      * 계산을 따로 두면 미리 보이는 궤적과 실제로 날아가는 경로가 어긋난다.
      */
     FVector ComputeThrowVelocity(const FVector& AimDirection) const;
+
+    /**
+     * 지금 이 노획물을 던진다면 어느 방향으로 나가야 하는가.
+     *
+     * 운반자의 시선을 그대로 쓰지 않는다. 발사점(손)이 화면 중앙에서 벗어나 있으면
+     * 시선 방향으로 던졌을 때 조준점 옆으로 날아가고, 멀수록 오차가 커진다.
+     * 카메라에서 트레이스해 조준점을 먼저 찾고, 발사점에서 그 지점을 향하게 한다.
+     *
+     * [경계] 보정에 필요한 발사점은 물건만 안다. 그래서 이 계산이 아이템 쪽에 있다.
+     *   플레이어 파트는 "언제 던지는가" 만 정하고 이 값을 그대로 OnThrown 에 넘기면 된다.
+     *   궤적 표시와 실제 발사가 같은 값을 쓰게 하려면 반드시 한 곳에서만 구해야 한다.
+     *
+     * 들려 있지 않으면 영벡터를 돌려준다.
+     */
+    UFUNCTION(BlueprintPure, Category = "Loot|Throw")
+    FVector ComputeThrowAimDirection() const;
 
     /**
      * 던지기 궤적을 예측한다. 조준 중인 클라이언트가 로컬로 그리는 표시용이다.
@@ -297,6 +343,19 @@ protected:
     UPROPERTY(ReplicatedUsing = OnRep_PrimaryCarrier, VisibleInstanceOnly, Category = "Loot|Carry")
     TObjectPtr<APawn> PrimaryCarrier;
 
+    /**
+     * 특성 태그(Loot.Type.*). BeginPlay 에서 채워지고 그 뒤로 바뀌지 않는다.
+     *
+     * 클라이언트도 상호작용 프롬프트("E — 들기")를 띄우려면 종류를 알아야 하므로 복제한다.
+     * 판정 자체는 서버에서만 한다.
+     */
+    UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Loot|Tags")
+    FGameplayTagContainer LootTypeTags;
+
+    /** 상태 태그(Loot.State.*). 하나만 유효하다 */
+    UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Loot|Tags")
+    FGameplayTag LootStateTag;
+
     UFUNCTION()
     void OnRep_PrimaryCarrier();
 
@@ -378,17 +437,6 @@ private:
 
     /** [임시] 지금 이 플레이어가 들고 있는 노획물. 없으면 nullptr. T 키가 쓴다 */
     ALootBase* Debug_FindCarriedLoot(const APawn* LocalPawn) const;
-
-    /**
-     * [임시] 조준 방향을 구한다. 궤적 표시와 실제 던지기가 같은 값을 써야 하므로 한 곳에 둔다.
-     *
-     * 시선 방향을 그대로 쓰지 않는다. 발사점(손)이 화면 중앙에서 벗어나 있으면
-     * 시선 방향으로 던졌을 때 조준점 옆으로 날아가고, 멀수록 오차가 커진다.
-     * 카메라에서 트레이스해 조준점을 먼저 찾고, 발사점에서 그 지점을 향하게 한다.
-     *
-     * 플레이어 파트가 OnThrown 에 넘길 AimDirection 도 이렇게 계산해야 한다.
-     */
-    FVector Debug_ComputeAimDirection() const;
 
     /** OnHit 콜백이 온 총 횟수. 확정 횟수와 비교해 게이팅 효과를 본다 */
     int32 DebugRawHitCount = 0;

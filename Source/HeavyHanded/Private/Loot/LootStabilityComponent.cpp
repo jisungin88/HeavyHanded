@@ -1,5 +1,6 @@
 ﻿#include "Loot/LootStabilityComponent.h"
 
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -37,6 +38,9 @@ void ULootStabilityComponent::BeginPlay()
         SetComponentTickEnabled(false);
         return;
     }
+
+    // 이 컴포넌트가 붙어 있다는 것이 곧 "불안정형" 이라는 선언이다.
+    OwnerLoot->AddLootTypeTag(HHTags::Loot_Type_Unstable);
 
     // 판정도 기울기 계산도 서버 몫이다. 클라이언트는 복제된 값으로 연출만 맞춘다.
     SetComponentTickEnabled(OwnerLoot->HasAuthority());

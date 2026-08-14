@@ -6,4 +6,14 @@ namespace HHTags
 {
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Impact, "Noise.Loot.Impact");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,  "Noise.Loot.Break");
+
+	UE_DEFINE_GAMEPLAY_TAG(Loot_Type,          "Loot.Type");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Heavy,    "Loot.Type.Heavy");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Fragile,  "Loot.Type.Fragile");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Unstable, "Loot.Type.Unstable");
+
+	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Idle,    "Loot.State.Idle");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Carried, "Loot.State.Carried");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Dropped, "Loot.State.Dropped");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Broken,  "Loot.State.Broken");
 }

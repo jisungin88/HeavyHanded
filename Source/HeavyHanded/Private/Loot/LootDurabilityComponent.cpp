@@ -1,6 +1,7 @@
 ﻿#include "Loot/LootDurabilityComponent.h"
 
 #include "Components/PrimitiveComponent.h"
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeavyHandedTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -43,6 +44,10 @@ void ULootDurabilityComponent::BeginPlay()
     // 확정 충격은 서버에서만 발생한다. 클라이언트는 복제된 값으로 연출만 맞춘다.
     if (OwnerLoot->HasAuthority())
     {
+        // 이 컴포넌트가 붙어 있다는 것이 곧 "파손형" 이라는 선언이다.
+        // BP 에서 태그를 따로 지정하게 하면 컴포넌트는 있는데 태그는 없는 상태가 생긴다.
+        OwnerLoot->AddLootTypeTag(HHTags::Loot_Type_Fragile);
+
         ImpactDelegateHandle = OwnerLoot->OnLootImpact.AddUObject(
             this, &ULootDurabilityComponent::HandleLootImpact);
     }
@@ -128,6 +133,9 @@ void ULootDurabilityComponent::Break(const FLootImpactEvent& CausingEvent)
     // 파괴된 노획물은 곧 사라지지만, 사라지기 전에 값을 0 으로 만들어 둬야
     // 이 액터를 참조하고 있던 쪽(적재 목록·오라클 표시)이 잘못된 금액을 읽지 않는다.
     OwnerLoot->ApplyValueLoss(1.f);
+
+    // 되돌아가지 않는 상태다. 놓기로 덮어쓰이지 않게 ApplyCarryState 가 이 태그를 피해 간다.
+    OwnerLoot->SetLootStateTag(HHTags::Loot_State_Broken);
 
     // 파괴는 부딪힌 소리와 별개의 사건이다. 상자가 바닥에 부딪히는 소리와
     // 깨지는 소리는 다르므로, 같은 충격에서 두 이벤트가 나가는 것이 맞다.

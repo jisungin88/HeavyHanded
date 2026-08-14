@@ -1,6 +1,7 @@
 ﻿#include "Loot/LootBase.h"
 
 #include "Components/InputComponent.h"
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -90,6 +91,39 @@ void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
     // 등록을 빠뜨려도 컴파일 에러가 나지 않고 호스트에서는 멀쩡히 동작한다. 반드시 확인할 것.
     DOREPLIFETIME(ALootBase, PrimaryCarrier);
     DOREPLIFETIME(ALootBase, CurrentValue);
+    DOREPLIFETIME(ALootBase, LootTypeTags);
+    DOREPLIFETIME(ALootBase, LootStateTag);
+}
+
+void ALootBase::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+    TagContainer.AppendTags(LootTypeTags);
+
+    if (LootStateTag.IsValid())
+    {
+        TagContainer.AddTag(LootStateTag);
+    }
+}
+
+void ALootBase::AddLootTypeTag(const FGameplayTag& TypeTag)
+{
+    // 특성은 스폰 시점에 확정되고 그 뒤로 바뀌지 않는다. 서버가 정하고 클라이언트는 받는다.
+    if (!HasAuthority() || !TypeTag.IsValid())
+    {
+        return;
+    }
+
+    LootTypeTags.AddTag(TypeTag);
+}
+
+void ALootBase::SetLootStateTag(const FGameplayTag& NewState)
+{
+    if (!HasAuthority() || LootStateTag == NewState)
+    {
+        return;
+    }
+
+    LootStateTag = NewState;
 }
 
 void ALootBase::BeginPlay()
@@ -105,6 +139,22 @@ void ALootBase::BeginPlay()
     {
         CurrentValue = BaseValue;
         OnRep_CurrentValue();
+
+        // 중량형은 전용 컴포넌트가 없어서 여기서 직접 단다.
+        // 파손형·불안정형은 각자 컴포넌트가 BeginPlay 에서 자기 태그를 등록한다.
+        if (PhysicsData.WeightClass == EWeightClass::Heavy)
+        {
+            AddLootTypeTag(HHTags::Loot_Type_Heavy);
+        }
+
+        // 특성 태그가 하나도 없으면 플레이어 파트의 집기 트레이스가 이 액터를 그냥 지나친다.
+        // Loot.Type 부모 태그 하나로 판정하므로, 특성이 없는 평범한 노획물도 부모는 달아야 한다.
+        if (LootTypeTags.IsEmpty())
+        {
+            AddLootTypeTag(HHTags::Loot_Type);
+        }
+
+        SetLootStateTag(HHTags::Loot_State_Idle);
     }
 
     // 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
@@ -146,7 +196,7 @@ void ALootBase::Tick(float DeltaSeconds)
 
     if (bDebugAiming)
     {
-        ShowThrowTrajectory(Debug_ComputeAimDirection());
+        ShowThrowTrajectory(ComputeThrowAimDirection());
     }
     else if (!bCarriedWithoutSocket)
     {
@@ -488,10 +538,22 @@ void ALootBase::ApplyCarryState()
         MoveIgnoredCarrier = Carrier;
 
         AttachToCarrier(Carrier);
+
+        SetLootStateTag(HHTags::Loot_State_Carried);
     }
     else
     {
         bCarriedWithoutSocket = false;
+
+        // 들려 있던 것이 놓였을 때만 Dropped 로 간다.
+        //
+        // BeginPlay 에서도 이 함수가 한 번 도는데, 그때 무조건 덮어쓰면 레벨에 배치된
+        // 노획물이 시작하자마자 "사람이 내려놓은 것"이 된다. 둘은 구별돼야 한다 —
+        // 파괴(Broken)처럼 되돌아가지 않는 상태를 지우는 문제도 같이 막힌다.
+        if (LootStateTag == HHTags::Loot_State_Carried)
+        {
+            SetLootStateTag(HHTags::Loot_State_Dropped);
+        }
 
         // 어태치된 채로는 물리가 돌지 않는다. 반드시 먼저 떼어낸다.
         DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -961,7 +1023,7 @@ ALootBase* ALootBase::Debug_FindGrabTarget(const APawn* LocalPawn) const
     return Nearest;
 }
 
-FVector ALootBase::Debug_ComputeAimDirection() const
+FVector ALootBase::ComputeThrowAimDirection() const
 {
     const APawn* Carrier = PrimaryCarrier.Get();
     const UWorld* World = GetWorld();
@@ -1054,7 +1116,7 @@ void ALootBase::Debug_ThrowForward()
     Target->bDebugAiming = false;
 
     // 조준 중 궤적과 같은 함수를 쓴다. 두 곳에서 따로 구하면 보던 것과 다르게 날아간다.
-    const FVector AimDirection = Target->Debug_ComputeAimDirection();
+    const FVector AimDirection = Target->ComputeThrowAimDirection();
     if (AimDirection.IsNearlyZero())
     {
         return;
