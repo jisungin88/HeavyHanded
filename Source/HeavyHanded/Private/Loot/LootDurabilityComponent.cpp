@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Loot/LootBase.h"
+#include "Loot/LootLog.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -35,7 +36,7 @@ void ULootDurabilityComponent::BeginPlay()
     if (!IsValid(OwnerLoot))
     {
         // 수치를 ALootBase 의 FLootPhysicsData 에서 읽으므로 다른 액터에는 붙을 수 없다.
-        UE_LOG(LogTemp, Warning,
+        UE_LOG(LogLoot, Warning,
             TEXT("[%s] ULootDurabilityComponent 는 ALootBase 에만 붙일 수 있다. 파손 판정이 비활성화된다."),
             *GetNameSafe(GetOwner()));
         return;

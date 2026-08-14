@@ -2,6 +2,7 @@
 
 #include "Components/InputComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Loot/LootLog.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -17,6 +18,9 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
 
+// 노획물 액터와 하위 컴포넌트가 같은 카테고리로 찍는다. 선언은 Loot/LootLog.h.
+DEFINE_LOG_CATEGORY(LogLoot);
+
 namespace LootCollisionProfiles
 {
     /** 물리 시뮬레이션 중 (Config/DefaultEngine.ini 의 CollisionProfile 정의) */
@@ -25,6 +29,23 @@ namespace LootCollisionProfiles
     /** 소지 중 — 물리 OFF, 다른 캐릭터만 Block */
     static const FName Carried(TEXT("CarriedLoot"));
 }
+
+/**
+ * 물리 복제 모드 폴백. 0 = PredictiveInterpolation(기본) / 1 = Default / 2 = Resimulation.
+ *
+ * PredictiveInterpolation 은 UE 5.4 에서 (WIP) 로 표시된 기능이다. 물건이 사람마다
+ * 다른 곳에 있거나 심하게 튀는 증상이 나오면 이 값으로 엔진 기본 모드로 되돌려
+ * '우리 코드 문제인지 엔진 모드 문제인지' 를 먼저 가른다.
+ *
+ * BeginPlay 에서만 읽는다. 이미 스폰된 노획물에는 적용되지 않으므로 PIE 를 다시 시작할 것.
+ * 전역 스위치인 이유는 진단할 때 전부 한꺼번에 바꿔야 비교가 되기 때문이다
+ * (액터별 스위치는 bShowImpactDebug 처럼 '하나만 보고 싶을 때' 쓴다 — 문서 07 테스트).
+ */
+static TAutoConsoleVariable<int32> CVarLootPhysicsRepMode(
+    TEXT("hh.Loot.PhysicsRepMode"),
+    0,
+    TEXT("노획물 물리 복제 모드. 0=PredictiveInterpolation(기본) 1=Default 2=Resimulation. BeginPlay 에서만 읽는다"),
+    ECVF_Default);
 
 namespace
 {
@@ -160,7 +181,26 @@ void ALootBase::BeginPlay()
     // 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
     // 클라이언트마다 물리 결과가 미세하게 달라서, 예측을 켜면 사람마다 다른 결과가 나온다.
     // (Config/DefaultEngine.ini 의 PhysicsSettings 주석과 짝을 이룬다)
-    SetPhysicsReplicationMode(EPhysicsReplicationMode::PredictiveInterpolation);
+    //
+    // UE 5.4 에는 전역 ini 키가 없어서 새 물리 액터마다 여기서 직접 불러야 한다.
+    // (WIP) 기능이라 hh.Loot.PhysicsRepMode 로 엔진 기본 모드로 되돌릴 수 있게 열어 둔다.
+    EPhysicsReplicationMode RepMode = EPhysicsReplicationMode::PredictiveInterpolation;
+    switch (CVarLootPhysicsRepMode.GetValueOnGameThread())
+    {
+    case 1:  RepMode = EPhysicsReplicationMode::Default;      break;
+    case 2:  RepMode = EPhysicsReplicationMode::Resimulation; break;
+    default: break;
+    }
+
+    if (RepMode != EPhysicsReplicationMode::PredictiveInterpolation)
+    {
+        // 기본값에서 벗어난 상태로 테스트하다 원인을 착각하는 일이 없도록 남긴다.
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] 물리 복제 모드가 기본(PredictiveInterpolation)이 아니다 — hh.Loot.PhysicsRepMode=%d"),
+            *GetName(), CVarLootPhysicsRepMode.GetValueOnGameThread());
+    }
+
+    SetPhysicsReplicationMode(RepMode);
 
     // 서버에서만 판정하므로 클라이언트에는 델리게이트를 붙이지 않는다.
     if (HasAuthority())
@@ -947,7 +987,7 @@ void ALootBase::Debug_ToggleGrabByLocalPlayer()
     {
         // 에디터에서 (플레이 중이 아닐 때) 버튼이 눌린 경우.
         // 조용히 빠지면 원인을 못 찾으므로 로그라도 남긴다.
-        UE_LOG(LogTemp, Warning, TEXT("[Loot:%s] 로컬 플레이어 폰이 없다. PIE 중인지 확인할 것."), *GetName());
+        UE_LOG(LogLoot, Warning, TEXT("[Loot:%s] 로컬 플레이어 폰이 없다. PIE 중인지 확인할 것."), *GetName());
         return;
     }
 
@@ -1175,7 +1215,7 @@ void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, con
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[Loot:%s] %s"), *GetName(), *Message);
+    UE_LOG(LogLoot, Log, TEXT("[Loot:%s] %s"), *GetName(), *Message);
 
     if (GEngine)
     {
