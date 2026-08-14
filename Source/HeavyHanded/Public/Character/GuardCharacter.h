@@ -6,6 +6,7 @@
 #include "GuardCharacter.generated.h"
 
 class UPerceptionMeterComponent;
+class UWidgetComponent;
 
 UCLASS()
 class AGuardCharacter : public ACharacter
@@ -35,7 +36,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
 	UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
 
+	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
+	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서
+	// WBP_DetectionGauge로 지정한다.
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UWidgetComponent* GetDetectionGaugeWidgetComponent() const { return DetectionGaugeWidgetComponent; }
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
 };

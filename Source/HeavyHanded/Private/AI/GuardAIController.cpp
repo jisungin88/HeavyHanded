@@ -13,6 +13,9 @@
 #include "Alert/AlertComponent.h"
 #include "AITypes.h"
 #include "NavigationSystem.h"
+#include "Components/WidgetComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "UI/DetectionGaugeWidget.h"
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -94,6 +97,12 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 				*GetNameSafe(InPawn));
 		}
 	}
+
+	// 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
+	// BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
+	// 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
+	GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
+		&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
 
 	// 시작 시 첫 순찰 지점을 미리 채워둔다
 	SelectNextPatrolPoint();
@@ -295,6 +304,53 @@ float AGuardAIController::GetWorldAlertLevel() const
 
 	// GameState 에 아직 컴포넌트가 없다(리슨 서버 시작 직후 등). 경계도 0 으로 취급.
 	return 0.f;
+}
+
+float AGuardAIController::GetDetectionGaugePercent() const
+{
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	return IsValid(BlackboardComp) ? BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) : 0.f;
+}
+
+bool AGuardAIController::IsTargeting(const AActor* InActor) const
+{
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	if (!IsValid(BlackboardComp) || !IsValid(InActor))
+	{
+		return false;
+	}
+
+	return BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) == InActor;
+}
+
+void AGuardAIController::UpdateHeadGaugeWidget()
+{
+	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
+	if (!IsValid(GuardPawn))
+	{
+		return;
+	}
+
+	UWidgetComponent* WidgetComp = GuardPawn->GetDetectionGaugeWidgetComponent();
+	if (!IsValid(WidgetComp))
+	{
+		return;
+	}
+
+	UDetectionGaugeWidget* GaugeWidget = Cast<UDetectionGaugeWidget>(WidgetComp->GetUserWidgetObject());
+	if (!GaugeWidget)
+	{
+		// Widget Class 가 아직 지정 안 됐거나(파생 BP에서 WBP_DetectionGauge 미설정),
+		// 컴포넌트가 아직 위젯 인스턴스를 만들기 전(BeginPlay 타이밍)일 수 있다.
+		return;
+	}
+
+	// 인덱스 0 로컬 플레이어 기준. 이 프로토타입은 단일 플레이어 대상 테스트 씬이라
+	// 화면 하나에 여러 로컬 플레이어가 동시에 있는 상황(스플릿스크린)은 다루지 않는다.
+	const APawn* LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	const float GaugePercent = IsTargeting(LocalPlayerPawn) ? GetDetectionGaugePercent() : 0.f;
+
+	GaugeWidget->SetGaugePercent(GaugePercent);
 }
 
 void AGuardAIController::SelectNextPatrolPoint()

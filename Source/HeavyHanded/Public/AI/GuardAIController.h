@@ -65,8 +65,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0.0", Units = "cm"))
 	float SearchSweepRadius = 600.f;
 
+	// Blackboard의 DetectionGauge(0~100)를 그대로 노출한다. 플레이어 화면의 게이지 위젯이
+	// 디버그 모드 없이 이 값을 읽어가도록 하기 위한 UI용 게터.
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	float GetDetectionGaugePercent() const;
+
+	// 지금 이 경비가 시야로 쫓고 있는 대상이 InActor인지. 게이지 위젯이 "나를 보고 있는
+	// 경비"만 골라내는 데 쓴다. CanSeeTarget이 아니라 TargetActor로 판정하는 이유는,
+	// 시야를 놓친 직후에도 감소 유예(DecayGraceSeconds) 동안 게이지가 100에 머무르는데
+	// 그 구간에도 "이 경비가 나를 쫓고 있다"는 표시는 계속 보여줘야 하기 때문이다.
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	bool IsTargeting(const AActor* InActor) const;
+
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
+
+	// 로컬 플레이어를 타겟하고 있을 때만 GetDetectionGaugePercent()를 폰의 머리 위
+	// 위젯 컴포넌트(UDetectionGaugeWidget)로 밀어넣는다. BTService_UpdateDetectionGauge와
+	// 같은 주기(0.1초)로 충분해 매 틱 대신 타이머로 돈다.
+	void UpdateHeadGaugeWidget();
+
+	UPROPERTY(EditAnywhere, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
+	float HeadGaugeUpdateInterval = 0.1f;
 
 	// AI Perception(Sight+Hearing) 콜백. TargetActor / CanSeeTarget / SoundTargetActor 갱신.
 	UFUNCTION()
@@ -118,4 +138,6 @@ private:
 	// 조사 세션 식별자로 쓰는 SearchStartTime 스냅샷.
 	// 이 값이 Blackboard 의 것과 달라지면 새 조사가 시작된 것이다.
 	float HandledSearchStartTime = TNumericLimits<float>::Lowest();
+
+	FTimerHandle HeadGaugeUpdateTimerHandle;
 };
