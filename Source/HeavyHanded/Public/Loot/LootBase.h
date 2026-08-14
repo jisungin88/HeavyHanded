@@ -191,6 +191,28 @@ protected:
     FName CarrySocketName = TEXT("hand_r");
 
     /**
+     * 손 소켓을 찾지 못했을 때 운반자 기준 어디에 들 것인가(cm, X=정면).
+     *
+     * 소켓이 있으면 소켓 위치가 답이므로 쓰지 않는다. 이 값은 소켓이 없는 폰
+     * (지금의 테스트용 DefaultPawn)에서만 적용된다. 그대로 두면 노획물이 폰 원점,
+     * 즉 카메라 자리에 붙어서 화면을 가리거나 아예 안 보인다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry")
+    FVector NoSocketCarryOffset = FVector(80.f, 0.f, -20.f);
+
+    /**
+     * 소지 중 메시의 아랫면 중심을 '손이 잡은 지점'으로 본다.
+     *
+     * 액터 원점(대개 메시 중심)을 기준으로 기울이면 물건이 제자리에서 팽이처럼 돈다.
+     * 사람이 상자를 들 때는 아랫부분을 받치고 있으므로, 그 지점을 고정하고
+     * 윗부분만 넘어가야 관성처럼 보인다.
+     *
+     * 끄면 원점 기준으로 돌아간다 — 중심을 잡는 물건(구슬·가방 손잡이)용.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry")
+    bool bCarryGripAtBottom = true;
+
+    /**
      * 손상되지 않았을 때의 가치($). 노획물 종류별로 BP 에서 지정한다.
      *
      * 기획서의 목표 금액은 저택 $50,000 / 박물관 $120,000 / 은행 $250,000 이고,
@@ -332,6 +354,30 @@ private:
 
     /** [임시] T 를 누르고 있는 동안 참. 이때만 틱이 돈다 */
     bool bDebugAiming = false;
+
+    /**
+     * 손 소켓 없이 들려 있는가. 소켓이 없으면 매 프레임 시선 앞에 다시 놓아야 한다.
+     * 진짜 캐릭터에 hand_r 이 생기면 항상 false 가 되고 이 경로는 죽는다.
+     */
+    bool bCarriedWithoutSocket = false;
+
+    /** 소켓이 없을 때 시선 앞에 노획물을 붙여 둔다 */
+    void UpdateNoSocketCarryTransform(const APawn* Carrier);
+
+    /**
+     * 소지 중 '손이 잡은 지점'의 오프셋. 액터 원점 기준의 로컬 방향이고 스케일이 반영돼 있다.
+     * bCarryGripAtBottom 이 꺼져 있으면 0 벡터(= 원점을 잡는다).
+     */
+    FVector GetCarryGripOffset() const;
+
+    /**
+     * [임시] 이번 G 입력이 다룰 노획물 하나를 고른다.
+     * 들고 있는 것이 있으면 그것(놓기), 없으면 범위 안에서 가장 가까운 것(집기).
+     */
+    ALootBase* Debug_FindGrabTarget(const APawn* LocalPawn) const;
+
+    /** [임시] 지금 이 플레이어가 들고 있는 노획물. 없으면 nullptr. T 키가 쓴다 */
+    ALootBase* Debug_FindCarriedLoot(const APawn* LocalPawn) const;
 
     /**
      * [임시] 조준 방향을 구한다. 궤적 표시와 실제 던지기가 같은 값을 써야 하므로 한 곳에 둔다.

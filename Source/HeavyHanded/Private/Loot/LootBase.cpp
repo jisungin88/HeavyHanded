@@ -7,6 +7,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"                 // TActorIterator — 디버그 집기 대상 탐색
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -37,6 +38,25 @@ namespace
 
     /** [임시] 조준점이 발사점에서 이보다 가까우면 방향이 불안정해지므로 시선 방향으로 대체한다 */
     constexpr float DebugMinAimDistance = 150.f;
+
+    /**
+     * [임시] 디버그 키를 한 프레임에 한 번만 처리하기 위한 표식.
+     *
+     * 노획물은 각자 자기 InputComponent 로 키를 받는다. 즉 레벨에 노획물이 N 개면
+     * G 를 한 번 눌러도 핸들러가 N 번 불린다. 대상 선정은 어차피 월드 전체를 훑어
+     * 같은 답을 내므로, 첫 호출만 처리하고 나머지는 여기서 버린다.
+     * (토글인 G 를 N 번 처리하면 잡았다 놨다를 반복해 결과가 뒤집힌다)
+     */
+    bool Debug_ClaimKeyPress(uint64& LastHandledFrame)
+    {
+        if (LastHandledFrame == GFrameCounter)
+        {
+            return false;
+        }
+
+        LastHandledFrame = GFrameCounter;
+        return true;
+    }
 }
 
 ALootBase::ALootBase()
@@ -108,17 +128,73 @@ void ALootBase::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    // 조준이 끝났거나 손에서 놓였으면 틱을 도로 끈다. 노획물이 수십 개 깔리므로
+    // 손에서 놓였으면 틱을 도로 끈다. 노획물이 수십 개 깔리므로
     // 필요 없는 틱을 계속 돌리지 않는다.
     APawn* Carrier = PrimaryCarrier.Get();
-    if (!bDebugAiming || !IsValid(Carrier))
+    if (!IsValid(Carrier))
     {
         bDebugAiming = false;
+        bCarriedWithoutSocket = false;
         SetActorTickEnabled(false);
         return;
     }
 
-    ShowThrowTrajectory(Debug_ComputeAimDirection());
+    if (bCarriedWithoutSocket && HasAuthority())
+    {
+        UpdateNoSocketCarryTransform(Carrier);
+    }
+
+    if (bDebugAiming)
+    {
+        ShowThrowTrajectory(Debug_ComputeAimDirection());
+    }
+    else if (!bCarriedWithoutSocket)
+    {
+        SetActorTickEnabled(false);
+    }
+}
+
+void ALootBase::UpdateNoSocketCarryTransform(const APawn* Carrier)
+{
+    // 폰의 액터 회전은 카메라를 따라간다는 보장이 없다. 액터 정면을 쓰면
+    // 고개만 돌렸을 때 물건이 제자리에 남아 시야에서 사라진다. 시선을 기준으로 잡는다.
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    if (const AController* CarrierController = Carrier->GetController())
+    {
+        CarrierController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+    }
+    else
+    {
+        Carrier->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+    }
+
+    // 시야 앞의 이 지점에 '손'이 있다고 본다.
+    const FVector GripPoint = ViewLocation + ViewRotation.RotateVector(NoSocketCarryOffset);
+
+    // 잡은 지점이 그 자리에 고정되도록 액터 원점을 반대로 밀어 준다.
+    // 기울기가 바뀌면 원점도 손을 축으로 같이 돌아서, 아랫부분은 손에 붙어 있고
+    // 윗부분만 넘어가는 모습이 된다. (기울기 자체는 불안정형 컴포넌트가 넣는다)
+    //
+    // 어태치된 상태라 월드 위치를 넣으면 엔진이 상대 위치를 계산해 준다.
+    // 회전은 건드리지 않는다 — 불안정형의 관성 기울기가 상대 회전으로 들어가 있다.
+    SetActorLocation(GripPoint - GetActorQuat().RotateVector(GetCarryGripOffset()),
+        /*bSweep=*/false);
+}
+
+FVector ALootBase::GetCarryGripOffset() const
+{
+    if (!bCarryGripAtBottom || !IsValid(LootMesh))
+    {
+        return FVector::ZeroVector;
+    }
+
+    // 메시 로컬 기준 바운드. 원점이 메시 중앙에 있다는 보장이 없으므로 실제 아랫면을 찾는다.
+    const FBoxSphereBounds LocalBounds = LootMesh->CalcLocalBounds();
+
+    // 아랫면 중심. 로컬 값이라 액터 스케일을 곱해 월드 거리로 바꿔 둔다.
+    return FVector(LocalBounds.Origin.X, LocalBounds.Origin.Y,
+        LocalBounds.Origin.Z - LocalBounds.BoxExtent.Z) * LootMesh->GetComponentScale();
 }
 
 // --------------------------------------------------------------------------
@@ -415,6 +491,8 @@ void ALootBase::ApplyCarryState()
     }
     else
     {
+        bCarriedWithoutSocket = false;
+
         // 어태치된 채로는 물리가 돌지 않는다. 반드시 먼저 떼어낸다.
         DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
@@ -467,6 +545,16 @@ void ALootBase::AttachToCarrier(APawn* Carrier)
     // 노획물마다 크기가 다르므로 스케일은 자기 것을 유지한다.
     AttachToComponent(AttachTarget,
         FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketToUse);
+
+    // 소켓이 있으면 소켓 위치가 곧 정답이고 손을 따라 알아서 움직인다.
+    // 소켓이 없으면 폰 원점(= 카메라 자리)에 붙어서 화면을 가리거나 아예 안 보이고,
+    // 고개를 돌려도 따라오지 않는다. 그때만 매 프레임 시선 앞에 다시 놓는다.
+    bCarriedWithoutSocket = SocketToUse.IsNone();
+    if (bCarriedWithoutSocket)
+    {
+        SetActorTickEnabled(true);
+        UpdateNoSocketCarryTransform(Carrier);
+    }
 }
 
 void ALootBase::ResolveReleaseOverlap(const APawn* Carrier)
@@ -770,15 +858,28 @@ void ALootBase::Debug_SetupTestKeys()
         return;
     }
 
-    InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ALootBase::Debug_ToggleGrabByLocalPlayer);
+    // bConsumeInput 기본값이 true 라서, 그냥 두면 입력 스택 맨 위의 노획물 하나가
+    // 키를 먹어 버리고 나머지는 아예 받지 못한다. 그 하나가 디버그 키를 켜 둔 액터라
+    // "레벨에 있는 노획물 중 딱 하나만 집힌다" 는 증상이 된다.
+    // 전부 받게 열어 두고, 중복 호출은 Debug_ClaimKeyPress 로 막는다.
+    InputComponent->BindKey(EKeys::G, IE_Pressed,
+        this, &ALootBase::Debug_ToggleGrabByLocalPlayer).bConsumeInput = false;
 
     // 누르고 있는 동안 조준, 뗄 때 던진다.
-    InputComponent->BindKey(EKeys::T, IE_Pressed, this, &ALootBase::Debug_BeginThrowAim);
-    InputComponent->BindKey(EKeys::T, IE_Released, this, &ALootBase::Debug_ThrowForward);
+    InputComponent->BindKey(EKeys::T, IE_Pressed,
+        this, &ALootBase::Debug_BeginThrowAim).bConsumeInput = false;
+    InputComponent->BindKey(EKeys::T, IE_Released,
+        this, &ALootBase::Debug_ThrowForward).bConsumeInput = false;
 }
 
 void ALootBase::Debug_ToggleGrabByLocalPlayer()
 {
+    static uint64 LastHandledFrame = MAX_uint64;
+    if (!Debug_ClaimKeyPress(LastHandledFrame))
+    {
+        return;
+    }
+
     APawn* LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
     if (!IsValid(LocalPawn))
     {
@@ -788,26 +889,76 @@ void ALootBase::Debug_ToggleGrabByLocalPlayer()
         return;
     }
 
-    // 들고 있으면 놓는다.
-    if (PrimaryCarrier.Get() == LocalPawn)
-    {
-        OnReleased(LocalPawn);
-        return;
-    }
-
-    // 남이 들고 있으면 건드리지 않는다.
-    if (IsValid(PrimaryCarrier))
+    // 월드를 훑어 '이번 입력의 대상' 하나를 고른 뒤, 그 액터에게 시킨다.
+    // 자기 자신일 때만 움직이게 하면, 키를 받은 액터와 대상이 다를 때 아무 일도 일어나지 않는다.
+    // 키를 받는 것과 집히는 것은 별개다 — 받은 쪽이 대리인 역할을 한다.
+    ALootBase* Target = Debug_FindGrabTarget(LocalPawn);
+    if (!IsValid(Target))
     {
         return;
     }
 
-    // 키는 모든 노획물이 같이 받는다. 가까이 간 하나만 반응해야 한다.
-    if (FVector::Dist(GetActorLocation(), LocalPawn->GetActorLocation()) > DebugGrabRange)
+    if (Target->PrimaryCarrier.Get() == LocalPawn)
     {
+        Target->OnReleased(LocalPawn);
         return;
     }
 
-    OnGrabbed(LocalPawn);
+    Target->OnGrabbed(LocalPawn);
+}
+
+ALootBase* ALootBase::Debug_FindCarriedLoot(const APawn* LocalPawn) const
+{
+    // 들고 있는 것이 있으면 Debug_FindGrabTarget 이 그것을 먼저 돌려준다.
+    ALootBase* Target = Debug_FindGrabTarget(LocalPawn);
+
+    return (IsValid(Target) && Target->PrimaryCarrier.Get() == LocalPawn) ? Target : nullptr;
+}
+
+ALootBase* ALootBase::Debug_FindGrabTarget(const APawn* LocalPawn) const
+{
+    UWorld* World = GetWorld();
+    if (!World || !IsValid(LocalPawn))
+    {
+        return nullptr;
+    }
+
+    ALootBase* Nearest = nullptr;
+    float NearestDistSq = FMath::Square(DebugGrabRange);
+
+    // 모든 노획물이 이 함수를 돌려 같은 답을 내야 한다.
+    // (DebugGrabRange 를 노획물마다 다르게 두면 답이 갈린다. 테스트용이니 통일해서 쓸 것)
+    for (TActorIterator<ALootBase> It(World); It; ++It)
+    {
+        ALootBase* Loot = *It;
+        if (!IsValid(Loot))
+        {
+            continue;
+        }
+
+        // 이미 들고 있는 것이 있으면 그것이 대상이다 — 놓기가 먼저다.
+        // 한 번에 하나만 들 수 있으므로 다른 것을 집으려면 먼저 놓아야 한다.
+        if (Loot->PrimaryCarrier.Get() == LocalPawn)
+        {
+            return Loot;
+        }
+
+        // 남이 들고 있는 것은 후보에서 뺀다.
+        if (IsValid(Loot->PrimaryCarrier))
+        {
+            continue;
+        }
+
+        const float DistSq =
+            FVector::DistSquared(Loot->GetActorLocation(), LocalPawn->GetActorLocation());
+        if (DistSq < NearestDistSq)
+        {
+            NearestDistSq = DistSq;
+            Nearest = Loot;
+        }
+    }
+
+    return Nearest;
 }
 
 FVector ALootBase::Debug_ComputeAimDirection() const
@@ -860,22 +1011,33 @@ FVector ALootBase::Debug_ComputeAimDirection() const
 
 void ALootBase::Debug_BeginThrowAim()
 {
-    if (!IsValid(PrimaryCarrier))
+    static uint64 LastHandledFrame = MAX_uint64;
+    if (!Debug_ClaimKeyPress(LastHandledFrame))
     {
         return;
     }
 
-    bDebugAiming = true;
-    SetActorTickEnabled(true);
+    // G 와 마찬가지로 키를 받은 액터가 아니라 실제로 들고 있는 액터가 조준한다.
+    ALootBase* Target = Debug_FindCarriedLoot(UGameplayStatics::GetPlayerPawn(this, 0));
+    if (!IsValid(Target))
+    {
+        return;
+    }
+
+    Target->bDebugAiming = true;
+    Target->SetActorTickEnabled(true);
 }
 
 void ALootBase::Debug_ThrowForward()
 {
-    bDebugAiming = false;
-    SetActorTickEnabled(false);
+    static uint64 LastHandledFrame = MAX_uint64;
+    if (!Debug_ClaimKeyPress(LastHandledFrame))
+    {
+        return;
+    }
 
-    APawn* Carrier = PrimaryCarrier.Get();
-    if (!IsValid(Carrier))
+    ALootBase* Target = Debug_FindCarriedLoot(UGameplayStatics::GetPlayerPawn(this, 0));
+    if (!IsValid(Target))
     {
         if (GEngine)
         {
@@ -885,8 +1047,14 @@ void ALootBase::Debug_ThrowForward()
         return;
     }
 
+    APawn* Carrier = Target->PrimaryCarrier.Get();
+
+    // 틱은 여기서 끄지 않는다. 소켓 없는 소지 중이면 위치 갱신에 틱이 계속 필요하고,
+    // 그 판단은 Tick 이 스스로 한다. 여기서 끄면 던지지 못했을 때 물건이 시야에서 멈춘다.
+    Target->bDebugAiming = false;
+
     // 조준 중 궤적과 같은 함수를 쓴다. 두 곳에서 따로 구하면 보던 것과 다르게 날아간다.
-    const FVector AimDirection = Debug_ComputeAimDirection();
+    const FVector AimDirection = Target->Debug_ComputeAimDirection();
     if (AimDirection.IsNearlyZero())
     {
         return;
@@ -895,9 +1063,9 @@ void ALootBase::Debug_ThrowForward()
     // 던지기 전에 그려야 한다. OnThrown 이 PrimaryCarrier 를 비우면
     // 운반자 속도가 빠져서 예측과 실제가 달라진다.
     // 조준 중 궤적은 한 프레임짜리라 사라지므로, 비교용으로 6초짜리를 한 번 더 남긴다.
-    ShowThrowTrajectory(AimDirection, 6.f);
+    Target->ShowThrowTrajectory(AimDirection, 6.f);
 
-    OnThrown(Carrier, AimDirection);
+    Target->OnThrown(Carrier, AimDirection);
 }
 
 void ALootBase::ShowThrowTrajectory(const FVector& AimDirection, float Duration)
