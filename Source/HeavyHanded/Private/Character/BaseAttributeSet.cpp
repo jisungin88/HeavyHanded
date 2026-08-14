@@ -7,7 +7,7 @@
 UBaseAttributeSet::UBaseAttributeSet()
 {
     InitHealth(100.0f);
-    InitMovementSpeed(600.0f);
+    InitMovementSpeed(300.0f);
 }
 
 void UBaseAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

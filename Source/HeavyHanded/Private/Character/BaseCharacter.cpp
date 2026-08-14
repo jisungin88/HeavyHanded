@@ -286,11 +286,13 @@ void ABaseCharacter::RemoveGameplayEffectFromSelf(TSubclassOf<UGameplayEffect> E
 
 void ABaseCharacter::StartCrouch(const FInputActionValue& Value)
 {
+	Crouch();
     Server_ApplyGameplayEffect(CrouchGameplayEffectClass, true);
 }
 
 void ABaseCharacter::StopCrouch(const FInputActionValue& Value)
 {
+	UnCrouch();
     Server_ApplyGameplayEffect(CrouchGameplayEffectClass, false);
 }
 
