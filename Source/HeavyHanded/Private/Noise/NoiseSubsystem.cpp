@@ -15,6 +15,7 @@
 
 #include "GameFramework/GameStateBase.h"
 #include "Alert/AlertComponent.h"
+#include "Perception/AISense_Hearing.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogNoise, Log, All);
 
@@ -241,6 +242,28 @@ void UNoiseSubsystem::ReportNoise(FGameplayTag Tag, FVector Location, float Loud
 	OnNoiseReported.Broadcast(Event, *Row, Instigator);
 
 	Propagate(Event, *Row);
+
+	// 엔진 내장 AIPerception 의 Hearing 센스에도 같은 이벤트를 흘려준다.
+	//
+	// GuardAIController 는 생성자에서 UAISenseConfig_Hearing 을 등록해 두었지만,
+	// 그 센스는 누군가 UAISense_Hearing::ReportNoiseEvent 를 불러줘야만 반응한다
+	// (등록만 해두고 아무도 이벤트를 안 쏘면 청각 감지가 영원히 발동하지 않는다).
+	// 이 프로젝트에서 그걸 불러주는 곳이 여기 한 곳뿐이라, 이 호출이 빠지면
+	// OnTargetPerceptionUpdated 의 Hearing 분기(GuardAIController.cpp)가 죽은 코드가 된다.
+	//
+	// 인자는 위에서 이미 검증 · 클램프까지 끝난 값을 그대로 재사용한다:
+	//  - Loudness 는 1.f 로 고정한다. Event.Radius 에 이미 Loudness 감쇄가
+	//    Lerp(0.6, 1.0) 곡선으로 반영돼 있어서, 여기서 또 곱하면(엔진이 MaxRange*Loudness
+	//    로 계산한다) 같은 감쇄가 두 번 적용돼 실제보다 훨씬 좁은 반경이 나간다.
+	//  - MaxRange 는 Event.Radius. 우리 쪽 반경 공식을 그대로 신뢰하는 것이다.
+	//  - Tag 는 FGameplayTag 가 아니라 FName 을 받으므로 GetTagName() 으로 변환한다.
+	//
+	// 주의: 이 경로는 Propagate() 의 ComputeAttenuation 과 달리 벽 오클루전을 계산하지
+	// 않는다 (엔진 Hearing 센스는 순수 거리 판정이다). 그래서 벽 뒤에 있는 경비가
+	// INoiseListener 쪽에서는 소리를 못 듣는데 AIPerception 쪽에서는 듣는 것처럼
+	// 엇갈릴 수 있다 — 오클루전까지 맞추려면 청취자별로 따로 불러야 하는데, 그건
+	// 이 함수의 "위치 없는 이벤트 1건 발행"이라는 시그니처를 벗어나는 작업이라 남겨둔다.
+	UAISense_Hearing::ReportNoiseEvent(GetWorld(), Location, 1.f, Instigator, Event.Radius, Tag.GetTagName());
 }
 
 FGuid UNoiseSubsystem::StartContinuousNoise(FGameplayTag Tag, AActor* Source)
@@ -571,16 +594,27 @@ static void NoiseTestCommand(const TArray<FString>& Args, UWorld* World)
 	const float Loudness = Args.IsValidIndex(1) ? FCString::Atof(*Args[1]) : 1.f;
 
 	FVector Location = FVector::ZeroVector;
-	if (const APlayerController* PC = World->GetFirstPlayerController())
+	APawn* Pawn = nullptr;
+	if (APlayerController* PC = World->GetFirstPlayerController())
 	{
-		if (const APawn* Pawn = PC->GetPawn())
+		Pawn = PC->GetPawn();
+		if (Pawn)
 		{
 			Location = Pawn->GetActorLocation();
 		}
 	}
 
-	Subsystem->ReportNoise(Tag, Location, Loudness, nullptr);
-	UE_LOG(LogNoise, Log, TEXT("테스트 발행: %s @ %s (Loudness %.2f)"), *Tag.ToString(), *Location.ToString(), Loudness);
+	// Instigator 로 nullptr 을 넘기면 안 된다.
+	// UAISense_Hearing::ReportNoiseEvent (엔진 AIPerception 청각 센스) 는 소리를
+	// 낸 액터를 "인지 대상"으로 등록해서 OnTargetPerceptionUpdated 를 호출한다
+	// (엔진 소스 AISense_Hearing.cpp 의 RegisterDelayedStimulus 가 Event.Instigator 를
+	// 그대로 대상 액터로 쓴다). Instigator 가 없으면 등록할 대상이 없어 그 콜백 자체가
+	// 안 불린다 — 즉 nullptr 로는 청각 인지 경로를 이 명령으로 테스트할 수 없었다.
+	// 실제 게임에서는 항상 소음을 낸 실제 액터(경비가 넘어뜨린 물건 등)가 넘어오므로
+	// 이 문제는 디버그 명령에만 있었다.
+	Subsystem->ReportNoise(Tag, Location, Loudness, Pawn);
+	UE_LOG(LogNoise, Log, TEXT("테스트 발행: %s @ %s (Loudness %.2f, Instigator %s)"),
+			*Tag.ToString(), *Location.ToString(), Loudness, *GetNameSafe(Pawn));
 }
 
 static FAutoConsoleCommandWithWorldAndArgs GNoiseTestCommand(
