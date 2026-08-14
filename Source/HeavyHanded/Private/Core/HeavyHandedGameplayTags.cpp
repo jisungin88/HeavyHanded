@@ -1,7 +1,9 @@
 ﻿#include "Core/HeavyHandedGameplayTags.h"
 
+// 문자열은 Config/Tags/Noise.ini 의 정의와 한 글자도 다르면 안 된다.
+// 여기서 정의한 태그는 네이티브로 등록되므로, .ini 에서 사라져도 태그 자체는 살아남는다.
 namespace HHTags
 {
-    // Noise.* 태그 6종은 소음 파트로 이관되었다.
-    // 물리·아이템 파트 전용 태그가 필요해지면 여기에 UE_DEFINE_GAMEPLAY_TAG 로 정의한다.
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Impact, "Noise.Loot.Impact");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,  "Noise.Loot.Break");
 }

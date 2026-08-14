@@ -1,0 +1,36 @@
+# 들여쓰기가 파일마다 달라서 diff 에 로직 변경과 공백 변경이 섞여 들어왔다.
+# Visual Studio · Rider · VS Code 가 모두 이 파일을 읽는다.
+root = true
+
+[*]
+charset = utf-8
+# .gitattributes 가 소스를 eol=lf 로 고정하고 있다. 여기서 crlf 를 쓰면
+# 에디터가 CRLF 로 저장하고 git 이 다시 LF 로 되돌려, 도구 조합에 따라
+# "파일 전체가 바뀐" 가짜 diff 가 난다. 두 파일은 항상 같은 값을 가리켜야 한다.
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# 언리얼 코딩 표준: 탭 들여쓰기, 탭 폭 4
+[*.{h,cpp,inl,cs}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+# BOM 이 없으면 MSVC 가 소스를 시스템 코드페이지(여기서는 CP949)로 읽는다.
+# 주석의 한글이 C4819 를 내고, 한글 바이트 끝이 0x5C 로 잡히면 줄 이음으로 먹혀
+# 다음 줄이 통째로 주석이 되는 일까지 생긴다. UBT 는 /utf-8 을 붙여주지 않는다.
+charset = utf-8-bom
+
+[*.ini]
+indent_style = space
+indent_size = 4
+# ini 는 엔진이 그대로 다시 쓰기 때문에 손대지 않는다
+trim_trailing_whitespace = false
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+# 윈도우 배치·파워셸은 CRLF 여야 한다. (.gitattributes 도 eol=crlf 로 잡아 둔다)
+[*.{bat,ps1}]
+end_of_line = crlf
