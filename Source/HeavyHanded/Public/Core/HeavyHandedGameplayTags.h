@@ -68,4 +68,19 @@ namespace HHTags
 	//   Carried 를 밀어내 버린다. 파괴는 액터가 곧 사라져서 문제가 없지만 유출은 다르다.
 	//   "샌 적이 있다" 는 사실이 필요해지면 상태가 아닌 별도 컨테이너로 붙일 것.
 	//   지금은 ULootStabilityComponent::GetSpillCount() 와 ALootBase::IsValueLost() 로 읽는다.
+
+	// ── 플레이어 상태 (전영배 / Config/Tags/State.ini) ──
+
+	/** 다운 — 무장 경비 접촉 / 경비견 3회 / 낙하. 동료가 5초간 복구한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Downed);
+
+	// ── 게임플레이 이벤트 (공용 / Config/Tags/Event.ini) ──
+
+	/** 경비견이 플레이어에 접촉했다는 사실. 3회 누적 판정은 플레이어 파트가 한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Guard_Contacted);
+
+	/** 다운 조건 성립. GAB_Downed 의 GameplayEvent 트리거 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Player_Downed);
+
+	// Guard.Type.* 은 선언하지 않는다 — EGuardType 열거형과 두 벌이 된다 (AI/GuardTypes.h).
 }
