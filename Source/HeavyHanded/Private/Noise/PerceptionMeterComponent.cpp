@@ -20,7 +20,7 @@ UPerceptionMeterComponent::UPerceptionMeterComponent()
 	// 경계도(0.1s)보다 촘촘한 이유 — 이쪽은 위젯이 머리 위에 붙어 눈에 직접 보인다
 	PrimaryComponentTick.TickInterval = 0.05f;
 
-	// 빼면 컴파일 에러도 경고도 없이 클라이언트 게이지만 안 움직인다 (팀 컨벤션 3-3)
+	// 빼면 컴파일 에러도 경고도 없이 클라이언트 게이지만 안 움직인다 (문서 02 네트워크)
 	SetIsReplicatedByDefault(true);
 }
 
