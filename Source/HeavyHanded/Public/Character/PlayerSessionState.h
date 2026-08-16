@@ -24,13 +24,17 @@ public:
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
     FORCEINLINE UBaseAttributeSet* GetBaseAttributeSet() const { return BaseAttributeSet; }
 
+    // 골드는 여기 없다.
+    //
+    //   노획한 금액은 개인 지갑이 아니라 팀 공용 지갑으로 들어간다. 개인 골드를 PlayerState 에
+    //   두면 두 가지가 동시에 깨진다.
+    //     1. 소유 주체가 틀린다 — 공용 잔액을 인원수만큼 복사해 두고 서로 맞추게 된다.
+    //     2. 레벨을 못 넘는다 — 비-심리스 ServerTravel 은 PlayerState 를 파괴한다.
+    //        은신처에서 장비를 사고 저택에 도착하면 잔액이 0 으로 돌아간다.
+    //
+    //   URunProgressSubsystem::GetTeamGold() 를 쓸 것. 화면에 그릴 값이면 GameState 로 복제된다.
+
     // [필수] 플레이어 세션 데이터 Getter / Setter
-    UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
-    int32 GetGold() const { return Gold; }
-
-    UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
-    void AddGold(int32 Amount);
-
     UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
     int32 GetSelectedCharacterID() const { return SelectedCharacterID; }
 
@@ -49,13 +53,6 @@ protected:
     TObjectPtr<UBaseAttributeSet> BaseAttributeSet;
 
     // --- 핵심 세션 데이터 (멀티플레이 동기화 적용) ---
-
-    // 플레이어 소유 주화 (골드)
-    UPROPERTY(ReplicatedUsing = OnRep_Gold, BlueprintReadOnly, Category = "PlayerSession|Data")
-    int32 Gold;
-
-    UFUNCTION()
-    virtual void OnRep_Gold();
 
     // 로비에서 선택한 캐릭터 고유 번호 (또는 타입)
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "PlayerSession|Data")
