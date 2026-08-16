@@ -30,6 +30,28 @@ namespace HHTags
 	/** 파손형 노획물이 깨질 때 나가는 태그 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Break);
 
+	// ── 코어 루프 페이즈 (지성인 / Config/Tags/Phase.ini) ──
+	//
+	// AHeistGameState 가 하나를 들고 전원에게 복제한다. 판정은 전부 서버(AHeistGameMode)다.
+
+	/** 준비 45초 — 역할 선택 · 드론 사전 정찰. 미션 제한 시간에 포함되지 않는다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Prep);
+
+	/** 본 작업 — 제한 시간은 장소마다 다르다 (AHeistGameMode::HeistSeconds) */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Heist);
+
+	/** 도주 90초 — 경보 100% 또는 제한 시간 만료로 진입한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Escape);
+
+	/** 결과 — 적재 목록 · 기여도 · 최다 소음 유발자 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Result);
+
+	// Phase.Lobby / Phase.Hideout 은 선언하지 않는다.
+	//   그 둘은 레벨 자체가 다르고 전환 수단이 ServerTravel 이라 태그로 판정할 것이 없다.
+	//   작업 레벨의 상태머신은 Prep 부터 시작한다.
+	//   Site.* 도 아직이다 — 목표 금액·제한 시간을 GameMode 프로퍼티로 받고 있어
+	//   지금은 C++ 이 장소를 태그로 구분할 일이 없다.
+
 	// ── 노획물 (김민준 / Config/Tags/Loot.ini) ──
 
 	/**
