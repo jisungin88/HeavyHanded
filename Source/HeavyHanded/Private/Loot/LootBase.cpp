@@ -347,6 +347,10 @@ void ALootBase::OnGrabbed(APawn* Carrier)
 
     PrimaryCarrier = Carrier;
 
+    // 놓거나 던진 뒤에도 남겨야 하는 값이라 PrimaryCarrier 와 따로 둔다.
+    // 밴에 던져 넣었을 때 "누가 실었는가" 를 아는 유일한 근거다. (AVanLoadZone)
+    LastCarrier = Carrier;
+
     // 서버에서 직접 값을 바꾸면 OnRep 이 호출되지 않는다. 서버 몫은 손으로 부른다.
     ApplyCarryState();
 }
