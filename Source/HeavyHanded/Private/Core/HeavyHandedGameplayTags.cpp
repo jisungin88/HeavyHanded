@@ -8,6 +8,11 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Impact, "Noise.Loot.Impact");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,  "Noise.Loot.Break");
 
+	UE_DEFINE_GAMEPLAY_TAG(Phase_Prep,   "Phase.Prep");
+	UE_DEFINE_GAMEPLAY_TAG(Phase_Heist,  "Phase.Heist");
+	UE_DEFINE_GAMEPLAY_TAG(Phase_Escape, "Phase.Escape");
+	UE_DEFINE_GAMEPLAY_TAG(Phase_Result, "Phase.Result");
+
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type,          "Loot.Type");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Heavy,    "Loot.Type.Heavy");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Fragile,  "Loot.Type.Fragile");
@@ -17,9 +22,11 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Carried, "Loot.State.Carried");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Dropped, "Loot.State.Dropped");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Broken,  "Loot.State.Broken");
+	UE_DEFINE_GAMEPLAY_TAG(Loot_State_Loaded,  "Loot.State.Loaded");
 
 	UE_DEFINE_GAMEPLAY_TAG(State_Downed,       "State.Downed");
 
 	UE_DEFINE_GAMEPLAY_TAG(Event_Guard_Contacted, "Event.Guard.Contacted");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Player_Downed,   "Event.Player.Downed");
+	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Loaded,     "Event.Loot.Loaded");
 }
