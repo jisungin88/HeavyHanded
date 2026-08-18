@@ -179,6 +179,18 @@ public:
     const FLootPhysicsData& GetPhysicsData() const { return PhysicsData; }
 
     /**
+     * 마지막으로 이 노획물을 든 사람. 놓거나 던진 뒤에도 남는다. 아무도 든 적 없으면 nullptr.
+     *
+     * [왜 PrimaryCarrier 로 부족한가] 밴에 '던져 넣기' 가 허용되므로(기획 5장 · 코어 루프 Day 2),
+     *   적재가 확정되는 시점에는 이미 손에서 떠나 PrimaryCarrier 가 비어 있다.
+     *   그때 "누가 실었는가" 를 알 수 있는 것은 이 값뿐이다 — 적재자 ASC 로 Event.Loot.Loaded 를
+     *   보내고 결과 화면 기여도를 집계하는 근거가 된다.
+     *
+     * 서버에서만 갱신되고 복제하지 않는다. 집계와 이벤트 발행이 전부 서버 판정이라 필요가 없다.
+     */
+    APawn* GetLastCarrier() const { return LastCarrier.Get(); }
+
+    /**
      * 다음 확정 충격의 원인을 예약한다. (서버 전용)
      * 놓기·던지기 직후 첫 충돌을 Drop / Throw 로 표시하기 위한 것으로,
      * 한 번 소비되면 다시 Collision 으로 돌아간다.
@@ -513,6 +525,9 @@ private:
 
     /** 상호 무시를 걸어 둔 운반자. 운반자가 바뀔 때 해제 대상을 놓치지 않기 위해 따로 들고 있는다 */
     TWeakObjectPtr<APawn> MoveIgnoredCarrier;
+
+    /** 마지막으로 이 노획물을 든 사람. PrimaryCarrier 와 달리 놓은 뒤에도 지워지지 않는다 */
+    TWeakObjectPtr<APawn> LastCarrier;
 
     /** SetPendingImpactCause 로 예약된 원인. 확정 충격 1회에 소비된다 */
     ELootImpactCause PendingImpactCause = ELootImpactCause::Collision;
