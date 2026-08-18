@@ -100,5 +100,16 @@ Loot_Vase_Museum        박물관 소장품 — 더 비싸고 더 잘 깨진다
 컴포넌트가 없는 행에도 칸은 있지만 채워도 아무 일이 일어나지 않는다 —
 특성은 표가 아니라 컴포넌트 조합이 정하기 때문이다.
 
+그 착오를 잡으려고 `ALootBase` 가 스폰 시 경고를 찍는다. PIE 로그에 이게 뜨면
+표가 아니라 BP 를 봐야 한다는 뜻이다.
+
+```
+[Loot:...] 표에 불안정형 수치(Stability)가 적혀 있는데 ULootStabilityComponent 가 없다
+[Loot:...] 표의 MaxImpactCount 가 2 인데 ULootDurabilityComponent 가 없다
+```
+
+반대로 `Loot|Tags > Loot Type Tags` 에 `Loot.Type` 하나만 있으면 컴포넌트를 빼먹은 것이다.
+파손형이면 `Loot.Type.Fragile`, 불안정형이면 `Loot.Type.Unstable` 이 자동으로 붙어 있어야 한다.
+
 `DamageImpulseThreshold` 는 질량에 비례한다. `MassKg` 를 바꾸면 같이 조정해야 한다.
 10kg 기준 실측값: 100cm 낙하 5031 / 150cm 6497 / 300cm 9622, 착지 후 튕김은 500~900.

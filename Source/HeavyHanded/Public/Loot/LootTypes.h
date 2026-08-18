@@ -88,6 +88,31 @@ struct FLootStabilityData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float MinValueRatio = 0.2f;
+
+	/**
+	 * 아무도 손대지 않은 상태인가.
+	 *
+	 * "컴포넌트는 없는데 표에 수치만 적혀 있다" 를 잡는 데 쓴다. 그 경우 값은 들어오지만
+	 * 읽는 코드가 없어서 조용히 무시되는데, 기본값과 같은지를 봐야 '일부러 적은 것'과
+	 * '그냥 비워 둔 것'을 구별할 수 있다.
+	 *
+	 * 기본값을 하나씩 비교하지 않고 기본 생성한 구조체와 맞추는 이유는, 위쪽 초기값을
+	 * 나중에 바꿔도 이 함수를 같이 고칠 필요가 없게 하기 위해서다.
+	 */
+	bool IsDefault() const
+	{
+		const FLootStabilityData Default;
+
+		return FMath::IsNearlyEqual(SpillTiltAngle,        Default.SpillTiltAngle)
+			&& FMath::IsNearlyEqual(SafeCarrySpeed,        Default.SafeCarrySpeed)
+			&& FMath::IsNearlyEqual(TiltGainPerSpeed,      Default.TiltGainPerSpeed)
+			&& FMath::IsNearlyEqual(TiltRecoverRate,       Default.TiltRecoverRate)
+			&& FMath::IsNearlyEqual(TiltDirectionTurnRate, Default.TiltDirectionTurnRate)
+			&& FMath::IsNearlyEqual(TiltGraceSeconds,      Default.TiltGraceSeconds)
+			&& FMath::IsNearlyEqual(SpillIntervalSeconds,  Default.SpillIntervalSeconds)
+			&& FMath::IsNearlyEqual(SpillValueLossRatio,   Default.SpillValueLossRatio)
+			&& FMath::IsNearlyEqual(MinValueRatio,         Default.MinValueRatio);
+	}
 };
 
 /**

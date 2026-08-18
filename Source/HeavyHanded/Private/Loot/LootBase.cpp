@@ -189,6 +189,34 @@ void ALootBase::ApplyLootDefinition()
     LootDisplayName = Row->DisplayName;
 }
 
+void ALootBase::WarnOnUnusedTypeData() const
+{
+    // 불안정형 수치는 ULootStabilityComponent 말고는 읽는 데가 없다.
+    // 기본값과 다르다는 것은 누군가 일부러 적었다는 뜻이므로, 컴포넌트가 없으면 착오다.
+    if (!StabilityData.IsDefault() && !LootTypeTags.HasTag(HHTags::Loot_Type_Unstable))
+    {
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] 표에 불안정형 수치(Stability)가 적혀 있는데 ULootStabilityComponent 가 없다 "
+                 "— 이 값들은 아무도 읽지 않아 기울여도 새지 않는다. "
+                 "BP 에 컴포넌트를 추가하거나 표의 Stability 를 기본값으로 되돌릴 것"),
+            *GetName());
+    }
+
+    // DamageImpulseThreshold 는 일부러 보지 않는다.
+    //   질량에 비례하는 값이라 파손형이 아닌 노획물에도 관례적으로 채워 두기 때문에,
+    //   '기본값과 다르다'가 착오의 신호가 되지 못한다. 경고가 전부 거짓양성이 된다.
+    //   MaxImpactCount 는 파손 컴포넌트 외에 쓰는 데가 없어 바꿨다면 의도한 것으로 본다.
+    const FLootPhysicsData DefaultPhysics;
+    if (PhysicsData.MaxImpactCount != DefaultPhysics.MaxImpactCount
+        && !LootTypeTags.HasTag(HHTags::Loot_Type_Fragile))
+    {
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] 표의 MaxImpactCount 가 %d 인데 ULootDurabilityComponent 가 없다 "
+                 "— 충격을 세는 코드가 없어 이 물건은 깨지지 않는다"),
+            *GetName(), PhysicsData.MaxImpactCount);
+    }
+}
+
 void ALootBase::BeginPlay()
 {
     Super::BeginPlay();
@@ -218,6 +246,9 @@ void ALootBase::BeginPlay()
         }
 
         SetLootStateTag(HHTags::Loot_State_Idle);
+
+        // 태그 등록이 끝난 뒤에 본다. 컴포넌트는 Super::BeginPlay 안에서 이미 자기 태그를 달았다.
+        WarnOnUnusedTypeData();
     }
 
     // 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
