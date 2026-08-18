@@ -3,8 +3,62 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameState.h"
 #include "GameplayTagContainer.h"        // FGameplayTag 를 값으로 보유 — 전방 선언 불가
+#include "Templates/SubclassOf.h"        // FHeistLoadEntry 가 값으로 보유
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — UPROPERTY 노출 enum 이라 전방 선언 불가
 #include "HeistGameState.generated.h"
+
+class ALootBase;
+class APlayerState;
+
+/**
+ * 밴에 실린 노획물 한 건의 기록. 결과 화면의 '적재 목록'(기획서 8장)이 이것의 배열이다.
+ *
+ * [왜 액터 포인터가 아니라 값인가]
+ *   적재가 확정되면 노획물 액터는 사라진다 (이펙트 후 파괴). 포인터로 들고 있으면
+ *   결과 화면이 뜰 무렵에는 전부 null 이라 무엇을 실었는지 아무것도 남지 않는다.
+ *   확정 순간의 사실만 복사해 두면 액터의 수명과 무관해진다.
+ *
+ * [적재자가 폰이 아니라 PlayerState 인 이유]
+ *   폰은 체포 · 다운 · 관전 전환으로 파괴된다. 결과 화면까지 살아남는 것은 PlayerState 뿐이고,
+ *   ASC 를 PlayerState 에 둔 것과 같은 이유다.
+ *
+ * [이름 · 아이콘이 없는 이유]
+ *   ALootBase 에 표시용 이름 필드가 없다. 클래스만 들고 있으면 UI 가 거기서 이름과 아이콘을
+ *   해결할 수 있고, 나중에 노획물 파트가 DisplayName 을 추가해도 이 구조체는 그대로다.
+ */
+USTRUCT(BlueprintType)
+struct FHeistLoadEntry
+{
+	GENERATED_BODY()
+
+	/** 무엇이 실렸는가. 표시용 이름 · 아이콘은 UI 가 이 클래스에서 가져온다 */
+	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
+	TSubclassOf<ALootBase> LootClass;
+
+	/** 특성 태그(Loot.Type.*). 결과 화면이 중량형 · 파손형을 갈라 보여줄 때 쓴다 */
+	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
+	FGameplayTagContainer TypeTags;
+
+	/** 확정 시점의 가치($). 파손 · 유출이 이미 반영된 값이다 */
+	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
+	int32 Value = 0;
+
+	/** 온전했을 때의 가치($). Value 와 비교하면 얼마나 깎였는지 나온다 */
+	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
+	int32 BaseValue = 0;
+
+	/** 누가 실었는가. 기여도 집계의 키. 굴러 들어온 물건은 비어 있다 */
+	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
+	TObjectPtr<APlayerState> Loader = nullptr;
+
+	/**
+	 * 파손 · 유출로 가치가 깎였는가.
+	 *
+	 * 별도 bool 로 저장하지 않는다 — 두 값에서 유도되는 사실을 따로 들고 있으면
+	 * 둘이 어긋날 수 있고, 어긋난 쪽이 맞는지 아무도 모른다.
+	 */
+	bool IsValueLost() const { return Value < BaseValue; }
+};
 
 /**
  * 페이즈 전환. HUD · 레벨 차단 볼륨 · 경비 증원이 여기에 붙는다.
@@ -104,6 +158,23 @@ public:
 	 */
 	void AddLoadedValue(int32 DeltaValue);
 
+	/**
+	 * 적재 한 건을 기록하고 금액까지 누적한다. (서버 전용)
+	 *
+	 * 목록과 금액을 한 함수로 묶은 이유는 둘이 갈라지면 안 되기 때문이다. 호출부가
+	 * 따로 부르는 구조면 어느 한쪽만 부른 경로가 생기고, 그때 결과 화면의 항목 합계와
+	 * 상단의 적재액이 다르게 찍힌다 — 어느 쪽이 맞는지 코드를 봐야만 알 수 있다.
+	 */
+	void RecordLoadedLoot(const FHeistLoadEntry& Entry);
+
+	/**
+	 * 지금까지 실은 노획물 기록. 결과 화면의 '적재 목록'이 여기서 나온다.
+	 *
+	 * [지금은 서버에만 있다] 복제하지 않는다. 결과 화면을 붙이는 Day 4 에 복제 수단을
+	 *   정한다 — 그때까지 클라이언트에서는 항상 비어 있으므로 UI 를 여기 붙이지 말 것.
+	 */
+	const TArray<FHeistLoadEntry>& GetLoadedEntries() const { return LoadedEntries; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Heist|Value")
 	FOnHeistLoadedValueChanged OnLoadedValueChanged;
 
@@ -167,4 +238,13 @@ protected:
 	 */
 	UPROPERTY(ReplicatedUsing = OnRep_LoadedValue, BlueprintReadOnly, Category = "Heist|Value")
 	int32 TargetValue = 0;
+
+	/**
+	 * 실은 노획물 기록. 적재존이 확정할 때마다 한 건씩 쌓인다.
+	 *
+	 * UPROPERTY 인 이유는 항목이 APlayerState 를 참조하기 때문이다 — GC 가 보게 해야 한다.
+	 * 복제 지정자가 없는 것은 의도다. 위 GetLoadedEntries() 주석 참고.
+	 */
+	UPROPERTY()
+	TArray<FHeistLoadEntry> LoadedEntries;
 };

@@ -68,4 +68,19 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Phase", meta = (ClampMin = "0.0", Units = "s"))
 	float EscapeSeconds = 90.f;
+
+	// ── 밴 적재 ──
+
+	/**
+	 * 노획물이 적재존 안에 이만큼 머물러 있으면 적재로 확정한다.
+	 *
+	 * 오버랩 즉시 확정하지 않는 이유는 노획물의 물리가 살아 있기 때문이다. 던져 넣은 물건은
+	 * 화물칸 바닥에서 튕겨 다시 굴러 나올 수 있고, 그것까지 적재로 세면 밴 쪽으로 던지기만 해도
+	 * 돈이 들어온다. 이 시간은 "제대로 들어갔는가" 를 보는 유예다.
+	 *
+	 * 운반자가 들고 있는 동안은 세지 않는다 — 손에서 떠난 순간부터가 시작이다.
+	 * 너무 길면 도주 중에 답답하고, 너무 짧으면 물리를 살려 둔 의미가 없어진다.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Van", meta = (ClampMin = "0.0", Units = "s"))
+	float LoadDwellSeconds = 1.5f;
 };

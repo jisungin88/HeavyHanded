@@ -115,6 +115,20 @@ void AHeistGameState::AddLoadedValue(int32 DeltaValue)
 	OnRep_LoadedValue();
 }
 
+void AHeistGameState::RecordLoadedLoot(const FHeistLoadEntry& Entry)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 금액보다 목록이 먼저다. 파괴돼서 가치가 0 이 된 노획물은 AddLoadedValue 가 그냥 빠지는데,
+	// 그래도 "무엇을 실었는가" 에는 남아야 한다 — 깨진 채로 실어 온 것도 결과 화면의 사실이다
+	LoadedEntries.Add(Entry);
+
+	AddLoadedValue(Entry.Value);
+}
+
 void AHeistGameState::SetTargetValue(int32 NewTargetValue)
 {
 	if (!HasAuthority())
