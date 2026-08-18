@@ -41,7 +41,10 @@ public:
 	// 이 거리(2D) 안이면 현재 순찰 지점에 도착한 것으로 본다.
 	// BT 의 Move To 노드 Acceptable Radius 보다 조금 크게 잡을 것 —
 	// 작으면 도착 판정이 안 나 같은 지점을 무한히 다시 지정한다.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Patrol", meta = (ClampMin = "0.0", Units = "cm"))
+	//
+	// DT_GuardStats(FGuardStatsRow)에서 GuardType 에 맞는 행을 찾아 OnPossess 때 덮어쓴다.
+	// 여기 초기값은 테이블 조회가 실패했을 때만 쓰이는 폴백이다 — BP 에서 직접 손대지 말 것.
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Patrol", meta = (ClampMin = "0.0", Units = "cm"))
 	float PatrolArrivalRadius = 120.f;
 
 	// 다음 수색 지점을 골라 Blackboard의 InvestigateLocation에 써넣는다.
@@ -58,11 +61,13 @@ public:
 
 	// 마지막 목격 지점을 확인한 뒤 주변을 몇 번 더 훑을지.
 	// 0 이면 목격 지점만 확인하고 순찰로 돌아간다.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0"))
+	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0"))
 	int32 SearchSweepCount = 3;
 
 	// 훑을 무작위 지점을 고르는 반경. NavMesh 위에서만 고른다.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0.0", Units = "cm"))
+	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0.0", Units = "cm"))
 	float SearchSweepRadius = 600.f;
 
 	// Blackboard의 DetectionGauge(0~100)를 그대로 노출한다. 플레이어 화면의 게이지 위젯이
@@ -85,8 +90,13 @@ protected:
 	// 같은 주기(0.1초)로 충분해 매 틱 대신 타이머로 돈다.
 	void UpdateHeadGaugeWidget();
 
-	UPROPERTY(EditAnywhere, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
+	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
 	float HeadGaugeUpdateInterval = 0.1f;
+
+	// GuardType 에 맞는 DT_GuardStats 행을 찾아 이동/지각/순찰/조사 수치를 일괄 적용한다.
+	// 행을 못 찾으면 위 폴백값을 그대로 두고 경고만 남긴다. InPawn은 이동속도를 적용할 대상.
+	void ApplyGuardStats(APawn* InPawn);
 
 	// AI Perception(Sight+Hearing) 콜백. TargetActor / CanSeeTarget / SoundTargetActor 갱신.
 	UFUNCTION()
@@ -100,9 +110,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|AI")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
-	// 시야/청각 파라미터. 지역 변수로 두면 디테일 패널에 뜨지 않아
-	// 반경·시야각을 전혀 조정할 수 없다(엔진 기본값 고정). 멤버로 들고 있어야
-	// BP_GuardAIController 및 그 파생 BP 에서 GuardType 별로 값을 덮어쓸 수 있다.
+	// 시야/청각 파라미터. 반경·시야각 등 실제 수치는 DT_GuardStats(FGuardStatsRow)에서
+	// OnPossess 때 GuardType 에 맞는 행으로 덮어쓴다(ApplyGuardStats). 여기 생성자 기본값은
+	// 테이블 조회가 실패했을 때의 폴백이며, 멤버로 들고 있어야 디테일 패널에도 노출된다.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 

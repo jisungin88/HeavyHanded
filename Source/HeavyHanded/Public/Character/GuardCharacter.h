@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "GenericTeamAgentInterface.h"
 #include "AI/GuardTypes.h"
 #include "GuardCharacter.generated.h"
 
@@ -9,12 +10,19 @@ class UPerceptionMeterComponent;
 class UWidgetComponent;
 
 UCLASS()
-class AGuardCharacter : public ACharacter
+class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 {
 	GENERATED_BODY()
 
 public:
 	AGuardCharacter();
+
+	// IGenericTeamAgentInterface 기본 구현(GenericTeamAgentInterface.h)은 감지 대상 액터
+	// 자신이 이 인터페이스를 구현했는지만 보고, 그 액터의 컨트롤러까지는 확인하지 않는다.
+	// AGuardAIController::SetGenericTeamId 로 컨트롤러에 팀을 심어도 폰(=Sight 가 실제로
+	// 검사하는 대상)이 인터페이스를 안 들고 있으면 항상 "중립"으로 판정돼 팀이 무시된다.
+	// 그래서 폰에서도 구현해 컨트롤러 값을 그대로 전달한다.
+	virtual FGenericTeamId GetGenericTeamId() const override;
 
 	// 레벨에 배치된 경비 인스턴스마다 서로 다른 순찰 경로를 지정할 수 있도록
 	// EditInstanceOnly로 노출한다 (블루프린트 기본값이 아니라, 레벨의 각 배치본에서 직접 설정).
