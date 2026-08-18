@@ -3,9 +3,10 @@
 
 #include "Core/PlayerControllers/TitlePlayerController.h"
 #include "OnlineSubsystem.h"
-#include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
+#include "Interfaces/OnlineSessionInterface.h"
 #include "Engine/Engine.h"
+#include "Core/GameInstances/NetGameInstanceSubsystem.h"
 
 
 void ATitlePlayerController::BeginPlay()
@@ -35,67 +36,11 @@ void ATitlePlayerController::BeginPlay()
 
 
 
-	//// 클라이언트에서는 NAME_GameSession을 직접 관리하지 않음
-	//if (!HasAuthority())
-	//{
-	//	SessionDebug(TEXT("Client: Skip GameSession Check"), true);
-	//	return;
-	//}
-	//
-	//// 여기부터 서버/호스트 전용
-	//FNamedOnlineSession* Session =
-	//	SessionInterface->GetNamedSession(NAME_GameSession);
-	//
-	//if (Session)
-	//{
-	//	SessionDebug(TEXT("Host: GameSession EXISTS"), true);
-	//}
-	//else
-	//{
-	//	SessionDebug(TEXT("Host: GameSession NOT FOUND"), true);
-	//}
-
-
-
-
-
 }
 
 void ATitlePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	/////if (SessionInterface.IsValid())
-	/////{
-	/////	FNamedOnlineSession* Session =
-	/////		SessionInterface->GetNamedSession(NAME_GameSession);
-	/////
-	/////	if (Session)
-	/////	{
-	/////		UE_LOG(LogTemp, Warning, TEXT("EndPlay: Destroying GameSession"));
-	/////
-	/////		SessionInterface->DestroySession(NAME_GameSession);
-	/////	}
-	/////}
-	/////
-	/////Super::EndPlay(EndPlayReason);
-
-		// 클라이언트는 GameSession을 직접 Destroy하지 않음
-	//if (HasAuthority() && SessionInterface.IsValid())
-	//{
-	//	FNamedOnlineSession* Session =
-	//		SessionInterface->GetNamedSession(NAME_GameSession);
-	//
-	//	if (Session)
-	//	{
-	//		UE_LOG(LogTemp, Warning,
-	//			TEXT("EndPlay: Host destroying GameSession"));
-	//
-	//		SessionInterface->DestroySession(NAME_GameSession);
-	//	}
-	//}
-
 	Super::EndPlay(EndPlayReason);
-
-
 }
 
 
@@ -103,15 +48,8 @@ void ATitlePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATitlePlayerController::TitleCreateSession
     (const FString& RoomName, int maxPlayer, bool isPublic)
 {
-
 	// CreateSession 호출 여부 확인
 	SessionDebug(TEXT("TitleCreateSession ================="), true);
-
-
-	
-
-
-
 
 
 	// 기존 GameSession이 있는지 확인
@@ -119,8 +57,6 @@ void ATitlePlayerController::TitleCreateSession
 		SessionInterface->GetNamedSession(NAME_GameSession);
 
 	SessionDebug(TEXT("Existing GameSession"),ExistingSession == nullptr);
-
-
 
     CreateHandle =
         SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(
@@ -132,12 +68,6 @@ void ATitlePlayerController::TitleCreateSession
 	if (!CreateHandle.IsValid()) { return; }
 
 
-	// GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("Create Delegate = ADDED"));
-	// UE_LOG(LogTemp, Warning, TEXT("Create Delegate Added"));
-	// OnSessionDebug.Broadcast(TEXT("Create Delegate = ADDED"), true);
-
-
-
     FOnlineSessionSettings Settings;
 
     Settings.bIsLANMatch = true;
@@ -147,6 +77,9 @@ void ATitlePlayerController::TitleCreateSession
     Settings.bUsesPresence = false;
 
 
+	// NetGameInstanceSubsystem에 저장
+	UNetGameInstanceSubsystem* NetSubsystem =
+		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
     
     Settings.Set(
         FName(TEXT("ROOM_NAME")),
@@ -154,6 +87,13 @@ void ATitlePlayerController::TitleCreateSession
         //EOnlineDataAdvertisementType::ViaPing
         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
     );
+
+
+
+	if (NetSubsystem)
+	{
+		NetSubsystem->JoinedRoomName = RoomName;
+	}
 
     
     // 비공개 방만 코드 생성
@@ -243,43 +183,11 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
 
 
 
-    //if (Session)
-    //{
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("Session State = %d"),
-    //        (int32)Session->SessionState);
-	//
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("Advertise = %d"),
-    //        Session->SessionSettings.bShouldAdvertise);
-	//
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("LAN = %d"),
-    //        Session->SessionSettings.bIsLANMatch);
-	//
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("Connections = %d"),
-    //        Session->SessionSettings.NumPublicConnections);
-	//
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("HOST SESSION OK"));
-	//
-    //    UE_LOG(LogTemp, Warning,
-    //        TEXT("Advertise=%d LAN=%d"),
-    //        Session->SessionSettings.bShouldAdvertise,
-    //        Session->SessionSettings.bIsLANMatch);
-    //}
-
     else
     {
         UE_LOG(LogTemp, Warning,
             TEXT("HOST SESSION NONE"));
     }
-
-
-    //SessionInterface->StartSession(NAME_GameSession);
-
-
 
     OnSessionCreated.Broadcast(bWasSuccessful);
 
@@ -494,46 +402,9 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
 // 참가
 void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
 {
-    // 세션 참가 시작
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
-        TEXT("===== Join Session Start ====="));
-    UE_LOG(LogTemp, Warning, TEXT("===== Join Session Start ====="));
 
-    // SessionInterface 유효성 확인
-    if (!SessionInterface.IsValid())
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-            TEXT("Join: SessionInterface INVALID"));
-        UE_LOG(LogTemp, Warning, TEXT("Join: SessionInterface INVALID"));
-        return;
-    }
+	JoinDebug(SearchIndex);
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-        TEXT("Join: SessionInterface OK"));
-    UE_LOG(LogTemp, Warning, TEXT("Join: SessionInterface OK"));
-
-    // 검색 결과 인덱스 확인
-    if (!PublicSessionResults.IsValidIndex(SearchIndex))
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-            FString::Printf(TEXT("Join: Invalid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num()));
-        UE_LOG(LogTemp, Warning, TEXT("Join: Invalid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num());
-        return;
-    }
-
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-        FString::Printf(TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num()));
-    UE_LOG(LogTemp, Warning, TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num());
-
-    // 현재 GameSession이 이미 존재하는지 확인
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-        SessionInterface->GetNamedSession(NAME_GameSession)
-        ? TEXT("Join: Existing GameSession")
-        : TEXT("Join: No Existing GameSession"));
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("Join: Existing GameSession = %s"),
-        SessionInterface->GetNamedSession(NAME_GameSession) ? TEXT("YES") : TEXT("NO"));
 
     // Join 완료 델리게이트 등록
     JoinHandle =
@@ -542,46 +413,52 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
                 this,
                 &ATitlePlayerController::TitleOnJoinSessionComplete));
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-        TEXT("Join: Delegate Added"));
-    UE_LOG(LogTemp, Warning, TEXT("Join: Delegate Added"));
 
-    // 선택한 세션 검색 결과 가져오기
+	SessionDebug("Join: Delegate Added",true);
+
+
+	// 선택한 세션 검색 결과 가져오기
     const FOnlineSessionSearchResult& Result =
         PublicSessionResults[SearchIndex];
 
     // 세션 ID 확인
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-        FString::Printf(TEXT("Join: Session ID = %s"), *Result.GetSessionIdStr()));
-    UE_LOG(LogTemp, Warning, TEXT("Join: Session ID = %s"), *Result.GetSessionIdStr());
+	SessionDebug((TEXT("Join: Session ID = %s"), *Result.GetSessionIdStr()), true);
+
+
+
+	// 방 제목 가져오기
+	FString RoomName;
+
+	bool bGotRoomName =
+		Result.Session.SessionSettings.Get(
+			FName("ROOM_NAME"),
+			RoomName
+		);
+
+
+	SessionDebug((TEXT("Get Room Name = %s"), *RoomName), bGotRoomName);
+
+	// NetGameInstanceSubsystem에 저장
+	UNetGameInstanceSubsystem* NetSubsystem =
+		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
+
+	if (NetSubsystem)
+	{
+		NetSubsystem->JoinedRoomName = RoomName;
+	}
+
+
 
     // 선택한 세션에 참가 요청
-    bool bStarted =
-        SessionInterface->JoinSession(
-            0,
-            NAME_GameSession,
-            Result);
+    bool bStarted = SessionInterface->JoinSession(0, NAME_GameSession, Result);
 
     // JoinSession 호출 자체가 성공했는지 확인
-    if (bStarted)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-            TEXT("JoinSession SUCCESS"));
-        UE_LOG(LogTemp, Warning, TEXT("JoinSession SUCCESS"));
-    }
-    else
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-            TEXT("JoinSession FAILED"));
-        UE_LOG(LogTemp, Error, TEXT("JoinSession FAILED"));
-    }
+	SessionDebug("JoinSession SUCCESS?", bStarted);
 
-    // 세션 참가 요청 종료
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
-        TEXT("===== Join Session End ====="));
-    UE_LOG(LogTemp, Warning, TEXT("===== Join Session End ====="));
-    
-    
+	// 세션 참가 요청 종료
+	SessionDebug("===== Join Session End =====", true);
+ 
+
 }
 
 void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
@@ -601,6 +478,7 @@ void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJo
         static_cast<int32>(Result));
 
 
+	// Join 성공 여부
     if (Result != EOnJoinSessionCompleteResult::Success)
     {
         UE_LOG(LogTemp, Error,
@@ -609,6 +487,27 @@ void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJo
     }
 
 
+	// ++
+	// Join한 Session 가져오기
+	FNamedOnlineSession* JoinedSession =
+		SessionInterface->GetNamedSession(SessionName);
+
+	if (!JoinedSession)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Joined Session is invalid"));
+
+		return;
+	}
+
+
+
+
+
+
+
+
+	// Connect String 가져오기
     FString ConnectString;
 
     bool bResolved =
@@ -631,6 +530,7 @@ void ATitlePlayerController::TitleOnJoinSessionComplete(FName SessionName, EOnJo
     }
 
 
+	// 이동
     ClientTravel(
         ConnectString,
         TRAVEL_Absolute);
@@ -654,6 +554,10 @@ FString ATitlePlayerController::GenerateRoomCode()
     return Code;
 }
 
+
+
+
+
 void ATitlePlayerController::SessionDebug(const FString& Message, bool bSuccess)
 {
 	const FColor DebugColor = bSuccess ? FColor::Green : FColor::Red;
@@ -664,8 +568,51 @@ void ATitlePlayerController::SessionDebug(const FString& Message, bool bSuccess)
 	}
 
 	OnSessionDebug.Broadcast(Message, bSuccess);
+}
 
-	//UE_LOG(LogTemp, Warning, TEXT("[SessionDebug] %s"), *Message);
+void ATitlePlayerController::JoinDebug(int32 SearchIndex)
+{
+	// 세션 참가 시작
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
+		TEXT("===== Join Session Start ====="));
+	UE_LOG(LogTemp, Warning, TEXT("===== Join Session Start ====="));
+
+	// SessionInterface 유효성 확인
+	if (!SessionInterface.IsValid())
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+			TEXT("Join: SessionInterface INVALID"));
+		UE_LOG(LogTemp, Warning, TEXT("Join: SessionInterface INVALID"));
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+		TEXT("Join: SessionInterface OK"));
+	UE_LOG(LogTemp, Warning, TEXT("Join: SessionInterface OK"));
+
+	// 검색 결과 인덱스 확인
+	if (!PublicSessionResults.IsValidIndex(SearchIndex))
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+			FString::Printf(TEXT("Join: Invalid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num()));
+		UE_LOG(LogTemp, Warning, TEXT("Join: Invalid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num());
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+		FString::Printf(TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num()));
+	UE_LOG(LogTemp, Warning, TEXT("Join: Valid Index = %d / Num = %d"), SearchIndex, PublicSessionResults.Num());
+
+	// 현재 GameSession이 이미 존재하는지 확인
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+		SessionInterface->GetNamedSession(NAME_GameSession)
+		? TEXT("Join: Existing GameSession")
+		: TEXT("Join: No Existing GameSession"));
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Join: Existing GameSession = %s"),
+		SessionInterface->GetNamedSession(NAME_GameSession) ? TEXT("YES") : TEXT("NO"));
+
 }
 
 void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
@@ -691,11 +638,6 @@ void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bo
 		bPendingCreateSession = false;
 
 		SessionDebug(TEXT("Creating New Session"), true);
-
-		//TitleCreateSessionInternal(
-		//	PendingRoomName,
-		//	PendingMaxPlayer,
-		//	PendingIsPublic);
 	}
 
 }

@@ -109,10 +109,7 @@ private:
     //비공개 방 코드 생성
     FString GenerateRoomCode();
 
-	UPROPERTY(BlueprintAssignable, Category = "Debug")
-	FOnSessionDebug OnSessionDebug;
 
-	void SessionDebug(const FString& Message, bool bSuccess);
 
 
 
@@ -124,5 +121,11 @@ private:
 	void TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 
 
-	
+	UPROPERTY(BlueprintAssignable, Category = "Debug")
+	FOnSessionDebug OnSessionDebug;
+
+	void SessionDebug(const FString& Message, bool bSuccess);
+
+	void JoinDebug(int32 SearchIndex);
+
 };

@@ -4,14 +4,34 @@
 #include "Core/PlayerControllers/ShelterPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
+#include "Core/GameInstances/NetGameInstanceSubsystem.h"
 
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 
 
+
 void AShelterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
+
+	UNetGameInstanceSubsystem* NetSubsystem =
+		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
+
+	if (!NetSubsystem)
+	{
+		return;
+	}
+
+	const FString& RoomName =
+		NetSubsystem->JoinedRoomName;
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Lobby Room Name = %s"),
+		*RoomName
+	);
 
 }
 
