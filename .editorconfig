@@ -4,7 +4,10 @@ root = true
 
 [*]
 charset = utf-8
-end_of_line = crlf
+# .gitattributes 가 소스를 eol=lf 로 고정하고 있다. 여기서 crlf 를 쓰면
+# 에디터가 CRLF 로 저장하고 git 이 다시 LF 로 되돌려, 도구 조합에 따라
+# "파일 전체가 바뀐" 가짜 diff 가 난다. 두 파일은 항상 같은 값을 가리켜야 한다.
+end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
@@ -27,3 +30,7 @@ trim_trailing_whitespace = false
 [*.{yml,yaml,json}]
 indent_style = space
 indent_size = 2
+
+# 윈도우 배치·파워셸은 CRLF 여야 한다. (.gitattributes 도 eol=crlf 로 잡아 둔다)
+[*.{bat,ps1}]
+end_of_line = crlf

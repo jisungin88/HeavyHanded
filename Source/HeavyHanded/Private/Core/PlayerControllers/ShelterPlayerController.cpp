@@ -15,13 +15,26 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
+<<<<<<< HEAD
 
 void AShelterPlayerController::ClientReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
+=======
+void AShelterPlayerController::Client_ReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
+>>>>>>> 3d9d5a9cbf86dbf63f416a1ed437b3dad899e61e
 {
 	OnChatMessageReceived.Broadcast(PlayerName, Message);
 }
 
-void AShelterPlayerController::ServerSendChatMessage_Implementation(const FString& Message)
+bool AShelterPlayerController::Server_SendChatMessage_Validate(const FString& Message)
+{
+	// 검증에 실패하면 엔진이 해당 클라이언트의 접속을 끊는다.
+	// 그래서 "빈 문자열" 같은 정상 범위의 잘못된 입력은 여기서 막지 않는다 —
+	// 그건 아래 _Implementation 에서 조용히 무시한다.
+	// 여기서 막는 것은 악의적인 입력뿐이다.
+	return Message.Len() <= MaxChatMessageLength;
+}
+
+void AShelterPlayerController::Server_SendChatMessage_Implementation(const FString& Message)
 {
 	if (Message.TrimStartAndEnd().IsEmpty())
 	{
@@ -58,7 +71,7 @@ void AShelterPlayerController::ServerSendChatMessage_Implementation(const FStrin
 
 		if (PC)
 		{
-			PC->ClientReceiveChatMessage(PlayerName, Message);
+			PC->Client_ReceiveChatMessage(PlayerName, Message);
 		}
 	}
 

@@ -1,5 +1,6 @@
 ﻿#include "Misc/AutomationTest.h"
 
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Noise/NoiseSpamFilter.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -19,16 +20,16 @@ namespace
 {
 	constexpr float TestCooldown = 0.25f;
 
-	/** 테스트 태그. Config/Tags/Noise.ini 에 등록돼 있다 */
+	/** 테스트 태그. 프로덕션과 같은 상수를 쓴다 — 문자열을 복사하면 테스트가 자기 복사본을 검증하게 된다 */
 	FGameplayTag ImpactTag()
 	{
-		return FGameplayTag::RequestGameplayTag(TEXT("Noise.Loot.Impact"), /*ErrorIfNotFound*/ false);
+		return HHTags::Noise_Loot_Impact;
 	}
 
 	/** 파손형 노획물이 깨질 때 나가는 태그. 충돌 태그와 상태가 분리돼 있다 */
 	FGameplayTag BreakTag()
 	{
-		return FGameplayTag::RequestGameplayTag(TEXT("Noise.Loot.Break"), /*ErrorIfNotFound*/ false);
+		return HHTags::Noise_Loot_Break;
 	}
 
 	FNoiseSpamFilterParams DefaultParams()

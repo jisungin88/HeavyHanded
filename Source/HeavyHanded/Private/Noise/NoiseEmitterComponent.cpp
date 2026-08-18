@@ -6,6 +6,7 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
 
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Shared/NetAuthority.h"
 #include "Noise/NoiseSettings.h"
 #include "Noise/NoiseSubsystem.h"
@@ -88,11 +89,9 @@ void UNoiseEmitterComponent::BeginPlay()
 
 	if (!ImpactTag.IsValid())
 	{
-		// 에디터에서 안 채웠으면 기본 태그로 폴백한다
-		ImpactTag = FGameplayTag::RequestGameplayTag(TEXT("Noise.Loot.Impact"), /*ErrorIfNotFound*/ false);
-		UE_CLOG(!ImpactTag.IsValid(), LogNoiseEmitter, Warning,
-				TEXT("%s: ImpactTag 가 비어 있고 Noise.Loot.Impact 도 없어 충돌 소음이 나지 않습니다."),
-				*GetNameSafe(GetOwner()));
+		// 에디터에서 안 채웠으면 기본 태그로 폴백한다.
+		// 네이티브 선언이라 항상 유효하다 — 예전처럼 태그를 못 찾아 소음이 죽는 경로가 없다
+		ImpactTag = HHTags::Noise_Loot_Impact;
 	}
 
 	// 한 번 찾아서 붙들어 둔다. EndPlay 에서 다시 찾으면 파괴 도중이라 못 찾고

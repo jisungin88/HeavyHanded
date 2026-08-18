@@ -18,7 +18,7 @@ enum class ENoiseGrade : uint8
 	Huge
 };
 
-// 경계도 4단계. 기획서 3장. 이름은 팀 컨벤션 2-2 예시(EAlertLevel)를 따른다.
+// 경계도 4단계. 기획서 3장. 이름은 문서 05 컨벤션의 클래스 접두사 규칙을 따른다.
 UENUM(BlueprintType)
 enum class EAlertLevel : uint8
 {
