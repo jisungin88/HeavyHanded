@@ -79,6 +79,8 @@ public:
     virtual void OnReleased(APawn* Carrier) override;
     virtual bool CanBeThrown() const override;
     virtual void OnThrown(APawn* Carrier, const FVector& AimDirection) override;
+    // ComputeThrowAimDirection 도 ICarryable 이지만, BlueprintPure 로 열어 두어
+    // 아래 Loot|Throw 묶음에 함께 둔다.
     virtual APawn* GetPrimaryCarrier() const override;
     virtual UPrimitiveComponent* GetPhysicsRoot() const override;
     //~ ICarryable 끝
@@ -132,7 +134,7 @@ public:
      * 들려 있지 않으면 영벡터를 돌려준다.
      */
     UFUNCTION(BlueprintPure, Category = "Loot|Throw")
-    FVector ComputeThrowAimDirection() const;
+    virtual FVector ComputeThrowAimDirection() const override;
 
     /**
      * 던지기 궤적을 예측한다. 조준 중인 클라이언트가 로컬로 그리는 표시용이다.
@@ -428,6 +430,23 @@ private:
      * bCarryGripAtBottom 이 꺼져 있으면 0 벡터(= 원점을 잡는다).
      */
     FVector GetCarryGripOffset() const;
+
+    /**
+     * ApplyCarryState 가 한 번이라도 돌았는가.
+     *
+     * AppliedCarrier 만으로는 '아직 아무것도 반영 안 됨'과 '놓인 상태를 반영함'을
+     * 구별할 수 없다 — 둘 다 nullptr 이다. 그러면 BeginPlay 의 첫 호출이
+     * 조기 반환에 걸려 초기 상태 설정 자체가 통째로 날아간다.
+     */
+    bool bCarryStateApplied = false;
+
+    /**
+     * ApplyCarryState 가 마지막으로 반영한 운반자. 놓인 상태면 nullptr.
+     *
+     * PrimaryCarrier(지금 어떤 상태여야 하는가)와 짝을 이루는 '지금 어떤 상태인가'다.
+     * 둘이 같으면 할 일이 없다.
+     */
+    TWeakObjectPtr<APawn> AppliedCarrier;
 
     /**
      * [임시] 이번 G 입력이 다룰 노획물 하나를 고른다.

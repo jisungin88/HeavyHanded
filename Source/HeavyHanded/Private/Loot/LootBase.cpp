@@ -556,6 +556,24 @@ void ALootBase::ApplyCarryState()
     APawn* Carrier = PrimaryCarrier;
     const bool bCarried = IsValid(Carrier);
 
+    // 이미 같은 상태를 반영해 뒀으면 아무것도 하지 않는다.
+    //
+    // 이 함수는 여러 경로에서 불린다 — 서버의 OnGrabbed/OnReleased/OnThrown,
+    // 클라이언트의 OnRep_PrimaryCarrier, 그리고 앞으로 플레이어 파트가
+    // ICarryable 로 알려 주는 시점. 캐릭터와 노획물은 서로 다른 액터 채널이라
+    // 도착 순서가 보장되지 않고, 같은 상태가 연달아 들어오는 일이 실제로 생긴다.
+    //
+    // 그때 놓기 경로를 다시 타면 ApplyDropImpulse 가 한 번 더 들어가 놓은 물건이
+    // 혼자 튀어 나가고, 잡기 경로를 다시 타면 어태치가 두 번 걸린다.
+    // 상태를 반영하는 함수는 몇 번 불러도 결과가 같아야 한다.
+    //
+    // bCarryStateApplied 가 따로 필요한 이유: BeginPlay 의 첫 호출은 Carrier 가
+    // 없는 상태(둘 다 nullptr)라 이 검사만으로는 초기화 자체를 건너뛰게 된다.
+    if (bCarryStateApplied && AppliedCarrier.Get() == Carrier)
+    {
+        return;
+    }
+
     // 운반자가 바뀌거나 놓인 경우, 이전 운반자와의 상호 무시를 먼저 푼다.
     APawn* PreviousCarrier = MoveIgnoredCarrier.Get();
     if (PreviousCarrier && PreviousCarrier != Carrier)
@@ -616,6 +634,10 @@ void ALootBase::ApplyCarryState()
             ApplyDropImpulse(PreviousCarrier);
         }
     }
+
+    // 무엇을 반영했는지 남긴다. 위쪽 조기 반환이 이 값을 본다.
+    bCarryStateApplied = true;
+    AppliedCarrier = Carrier;
 }
 
 void ALootBase::AttachToCarrier(APawn* Carrier)
