@@ -3,6 +3,7 @@
 #include "Components/InputComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Loot/LootLog.h"
+#include "Loot/LootTypes.h"              // FLootDefinitionRow — DT_LootCatalog 행
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -145,6 +146,46 @@ void ALootBase::SetLootStateTag(const FGameplayTag& NewState)
     }
 
     LootStateTag = NewState;
+}
+
+void ALootBase::PostInitializeComponents()
+{
+    Super::PostInitializeComponents();
+
+    // BeginPlay 가 아니라 여기서 부른다.
+    // BeginPlay 는 PhysicsData.MassKg 로 질량을 덮어쓰고 BaseValue 로 CurrentValue 를
+    // 채우기 때문에, 표의 값이 그보다 먼저 들어와 있어야 한다.
+    // 또 컴포넌트의 BeginPlay(파손 임계값을 읽어 간다)도 액터 BeginPlay 안에서 돈다.
+    ApplyLootDefinition();
+}
+
+void ALootBase::ApplyLootDefinition()
+{
+    // 행을 지정하지 않은 노획물은 BP 에 적힌 인라인 값을 그대로 쓴다.
+    // 표에 아직 안 올린 것과 일회성 실험물을 위해 남겨 둔 길이다.
+    if (!LootDefinition.DataTable || LootDefinition.RowName.IsNone())
+    {
+        return;
+    }
+
+    // FindRow 는 행 구조체가 다르면 nullptr 을 주면서 경고를 찍는다.
+    // 두 번째 인자는 그 경고에 붙는 문맥 문자열이다 — 어느 액터가 잘못 지정했는지 남긴다.
+    const FLootDefinitionRow* Row =
+        LootDefinition.DataTable->FindRow<FLootDefinitionRow>(LootDefinition.RowName, GetName());
+
+    if (!Row)
+    {
+        // 조용히 넘어가면 기획자가 표에서 고친 값이 반영 안 된 채로 테스트하게 된다.
+        // 행 이름 오타는 실제로 자주 나므로 반드시 눈에 띄어야 한다.
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] DT 행을 찾지 못했다 — 테이블=%s 행=%s. BP 인라인 값으로 진행한다"),
+            *GetName(), *GetNameSafe(LootDefinition.DataTable), *LootDefinition.RowName.ToString());
+        return;
+    }
+
+    PhysicsData     = Row->Physics;
+    BaseValue       = Row->BaseValue;
+    LootDisplayName = Row->DisplayName;
 }
 
 void ALootBase::BeginPlay()

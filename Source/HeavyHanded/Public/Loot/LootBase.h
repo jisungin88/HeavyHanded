@@ -5,6 +5,7 @@
 #include "Core/HeavyHandedTypes.h"
 #include "GameplayTagAssetInterface.h"   // 부모 인터페이스 — 전방 선언 불가
 #include "GameplayTagContainer.h"        // FGameplayTagContainer 를 값으로 보유
+#include "Engine/DataTable.h"            // FDataTableRowHandle 을 값으로 보유
 #include "Interfaces/Carryable.h"
 #include "LootBase.generated.h"
 
@@ -97,6 +98,16 @@ public:
     /** 손상되지 않았을 때의 설계 가치($) */
     UFUNCTION(BlueprintPure, Category = "Loot|Value")
     int32 GetBaseValue() const { return BaseValue; }
+
+    /**
+     * 화면에 뜨는 이름. 상호작용 프롬프트("E — 도자기 들기")와 정산 목록이 쓴다.
+     *
+     * DT_LootCatalog 행에서 온다. 행을 지정하지 않았으면 비어 있고, 그때는
+     * 부르는 쪽이 알아서 대체 표기를 정한다 — 여기서 GetName() 을 돌려주면
+     * "BP_Loot_Fragile_C_0" 같은 내부 이름이 그대로 UI 에 뜬다.
+     */
+    UFUNCTION(BlueprintPure, Category = "Loot|Value")
+    const FText& GetDisplayName() const { return LootDisplayName; }
 
     /** 가치가 깎였는가 (파손·유출) */
     UFUNCTION(BlueprintPure, Category = "Loot|Value")
@@ -212,6 +223,12 @@ public:
     void Debug_ThrowForward();
 
 protected:
+    /**
+     * DT_LootCatalog 행을 반영한다. BeginPlay 보다 먼저 돌아야 한다 —
+     * BeginPlay 가 PhysicsData.MassKg 로 질량을 덮고 BaseValue 로 CurrentValue 를 채운다.
+     */
+    virtual void PostInitializeComponents() override;
+
     virtual void BeginPlay() override;
 
     /** 평소에는 꺼져 있고 조준 중에만 켜진다 (궤적 갱신용) */
@@ -222,11 +239,33 @@ protected:
     TObjectPtr<UStaticMeshComponent> LootMesh;
 
     /**
-     * 무게·질량·임계값. 지금은 액터에 인라인으로 두고, 마지막 단계에서 DataAsset 으로 뺀다.
+     * DT_LootCatalog 에서 이 노획물의 설계값을 가져올 행.
+     *
+     * 지정하면 아래 PhysicsData 와 BaseValue, 그리고 표시 이름을 이 행의 값으로 덮어쓴다.
+     * 비워 두면 아래 인라인 값을 그대로 쓴다 — 표에 아직 안 올린 노획물이나
+     * 일회성 실험물을 위해 열어 둔 길이다.
+     *
+     * 이걸 쓰는 이유는 수치를 BP(uasset) 밖으로 빼기 위해서다. BP 안에 있으면
+     * 기획자가 값 하나 고치려고 BP 를 열어야 하고, 그 파일은 병합이 안 된다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Data")
+    FDataTableRowHandle LootDefinition;
+
+    /**
+     * 무게·질량·임계값. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다.
      * BP 자식 클래스가 값만 지정하는 껍데기가 되도록 EditAnywhere 로 연다.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
     FLootPhysicsData PhysicsData;
+
+    /**
+     * 화면 표시 이름. LootDefinition 행에서 온다.
+     *
+     * 복제하지 않는다 — 표 조회는 모든 머신에서 같은 답이 나오는 순수 계산이고,
+     * PostInitializeComponents 는 서버·클라이언트 양쪽에서 돈다. 굳이 대역폭을 쓸 이유가 없다.
+     */
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Loot|Data")
+    FText LootDisplayName;
 
     /**
      * 소지 중 어태치할 운반자 스켈레탈 메시의 소켓 이름.
@@ -430,6 +469,12 @@ private:
      * bCarryGripAtBottom 이 꺼져 있으면 0 벡터(= 원점을 잡는다).
      */
     FVector GetCarryGripOffset() const;
+
+    /**
+     * LootDefinition 이 가리키는 행을 찾아 PhysicsData / BaseValue / LootDisplayName 에 반영한다.
+     * 행을 지정하지 않았으면 아무것도 하지 않는다 (인라인 값 유지).
+     */
+    void ApplyLootDefinition();
 
     /**
      * ApplyCarryState 가 한 번이라도 돌았는가.
