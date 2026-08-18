@@ -6,6 +6,91 @@
 #include "LootTypes.generated.h"
 
 /**
+ * 불안정형 노획물의 설계값. (기획서 5장 — 기울기 60도 초과 시 내용물 유출)
+ *
+ * ULootStabilityComponent 가 아니라 ALootBase 가 들고 있고 컴포넌트는 읽기만 한다.
+ * FLootPhysicsData 와 같은 구조다 — 값은 데이터, 행동은 컴포넌트.
+ *
+ * [왜 컴포넌트에서 뺐나] 이 값들은 노획물마다 달라야 하는 설계 수치다.
+ *   동전 자루와 물통은 새기 시작하는 각도도, 한 번에 잃는 비율도 달라야 한다.
+ *   컴포넌트 안에 있으면 기획자가 BP 를 열어야 하고, BP 는 병합이 안 된다.
+ *   파손형 수치(DamageImpulseThreshold, MaxImpactCount)는 이미 표에 있는데
+ *   불안정형만 BP 에 남아 있는 비대칭도 여기서 없앤다.
+ */
+USTRUCT(BlueprintType)
+struct FLootStabilityData
+{
+	GENERATED_BODY()
+
+	/** 이 각도를 넘으면 샌다(도). 수직에서 벗어난 각도이므로 90 이면 완전히 누운 상태다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
+		meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	float SpillTiltAngle = 60.f;
+
+	/**
+	 * 이 속도 이하로 움직이면 기울기가 쌓이지 않는다(cm/s).
+	 * 걷기는 안전하고 뛰면 쌓이는 지점에 둔다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Carry",
+		meta = (ClampMin = "0.0"))
+	float SafeCarrySpeed = 200.f;
+
+	/**
+	 * 안전 속도 초과분 1cm/s 당 초당 쌓이는 기울기(도).
+	 *
+	 * 속도와 시간이 둘 다 들어가는 것이 핵심이다. 얼마나 빠른지(초과분)와
+	 * 얼마나 오래 그랬는지(누적)가 같이 반영돼야 "조금만 더 뛸까" 하는 판단이 생긴다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Carry",
+		meta = (ClampMin = "0.0"))
+	float TiltGainPerSpeed = 0.06f;
+
+	/** 안전 속도 이하일 때 되돌아오는 속도(도/초). 멈춰서 숨 고르면 회복된다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Carry",
+		meta = (ClampMin = "0.0"))
+	float TiltRecoverRate = 25.f;
+
+	/**
+	 * 기우는 방향이 이동 방향을 따라가는 속도(도/초).
+	 *
+	 * 방향을 즉시 바꾸면 좌우로 왔다 갔다 할 때 물건이 순간이동하듯 꺾인다.
+	 * 내용물이 쏠렸다가 반대로 쏠리는 데도 시간이 걸린다고 보면 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Carry",
+		meta = (ClampMin = "0.0"))
+	float TiltDirectionTurnRate = 180.f;
+
+	/**
+	 * 놓인 상태에서 이 시간 이상 연속으로 기울어져 있어야 샌다(초).
+	 *
+	 * 던지면 ThrowSpinSpeed 로 회전하면서 날아가기 때문에, 순간 각도만 보면
+	 * 공중에서 새 버린다. 시간으로 한 겹 걸러야 '넘어진 것'과 '회전 중인 것'이 갈린다.
+	 * 굴러가는 중에는 계속 기울어져 있으므로 그대로 통과한다 — 의도한 동작이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
+		meta = (ClampMin = "0.0"))
+	float TiltGraceSeconds = 0.5f;
+
+	/** 기울어져 있는 동안 이 주기로 계속 샌다(초) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
+		meta = (ClampMin = "0.1"))
+	float SpillIntervalSeconds = 2.f;
+
+	/** 1회 유출당 깎이는 가치 비율 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SpillValueLossRatio = 0.15f;
+
+	/**
+	 * 설계 가치 대비 이 비율 밑으로는 깎이지 않는다.
+	 * 가치 0 은 파손형의 몫이다. 불안정형까지 0 이 되면 두 특성이 같아진다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinValueRatio = 0.2f;
+};
+
+/**
  * 노획물 한 종류의 설계값. DT_LootCatalog 의 한 행이다.
  *
  * [왜 DataAsset 이 아니라 DataTable 인가]
@@ -59,4 +144,14 @@ struct FLootDefinitionRow : public FTableRowBase
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
 	FLootPhysicsData Physics;
+
+	/**
+	 * 불안정형 수치. ULootStabilityComponent 를 붙인 노획물만 쓴다.
+	 *
+	 * 컴포넌트가 없는 행에도 칸은 남아 있는데, 채워도 아무 일이 일어나지 않는다.
+	 * 특성을 표에서 정하지 않는다는 원칙 때문이다 — 컴포넌트를 붙이는 것이 곧 선언이고,
+	 * 여기서 "불안정형인가" 를 또 정하면 둘 중 무엇이 진실인지 알 수 없게 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
+	FLootStabilityData Stability;
 };

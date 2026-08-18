@@ -184,6 +184,7 @@ void ALootBase::ApplyLootDefinition()
     }
 
     PhysicsData     = Row->Physics;
+    StabilityData   = Row->Stability;
     BaseValue       = Row->BaseValue;
     LootDisplayName = Row->DisplayName;
 }

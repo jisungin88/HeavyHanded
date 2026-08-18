@@ -6,7 +6,21 @@
 #include "GameFramework/Pawn.h"
 #include "Loot/LootBase.h"
 #include "Loot/LootLog.h"
+#include "Loot/LootTypes.h"
 #include "Net/UnrealNetwork.h"
+
+const FLootStabilityData& ULootStabilityComponent::GetData() const
+{
+    if (IsValid(OwnerLoot))
+    {
+        return OwnerLoot->GetStabilityData();
+    }
+
+    // 소유자가 없는 경우는 BeginPlay 전이거나 잘못 붙인 상태다. 둘 다 판정이 돌지 않지만,
+    // 호출부마다 유효성 검사를 넣지 않아도 되도록 기본값을 돌려준다.
+    static const FLootStabilityData Fallback;
+    return Fallback;
+}
 
 ULootStabilityComponent::ULootStabilityComponent()
 {
@@ -86,21 +100,23 @@ float ULootStabilityComponent::UpdateCarriedTilt(const APawn* Carrier, float Del
 {
     UpdateTiltDirection(Carrier, DeltaTime);
 
+    const FLootStabilityData& Data = GetData();
+
     // 수직 속도는 빼고 본다. 점프나 계단 낙하로 내용물이 쏟아지는 것은 이 규칙의 의도가 아니다.
     const float Speed = Carrier->GetVelocity().Size2D();
 
-    if (Speed > SafeCarrySpeed)
+    if (Speed > Data.SafeCarrySpeed)
     {
         // 초과분에 비례해 쌓는다. 빠를수록, 오래갈수록 많이 쌓인다.
-        CarriedTiltDegrees += (Speed - SafeCarrySpeed) * TiltGainPerSpeed * DeltaTime;
+        CarriedTiltDegrees += (Speed - Data.SafeCarrySpeed) * Data.TiltGainPerSpeed * DeltaTime;
     }
     else
     {
         // 천천히 가거나 멈추면 다시 선다. 멈춰서 숨 고르는 선택지가 있어야 한다.
-        CarriedTiltDegrees -= TiltRecoverRate * DeltaTime;
+        CarriedTiltDegrees -= Data.TiltRecoverRate * DeltaTime;
     }
 
-    CarriedTiltDegrees = FMath::Clamp(CarriedTiltDegrees, 0.f, SpillTiltAngle);
+    CarriedTiltDegrees = FMath::Clamp(CarriedTiltDegrees, 0.f, Data.SpillTiltAngle);
 
     ApplyCarriedLean(CarriedTiltDegrees);
     PushReplicatedTilt(CarriedTiltDegrees);
@@ -118,7 +134,9 @@ float ULootStabilityComponent::GetPhysicalTiltDegrees() const
 
 void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bool bUseGrace)
 {
-    if (TiltDegrees < SpillTiltAngle)
+    const FLootStabilityData& Data = GetData();
+
+    if (TiltDegrees < Data.SpillTiltAngle)
     {
         TiltedSeconds = 0.f;
         return;
@@ -128,7 +146,7 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 
     // 던져서 회전하는 중에는 각도가 계속 바뀌므로 여기서 걸린다.
     // 넘어져 있거나 굴러가는 중이면 계속 누적돼 통과한다.
-    if (bUseGrace && TiltedSeconds < TiltGraceSeconds)
+    if (bUseGrace && TiltedSeconds < Data.TiltGraceSeconds)
     {
         return;
     }
@@ -140,7 +158,7 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
     }
 
     // 기울어져 있는 동안 계속 샌다. "빨리 세워라" 는 압박이 여기서 나온다.
-    if (World->GetTimeSeconds() - LastSpillTime < SpillIntervalSeconds)
+    if (World->GetTimeSeconds() - LastSpillTime < Data.SpillIntervalSeconds)
     {
         return;
     }
@@ -151,8 +169,10 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 
 void ULootStabilityComponent::Spill(float TiltDegrees)
 {
+    const FLootStabilityData& Data = GetData();
+
     const int32 CurrentValue = OwnerLoot->GetCurrentValue();
-    const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * MinValueRatio);
+    const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * Data.MinValueRatio);
 
     // 바닥까지 샜으면 더 깎지 않는다. 가치 0 은 파손형의 몫이다.
     if (CurrentValue <= FloorValue)
@@ -161,7 +181,7 @@ void ULootStabilityComponent::Spill(float TiltDegrees)
     }
 
     const int32 TargetValue = FMath::Max(
-        FMath::RoundToInt(CurrentValue * (1.f - SpillValueLossRatio)), FloorValue);
+        FMath::RoundToInt(CurrentValue * (1.f - Data.SpillValueLossRatio)), FloorValue);
 
     // ALootBase 는 비율로 받는다. 바닥에 걸린 경우를 위해 목표 금액을 비율로 되돌린다.
     const float ActualRatio = 1.f - static_cast<float>(TargetValue) / static_cast<float>(CurrentValue);
@@ -209,7 +229,7 @@ void ULootStabilityComponent::UpdateTiltDirection(const APawn* Carrier, float De
 
     // 방향을 즉시 바꾸면 좌우로 왔다 갔다 할 때 물건이 순간이동하듯 꺾인다.
     TiltDirection = FMath::VInterpNormalRotationTo(
-        TiltDirection, MoveDirection, DeltaTime, TiltDirectionTurnRate);
+        TiltDirection, MoveDirection, DeltaTime, GetData().TiltDirectionTurnRate);
 }
 
 void ULootStabilityComponent::ApplyCarriedLean(float TiltDegrees)
@@ -248,6 +268,8 @@ void ULootStabilityComponent::ApplyCarriedLean(float TiltDegrees)
 
 void ULootStabilityComponent::PushReplicatedTilt(float TiltDegrees)
 {
+    const float SpillTiltAngle = GetData().SpillTiltAngle;
+
     const float Tilt01 = (SpillTiltAngle > 0.f)
         ? FMath::Clamp(TiltDegrees / SpillTiltAngle, 0.f, 1.f) : 0.f;
 

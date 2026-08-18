@@ -6,6 +6,7 @@
 #include "GameplayTagAssetInterface.h"   // 부모 인터페이스 — 전방 선언 불가
 #include "GameplayTagContainer.h"        // FGameplayTagContainer 를 값으로 보유
 #include "Engine/DataTable.h"            // FDataTableRowHandle 을 값으로 보유
+#include "Loot/LootTypes.h"              // FLootStabilityData 를 값으로 보유
 #include "Interfaces/Carryable.h"
 #include "LootBase.generated.h"
 
@@ -179,6 +180,14 @@ public:
     const FLootPhysicsData& GetPhysicsData() const { return PhysicsData; }
 
     /**
+     * 불안정형 수치. ULootStabilityComponent 가 읽어간다.
+     *
+     * 컴포넌트가 아니라 여기 있는 이유는 FLootPhysicsData 와 같다 —
+     * 설계 수치는 표(DT_LootCatalog)에서 오고, 컴포넌트는 그 값으로 행동만 한다.
+     */
+    const FLootStabilityData& GetStabilityData() const { return StabilityData; }
+
+    /**
      * 마지막으로 이 노획물을 든 사람. 놓거나 던진 뒤에도 남는다. 아무도 든 적 없으면 nullptr.
      *
      * [왜 PrimaryCarrier 로 부족한가] 밴에 '던져 넣기' 가 허용되므로(기획 5장 · 코어 루프 Day 2),
@@ -269,6 +278,13 @@ protected:
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
     FLootPhysicsData PhysicsData;
+
+    /**
+     * 불안정형 수치. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다.
+     * ULootStabilityComponent 를 붙이지 않은 노획물에서는 쓰이지 않는다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
+    FLootStabilityData StabilityData;
 
     /**
      * 화면 표시 이름. LootDefinition 행에서 온다.
