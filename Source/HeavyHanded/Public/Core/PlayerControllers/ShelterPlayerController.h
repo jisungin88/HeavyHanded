@@ -35,14 +35,6 @@ protected:
 
 public:
 
-<<<<<<< HEAD
-
-	// 클라이언트 → 서버
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSendChatMessage(const FString& Message);
-
-	// 서버 → 해당 클라이언트
-=======
 	/**
 	 * 채팅 한 줄을 서버로 보낸다. 채팅 UI(WBP_ChatBox)가 호출한다.
 	 *
@@ -54,18 +46,17 @@ public:
 	void Server_SendChatMessage(const FString& Message);
 
 	/** 서버가 해당 클라이언트에게 채팅 한 줄을 전달한다 */
->>>>>>> 3d9d5a9cbf86dbf63f416a1ed437b3dad899e61e
+
 	UFUNCTION(Client, Reliable)
 	void Client_ReceiveChatMessage(
 		const FString& PlayerName,
 		const FString& Message
 	);
 
-<<<<<<< HEAD
+
 	// 채팅 UI에서 바인딩
-=======
 	/** 채팅 UI 가 바인딩하는 수신 델리게이트 */
->>>>>>> 3d9d5a9cbf86dbf63f416a1ed437b3dad899e61e
+
 	UPROPERTY(BlueprintAssignable)
 	FOnChatMessageReceived OnChatMessageReceived;
 

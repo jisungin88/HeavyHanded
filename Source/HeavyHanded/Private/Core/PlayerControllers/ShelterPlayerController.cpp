@@ -15,12 +15,13 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
-<<<<<<< HEAD
+//void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
+//{
+//}
 
-void AShelterPlayerController::ClientReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
-=======
+
+
 void AShelterPlayerController::Client_ReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
->>>>>>> 3d9d5a9cbf86dbf63f416a1ed437b3dad899e61e
 {
 	OnChatMessageReceived.Broadcast(PlayerName, Message);
 }
