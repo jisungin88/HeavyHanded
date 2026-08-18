@@ -1,14 +1,20 @@
-#include "Core/VanLoadZone.h"
+#include "Core/VanZone.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "UObject/ConstructorHelpers.h"
 #include "GameplayEffectTypes.h"
 #include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
@@ -26,8 +32,19 @@ namespace
 	/** Config/DefaultEngine.ini 의 프로파일 이름. 노획물만 Overlap 한다 */
 	static const FName VanLoadZoneProfile(TEXT("VanLoadZone"));
 
+	/** 같은 파일의 승차 판정 프로파일. 플레이어만 Overlap 한다 */
+	static const FName VanBoardZoneProfile(TEXT("VanBoardZone"));
+
 	/** 기본 화물칸 크기(cm, 반지름). 밴 메시가 정해지면 인스턴스에서 조정한다 */
 	constexpr float DefaultZoneExtent = 150.f;
+
+	/**
+	 * 좌석 수. 기획서 2~4인이라 넷이면 충분하다.
+	 *
+	 * 모자랄 때 승차를 거부하지 않고 마지막 좌석에 겹쳐 앉히므로, 이 값이 틀려도
+	 * 누가 못 타는 일은 없다. 파티 인원이 늘면 여기 하나만 고친다.
+	 */
+	constexpr int32 MaxSeats = 4;
 
 	/**
 	 * PendingLoot 의 값이 이것이면 아직 누가 들고 있다는 뜻이다.
@@ -38,7 +55,7 @@ namespace
 	constexpr float CarriedMarker = -1.f;
 }
 
-AVanLoadZone::AVanLoadZone()
+AVanZone::AVanZone()
 {
 	// 판정은 오버랩과 타이머로 돈다. 매 프레임 할 일이 없다.
 	PrimaryActorTick.bCanEverTick = false;
@@ -60,6 +77,61 @@ AVanLoadZone::AVanLoadZone()
 	// 판정 볼륨이지 화물칸 벽이 아니다. 게임 화면에는 보이지 않아야 한다.
 	LoadVolume->SetHiddenInGame(true);
 
+	BoardVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardVolume"));
+	BoardVolume->SetupAttachment(LoadVolume);
+
+	BoardVolume->SetBoxExtent(FVector(DefaultZoneExtent));
+	BoardVolume->SetCollisionProfileName(VanBoardZoneProfile);
+	BoardVolume->SetHiddenInGame(true);
+
+	// 콜백은 걸지 않지만 겹침 추적은 켜야 한다. IsOverlappingActor 가 이 목록을 읽는다
+	BoardVolume->SetGenerateOverlapEvents(true);
+
+	VanDoor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VanDoor"));
+	VanDoor->SetupAttachment(LoadVolume);
+
+	// 그레이박스용 기본값. 큐브를 얇게 눌러 문짝 모양으로 쓴다.
+	// 비워 두면 조준할 것이 없어 승차가 아예 불가능해지므로 기본값이 있어야 한다
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDoorMesh(
+		TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (DefaultDoorMesh.Succeeded())
+	{
+		VanDoor->SetStaticMesh(DefaultDoorMesh.Object);
+	}
+
+	// 볼륨 뒤쪽 면에 세워 둔다. 두께 10cm · 폭 140cm · 높이 200cm 짜리 문짝이다
+	VanDoor->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, 0.f));
+	VanDoor->SetRelativeScale3D(FVector(0.1f, 1.4f, 2.f));
+
+	// 조준되는 것 하나가 이 컴포넌트의 전부다. 헤더 주석 참고 —
+	// 몸체가 아니라 문이므로 막을 것도 가릴 것도 없다
+	VanDoor->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	VanDoor->SetCollisionResponseToAllChannels(ECR_Ignore);
+	VanDoor->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	// 좌석. 화물칸 바닥에 둘씩 마주 보게 흩어 두고, 실제 배치는 뷰포트에서 한다.
+	// Z 가 볼륨 아래 면인 이유는 앵커가 '발이 닿는 지점' 이기 때문이다
+	static const FVector DefaultSeatOffsets[] = {
+		FVector(-60.f, -60.f, -DefaultZoneExtent), FVector(-60.f,  60.f, -DefaultZoneExtent),
+		FVector( 30.f, -60.f, -DefaultZoneExtent), FVector( 30.f,  60.f, -DefaultZoneExtent)
+	};
+
+	Seats.Reserve(MaxSeats);
+	for (int32 Index = 0; Index < MaxSeats; ++Index)
+	{
+		USceneComponent* Seat = CreateDefaultSubobject<USceneComponent>(
+			*FString::Printf(TEXT("Seat%d"), Index));
+		Seat->SetupAttachment(LoadVolume);
+		Seat->SetRelativeLocation(DefaultSeatOffsets[Index]);
+
+		Seats.Add(Seat);
+	}
+
+	// 하차 지점. 기본값은 문짝 바깥쪽 바닥이다 — 문을 열고 뒤로 내리는 그림
+	ExitAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("ExitAnchor"));
+	ExitAnchor->SetupAttachment(LoadVolume);
+	ExitAnchor->SetRelativeLocation(FVector(DefaultZoneExtent + 80.f, 0.f, -DefaultZoneExtent));
+
 	BorderDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("BorderDecal"));
 	BorderDecal->SetupAttachment(LoadVolume);
 
@@ -70,7 +142,7 @@ AVanLoadZone::AVanLoadZone()
 	BorderDecal->SetVisibility(false);
 }
 
-void AVanLoadZone::OnConstruction(const FTransform& Transform)
+void AVanZone::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
@@ -79,7 +151,7 @@ void AVanLoadZone::OnConstruction(const FTransform& Transform)
 	SyncBorderDecal();
 }
 
-void AVanLoadZone::BeginPlay()
+void AVanZone::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -97,8 +169,10 @@ void AVanLoadZone::BeginPlay()
 
 	WarnIfDuplicateZone();
 
-	LoadVolume->OnComponentBeginOverlap.AddDynamic(this, &AVanLoadZone::HandleBeginOverlap);
-	LoadVolume->OnComponentEndOverlap.AddDynamic(this, &AVanLoadZone::HandleEndOverlap);
+	LoadVolume->OnComponentBeginOverlap.AddDynamic(this, &AVanZone::HandleBeginOverlap);
+	LoadVolume->OnComponentEndOverlap.AddDynamic(this, &AVanZone::HandleEndOverlap);
+
+	// BoardVolume 에는 콜백을 걸지 않는다. 승차는 드나드는 것이 아니라 상호작용이다
 
 	// 레벨에 처음부터 존 안에 놓여 있는 노획물은 오버랩 이벤트를 만들지 않는다.
 	// (엔진이 BeginPlay 전에 겹침을 갱신해 버려서 콜백을 받을 시점이 지나 있다)
@@ -111,7 +185,7 @@ void AVanLoadZone::BeginPlay()
 	}
 }
 
-void AVanLoadZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AVanZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 레벨 전환 중에 재검사가 돌면 이미 정리되기 시작한 월드를 건드린다.
 	if (const UWorld* World = GetWorld())
@@ -122,7 +196,7 @@ void AVanLoadZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AVanLoadZone::WarnIfDuplicateZone() const
+void AVanZone::WarnIfDuplicateZone() const
 {
 	const UWorld* World = GetWorld();
 	if (!World)
@@ -131,7 +205,7 @@ void AVanLoadZone::WarnIfDuplicateZone() const
 	}
 
 	int32 ZoneCount = 0;
-	for (TActorIterator<AVanLoadZone> It(World); It; ++It)
+	for (TActorIterator<AVanZone> It(World); It; ++It)
 	{
 		++ZoneCount;
 	}
@@ -139,7 +213,7 @@ void AVanLoadZone::WarnIfDuplicateZone() const
 	if (ZoneCount > 1)
 	{
 		UE_LOG(LogHeist, Warning,
-			TEXT("[VanLoadZone:%s] 레벨에 적재존이 %d개 있습니다. 진입 지역이 달라도 존은 하나여야 "
+			TEXT("[VanZone:%s] 레벨에 적재존이 %d개 있습니다. 진입 지역이 달라도 존은 하나여야 "
 				 "합니다 — 어느 존이 금액을 올렸는지 추적할 수 없게 됩니다."),
 			*GetName(), ZoneCount);
 	}
@@ -149,7 +223,7 @@ void AVanLoadZone::WarnIfDuplicateZone() const
 // 오버랩 — 존 안에 들어왔는가
 // ──────────────────────────────────────────────────────────────
 
-void AVanLoadZone::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
+void AVanZone::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
 	UPrimitiveComponent* /*OtherComp*/, int32 /*OtherBodyIndex*/, bool /*bFromSweep*/,
 	const FHitResult& /*SweepResult*/)
 {
@@ -171,7 +245,7 @@ void AVanLoadZone::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent
 	TrackPending(Loot);
 }
 
-void AVanLoadZone::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
+void AVanZone::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
 	UPrimitiveComponent* /*OtherComp*/, int32 /*OtherBodyIndex*/)
 {
 	// IsValid 로 거르지 않는다. 확정 직후 파괴되는 노획물도 이 콜백을 한 번 만들고,
@@ -194,10 +268,301 @@ void AVanLoadZone::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/
 }
 
 // ──────────────────────────────────────────────────────────────
+// 승차 — 상태이지 사건이 아니다
+// ──────────────────────────────────────────────────────────────
+
+AVanZone* AVanZone::Get(const UObject* WorldContext)
+{
+	if (!GEngine)
+	{
+		return nullptr;
+	}
+
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::ReturnNull);
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	// 레벨당 하나라는 계약에 기대어 첫 번째를 돌려준다.
+	// 둘 이상이면 BeginPlay 가 이미 경고를 남겼으므로 여기서 다시 따지지 않는다.
+	for (TActorIterator<AVanZone> It(World); It; ++It)
+	{
+		return *It;
+	}
+
+	return nullptr;
+}
+
+bool AVanZone::TryDisembarkIfBoarded(APawn* Player)
+{
+	if (!IsValid(Player))
+	{
+		return false;
+	}
+
+	const APlayerState* PlayerState = Player->GetPlayerState();
+	if (!PlayerState)
+	{
+		return false;
+	}
+
+	// 명단이 진리원이다. 밴을 먼저 찾아 물어보지 않는 이유는, 타고 있지 않은 경우가
+	// 압도적으로 흔한데 그때마다 액터를 훑을 이유가 없기 때문이다
+	const AHeistGameState* HeistState = AHeistGameState::Get(Player);
+	if (!HeistState || !HeistState->IsBoarded(PlayerState))
+	{
+		return false;
+	}
+
+	AVanZone* Van = Get(Player);
+	return Van && Van->TryToggleBoarding(Player);
+}
+
+bool AVanZone::TryToggleBoarding(APawn* Player)
+{
+	// 상호작용 판정은 서버에서만 돈다 (UGAB_Interact 도 서버에서만 부른다).
+	// 클라이언트가 자기 명단을 고칠 수 있으면 탈출 판정이 곧 치트가 된다
+	if (!HasAuthority() || !IsValid(Player))
+	{
+		return false;
+	}
+
+	// 조종자가 없는 폰은 명단에 오를 수 없다. 그것을 사람으로 세면 인원이 맞지 않는다
+	APlayerState* PlayerState = Player->GetPlayerState();
+	if (!PlayerState)
+	{
+		return false;
+	}
+
+	AHeistGameState* HeistState = AHeistGameState::Get(this);
+	if (!HeistState)
+	{
+		// 작업 레벨이 아닌 테스트 맵이다. 적재는 되지만 승차는 셀 곳이 없다
+		return false;
+	}
+
+	const bool bWasBoarded = HeistState->IsBoarded(PlayerState);
+
+	// 내리는 것은 언제나 된다. 탈 때만 조건을 본다 —
+	// 페이즈가 넘어갔다고 탄 사람을 밴에 가둬 둘 이유가 없다
+	if (!bWasBoarded && !CanBoardNow(Player))
+	{
+		return false;
+	}
+
+	const bool bBoarded = !bWasBoarded;
+
+	// 폰을 먼저 처리한다. 명단 갱신이 GameMode 의 종료 판정을 그 자리에서 불러서,
+	// 순서를 뒤집으면 결과 화면이 뜬 뒤에 폰이 붙는다
+	ApplyBoardedPawnState(Player, bBoarded);
+	HeistState->SetBoarded(PlayerState, bBoarded);
+
+	ShowLoadDebug(FString::Printf(TEXT("%s — %s (승차 %d명)"),
+		bBoarded ? TEXT("승차") : TEXT("하차"),
+		*PlayerState->GetPlayerName(), HeistState->GetBoardedNum()),
+		bBoarded ? FColor::Cyan : FColor::Silver, Player->GetActorLocation());
+
+	// 이벤트는 "일어난 일" 이라 탈 때만 보낸다.
+	// 내리는 것은 별도 이벤트가 아니라 State.InVan 이 떨어지는 것으로 표현된다
+	if (bBoarded)
+	{
+		SendBoardedEvent(Player, HeistState->GetBoardedNum());
+	}
+
+	return true;
+}
+
+bool AVanZone::CanBoardNow(const APawn* Player) const
+{
+	// 뒷칸 밖에서 멀리 조준해 타는 것을 막는다. 어빌리티의 사거리(기본 300cm)만으로는
+	// 밴 옆이나 지붕 위에서도 닿기 때문에, "안에 들어와 있는가" 를 여기서 다시 본다
+	if (!BoardVolume->IsOverlappingActor(Player))
+	{
+		ShowLoadDebug(FString::Printf(TEXT("승차 거부 — %s 가 뒷칸 밖에 있다"),
+			*GetNameSafe(Player)), FColor::Red, Player->GetActorLocation());
+		return false;
+	}
+
+	const AHeistGameState* HeistState = AHeistGameState::Get(this);
+	if (!HeistState)
+	{
+		return true;   // 페이즈가 없는 테스트 맵. 판정할 근거가 없으면 막지 않는다
+	}
+
+	// 준비 시간에 타 봐야 할 일이 없고, 그때 이동이 묶이면 준비 시간을 통째로 날린다.
+	// 결과 화면이 뜬 뒤도 마찬가지다 — 이미 끝난 판이다
+	if (!HeistState->IsPhase(HHTags::Phase_Heist) && !HeistState->IsPhase(HHTags::Phase_Escape))
+	{
+		ShowLoadDebug(TEXT("승차 거부 — 본 작업이 시작되기 전이다"),
+			FColor::Red, Player->GetActorLocation());
+		return false;
+	}
+
+	return true;
+}
+
+void AVanZone::ApplyBoardedPawnState(APawn* Player, bool bBoarded)
+{
+	ACharacter* Character = Cast<ACharacter>(Player);
+	if (!Character)
+	{
+		return;
+	}
+
+	APlayerState* PlayerState = Player->GetPlayerState();
+	UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
+
+	if (bBoarded)
+	{
+		if (USceneComponent* Seat = TakeSeat(PlayerState))
+		{
+			// 자리로 옮긴 뒤 붙인다. 회전은 건드리지 않는다 — 시점 회전은 컨트롤러가
+			// 매 프레임 덮어쓰므로, 여기서 돌려 놔도 다음 프레임에 되돌아간다
+			PlaceAtAnchor(Character, Seat);
+
+			Character->AttachToComponent(Seat, FAttachmentTransformRules::KeepWorldTransform);
+		}
+		else
+		{
+			// 좌석이 하나도 없다. 서 있던 자리에 고정한다 — 자리가 없다고 못 타게 하면
+			// 그 사람은 영영 탈출하지 못한다
+			Character->AttachToComponent(GetRootComponent(),
+				FAttachmentTransformRules::KeepWorldTransform);
+		}
+
+		if (Movement)
+		{
+			// MovementMode 는 복제되므로 클라이언트도 같이 멈춘다
+			Movement->DisableMovement();
+			Movement->StopMovementImmediately();
+		}
+	}
+	else
+	{
+		ReleaseSeat(PlayerState);
+
+		// 떼어낸 뒤에 옮긴다. 붙어 있는 채로 위치를 바꾸면 어태치가 그 값을 상대 좌표로
+		// 다시 해석해서 엉뚱한 곳으로 간다
+		Character->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		PlaceAtAnchor(Character, ExitAnchor);
+
+		if (Movement)
+		{
+			Movement->SetMovementMode(MOVE_Walking);
+		}
+	}
+}
+
+// ──────────────────────────────────────────────────────────────
+// 좌석
+// ──────────────────────────────────────────────────────────────
+
+USceneComponent* AVanZone::TakeSeat(APlayerState* Player)
+{
+	if (Seats.IsEmpty() || !Player)
+	{
+		return nullptr;
+	}
+
+	// 좌석 수가 바뀌어도(파티 인원 조정) 장부가 따라오게 매번 맞춘다
+	SeatOccupants.SetNum(Seats.Num());
+
+	const AHeistGameState* HeistState = AHeistGameState::Get(this);
+
+	int32 FirstFree = INDEX_NONE;
+
+	for (int32 Index = 0; Index < SeatOccupants.Num(); ++Index)
+	{
+		const APlayerState* Occupant = SeatOccupants[Index].Get();
+
+		if (Occupant == Player)
+		{
+			return Seats[Index];   // 이미 앉아 있다. 자리를 옮기지 않는다
+		}
+
+		if (FirstFree != INDEX_NONE)
+		{
+			continue;
+		}
+
+		// 비었는가를 '상태' 가 아니라 '사실' 로 본다. 접속이 끊긴 사람의 자리가 영영 잠기면
+		// 나중에 들어온 사람이 앉을 곳이 없어지는데, 그건 하차 처리를 놓치는 순간 바로 생긴다
+		const bool bStale = !IsValid(Occupant)
+			|| (HeistState && !HeistState->IsBoarded(Occupant));
+
+		if (bStale)
+		{
+			FirstFree = Index;
+		}
+	}
+
+	// 자리가 없으면 마지막 좌석에 겹쳐 앉힌다. 장부는 덮어쓰지 않는다 —
+	// 원래 앉아 있던 사람이 내릴 때 그 자리가 정상적으로 비어야 한다
+	if (FirstFree == INDEX_NONE)
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("[VanZone:%s] 좌석이 %d개뿐이라 %s 를 마지막 자리에 겹쳐 앉힙니다."),
+			*GetName(), Seats.Num(), *Player->GetPlayerName());
+
+		return Seats.Last();
+	}
+
+	SeatOccupants[FirstFree] = Player;
+	return Seats[FirstFree];
+}
+
+void AVanZone::PlaceAtAnchor(ACharacter* Character, const USceneComponent* Anchor)
+{
+	if (!Character || !Anchor)
+	{
+		return;
+	}
+
+	FVector Location = Anchor->GetComponentLocation();
+
+	// 캡슐 원점은 가운데다. 앵커 좌표를 그대로 넣으면 절반이 바닥에 파묻히고,
+	// 하차 직후 물리가 캐릭터를 위로 밀어내면서 튀어 오른다
+	if (const UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+	{
+		Location.Z += Capsule->GetScaledCapsuleHalfHeight();
+	}
+
+	// 스윕하지 않는다. 좌석은 메시 안일 수도 있고, 그때 스윕은 도착을 막아 버린다
+	Character->SetActorLocation(Location,
+		/*bSweep=*/false, /*OutSweepHitResult=*/nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AVanZone::ReleaseSeat(const APlayerState* Player)
+{
+	for (TWeakObjectPtr<APlayerState>& Occupant : SeatOccupants)
+	{
+		if (Occupant.Get() == Player)
+		{
+			Occupant.Reset();
+			return;
+		}
+	}
+}
+
+void AVanZone::SendBoardedEvent(APawn* Player, int32 NumBoarded) const
+{
+	// 페이로드 규약은 HHTags::Event_Player_BoardedVan 주석에 있다
+	FGameplayEventData Payload;
+	Payload.EventTag = HHTags::Event_Player_BoardedVan;
+	Payload.Instigator = Player;
+	Payload.Target = Player;
+	Payload.EventMagnitude = static_cast<float>(NumBoarded);
+
+	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+		Player, HHTags::Event_Player_BoardedVan, Payload);
+}
+
+// ──────────────────────────────────────────────────────────────
 // 체류 시간 — 놓기와 던지기는 오버랩 이벤트를 만들지 않는다
 // ──────────────────────────────────────────────────────────────
 
-bool AVanLoadZone::IsLoadAllowedNow() const
+bool AVanZone::IsLoadAllowedNow() const
 {
 	// 결과 화면이 뜬 뒤에 굴러 들어온 물건까지 금액에 반영되면, 화면에 이미 표시된 정산액과
 	// GameState 의 값이 달라진다. Prep · Heist · Escape 는 전부 받는다 —
@@ -210,7 +575,7 @@ bool AVanLoadZone::IsLoadAllowedNow() const
 	return !HeistState || !HeistState->IsPhase(HHTags::Phase_Result);
 }
 
-void AVanLoadZone::TrackPending(ALootBase* Loot)
+void AVanZone::TrackPending(ALootBase* Loot)
 {
 	// 이미 추적 중이면 손대지 않는다. 액터 하나가 여러 바디로 겹치면 BeginOverlap 이
 	// 여러 번 오는데, 그때마다 시작 시각을 새로 찍으면 체류 시간이 영영 안 찬다.
@@ -247,7 +612,7 @@ void AVanLoadZone::TrackPending(ALootBase* Loot)
 		FColor::Orange, Loot->GetActorLocation());
 }
 
-void AVanLoadZone::RecheckPending()
+void AVanZone::RecheckPending()
 {
 	const UWorld* World = GetWorld();
 	if (!World)
@@ -308,7 +673,7 @@ void AVanLoadZone::RecheckPending()
 	UpdateRecheckTimer();
 }
 
-void AVanLoadZone::UpdateRecheckTimer()
+void AVanZone::UpdateRecheckTimer()
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -327,7 +692,7 @@ void AVanLoadZone::UpdateRecheckTimer()
 
 	if (!Timers.IsTimerActive(RecheckTimerHandle))
 	{
-		Timers.SetTimer(RecheckTimerHandle, this, &AVanLoadZone::RecheckPending,
+		Timers.SetTimer(RecheckTimerHandle, this, &AVanZone::RecheckPending,
 			RecheckIntervalSeconds, /*bLoop=*/true);
 	}
 }
@@ -336,7 +701,7 @@ void AVanLoadZone::UpdateRecheckTimer()
 // 확정
 // ──────────────────────────────────────────────────────────────
 
-void AVanLoadZone::ConfirmLoad(ALootBase* Loot)
+void AVanZone::ConfirmLoad(ALootBase* Loot)
 {
 	if (!HasAuthority() || !IsValid(Loot))
 	{
@@ -362,7 +727,7 @@ void AVanLoadZone::ConfirmLoad(ALootBase* Loot)
 	{
 		// 작업 레벨이 아닌 곳(테스트 맵)에 존만 놓은 경우다. 적재 자체는 되지만 집계가 없다.
 		UE_LOG(LogHeist, Warning,
-			TEXT("[VanLoadZone:%s] AHeistGameState 가 없어 금액을 집계하지 못했다 — %s ($%d)"),
+			TEXT("[VanZone:%s] AHeistGameState 가 없어 금액을 집계하지 못했다 — %s ($%d)"),
 			*GetName(), *Loot->GetName(), Entry.Value);
 	}
 
@@ -379,7 +744,7 @@ void AVanLoadZone::ConfirmLoad(ALootBase* Loot)
 	HandleConfirmedLoot(Loot);
 }
 
-FHeistLoadEntry AVanLoadZone::MakeLoadEntry(const ALootBase* Loot) const
+FHeistLoadEntry AVanZone::MakeLoadEntry(const ALootBase* Loot) const
 {
 	FHeistLoadEntry Entry;
 
@@ -407,7 +772,7 @@ FHeistLoadEntry AVanLoadZone::MakeLoadEntry(const ALootBase* Loot) const
 	return Entry;
 }
 
-void AVanLoadZone::SendLoadedEvent(APawn* Loader, ALootBase* Loot, int32 LoadedValue) const
+void AVanZone::SendLoadedEvent(APawn* Loader, ALootBase* Loot, int32 LoadedValue) const
 {
 	if (!IsValid(Loader))
 	{
@@ -434,7 +799,7 @@ void AVanLoadZone::SendLoadedEvent(APawn* Loader, ALootBase* Loot, int32 LoadedV
 // 연출 — 여기만 갈아 끼우면 NPC 적재가 된다
 // ──────────────────────────────────────────────────────────────
 
-void AVanLoadZone::HandleConfirmedLoot_Implementation(ALootBase* Loot)
+void AVanZone::HandleConfirmedLoot_Implementation(ALootBase* Loot)
 {
 	if (!IsValid(Loot))
 	{
@@ -449,7 +814,7 @@ void AVanLoadZone::HandleConfirmedLoot_Implementation(ALootBase* Loot)
 	Loot->Destroy();
 }
 
-void AVanLoadZone::Multicast_PlayLoadedEffect_Implementation(FVector Location)
+void AVanZone::Multicast_PlayLoadedEffect_Implementation(FVector Location)
 {
 	if (!LoadedEffect)
 	{
@@ -463,7 +828,7 @@ void AVanLoadZone::Multicast_PlayLoadedEffect_Implementation(FVector Location)
 // 표시
 // ──────────────────────────────────────────────────────────────
 
-void AVanLoadZone::SyncBorderDecal()
+void AVanZone::SyncBorderDecal()
 {
 	if (!BorderDecal || !LoadVolume)
 	{
@@ -481,10 +846,10 @@ void AVanLoadZone::SyncBorderDecal()
 	BorderDecal->DecalSize = FVector(Extent.Z, Extent.Y, Extent.X);
 }
 
-void AVanLoadZone::DrawBorderFallback() const
+void AVanZone::DrawBorderFallback() const
 {
 	UE_LOG(LogHeist, Warning,
-		TEXT("[VanLoadZone:%s] BorderMaterial 이 없어 존 테두리를 디버그 선으로 그립니다. "
+		TEXT("[VanZone:%s] BorderMaterial 이 없어 존 테두리를 디버그 선으로 그립니다. "
 			 "머티리얼이 나오면 지정하세요."),
 		*GetName());
 
@@ -499,14 +864,14 @@ void AVanLoadZone::DrawBorderFallback() const
 #endif
 }
 
-void AVanLoadZone::ShowLoadDebug(const FString& Message, const FColor& Color, const FVector& Location) const
+void AVanZone::ShowLoadDebug(const FString& Message, const FColor& Color, const FVector& Location) const
 {
 	if (!bShowLoadDebug)
 	{
 		return;
 	}
 
-	UE_LOG(LogHeist, Log, TEXT("[VanLoadZone:%s] %s"), *GetName(), *Message);
+	UE_LOG(LogHeist, Log, TEXT("[VanZone:%s] %s"), *GetName(), *Message);
 
 	if (GEngine)
 	{

@@ -1,9 +1,13 @@
 ﻿#include "Core/GameStates/HeistGameState.h"
 
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistLog.h"
 
 AHeistGameState::AHeistGameState()
@@ -23,6 +27,8 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHeistGameState, PhaseReason);
 	DOREPLIFETIME(AHeistGameState, LoadedValue);
 	DOREPLIFETIME(AHeistGameState, TargetValue);
+	DOREPLIFETIME(AHeistGameState, BoardedPlayers);
+	DOREPLIFETIME(AHeistGameState, ArrestedPlayers);
 }
 
 AHeistGameState* AHeistGameState::Get(const UObject* WorldContext)
@@ -145,4 +151,158 @@ void AHeistGameState::SetTargetValue(int32 NewTargetValue)
 void AHeistGameState::OnRep_LoadedValue()
 {
 	OnLoadedValueChanged.Broadcast(LoadedValue, TargetValue);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 탈출
+// ──────────────────────────────────────────────────────────────
+
+bool AHeistGameState::IsCountedPlayer(const APlayerState* Player)
+{
+	// IsInactive 는 접속이 끊긴 뒤 재접속을 위해 남겨 둔 껍데기다. 이걸 안 걸면
+	// 나간 사람이 영영 "안 탄 사람" 으로 남아 전원 승차가 성립하지 않는다.
+	return IsValid(Player) && !Player->IsOnlyASpectator() && !Player->IsInactive();
+}
+
+bool AHeistGameState::IsPlayerDowned(const APlayerState* Player)
+{
+	const IAbilitySystemInterface* AsAbilitySystem = Cast<IAbilitySystemInterface>(Player);
+	if (!AsAbilitySystem)
+	{
+		return false;
+	}
+
+	// 다운 시스템(전영배)이 아직 이 태그를 붙이지 않는다. 그래서 지금은 언제나 false 이고,
+	// 다운 관련 분기가 전부 잠들어 있다 — GE 가 들어오는 순간 그대로 살아난다.
+	const UAbilitySystemComponent* ASC = AsAbilitySystem->GetAbilitySystemComponent();
+	return ASC && ASC->HasMatchingGameplayTag(HHTags::State_Downed);
+}
+
+void AHeistGameState::SetMirrorTag(APlayerState* Player, const FGameplayTag& Tag, bool bApply)
+{
+	IAbilitySystemInterface* AsAbilitySystem = Cast<IAbilitySystemInterface>(Player);
+	if (!AsAbilitySystem)
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = AsAbilitySystem->GetAbilitySystemComponent();
+	if (!ASC)
+	{
+		return;
+	}
+
+	// Loose 태그를 쓰는 이유는 이 상태의 주인이 GAS 가 아니기 때문이다. 진리원은 명단이고
+	// 태그는 그 사본이라, 태그를 만드는 GameplayEffect 를 따로 두면 주인이 둘이 된다.
+	//
+	// 복제판(AddReplicated~)인 이유는 이 태그의 유일한 용도가 남에게 보이는 것이라서다.
+	// 그냥 AddLooseGameplayTag 는 서버에만 붙어서, 정작 이걸 읽어야 할 클라이언트 HUD 와
+	// 어빌리티 차단 판정에는 아무것도 도착하지 않는다.
+	if (bApply)
+	{
+		ASC->AddReplicatedLooseGameplayTag(Tag);
+	}
+	else
+	{
+		ASC->RemoveReplicatedLooseGameplayTag(Tag);
+	}
+}
+
+bool AHeistGameState::IsBoarded(const APlayerState* Player) const
+{
+	return IsValid(Player) && BoardedPlayers.Contains(Player);
+}
+
+bool AHeistGameState::IsArrested(const APlayerState* Player) const
+{
+	return IsValid(Player) && ArrestedPlayers.Contains(Player);
+}
+
+int32 AHeistGameState::GetSurvivorNum() const
+{
+	return HeistEscapeGate::GetSurvivorNum(MakeEscapeConditions());
+}
+
+FHeistEscapeConditions AHeistGameState::MakeEscapeConditions() const
+{
+	FHeistEscapeConditions Conditions;
+
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (!IsCountedPlayer(Player))
+		{
+			continue;
+		}
+
+		++Conditions.NumActivePlayers;
+
+		if (IsPlayerDowned(Player))
+		{
+			++Conditions.NumDownedPlayers;
+			continue;   // 다운자는 밴에 있어도 탈출 인원이 아니다
+		}
+
+		if (BoardedPlayers.Contains(Player))
+		{
+			++Conditions.NumBoardedSurvivors;
+		}
+	}
+
+	return Conditions;
+}
+
+void AHeistGameState::SetBoarded(APlayerState* Player, bool bBoarded)
+{
+	if (!HasAuthority() || !IsValid(Player))
+	{
+		return;
+	}
+
+	const bool bWasBoarded = BoardedPlayers.Contains(Player);
+	if (bWasBoarded == bBoarded)
+	{
+		return;   // 같은 상태를 다시 넣지 않는다 — 복제와 방송을 헛되이 일으킬 이유가 없다
+	}
+
+	if (bBoarded)
+	{
+		BoardedPlayers.Add(Player);
+	}
+	else
+	{
+		BoardedPlayers.Remove(Player);
+	}
+
+	SetMirrorTag(Player, HHTags::State_InVan, bBoarded);
+
+	UE_LOG(LogHeist, Log, TEXT("%s %s — 승차 %d명 / 생존 %d명"),
+		*Player->GetPlayerName(), bBoarded ? TEXT("승차") : TEXT("하차"),
+		BoardedPlayers.Num(), GetSurvivorNum());
+
+	// 서버에서는 RepNotify 가 자동으로 불리지 않는다. 구독자가 어디에 있든 같은 시점에
+	// 같은 값을 받게 하려면 여기서 직접 불러 준다 — SetPhase 와 같은 이유다
+	BroadcastBoardedChanged();
+}
+
+void AHeistGameState::MarkArrested(APlayerState* Player)
+{
+	if (!HasAuthority() || !IsValid(Player) || ArrestedPlayers.Contains(Player))
+	{
+		return;
+	}
+
+	ArrestedPlayers.Add(Player);
+	SetMirrorTag(Player, HHTags::State_Arrested, true);
+
+	UE_LOG(LogHeist, Log, TEXT("체포 — %s"), *Player->GetPlayerName());
+}
+
+void AHeistGameState::OnRep_BoardedPlayers()
+{
+	BroadcastBoardedChanged();
+}
+
+void AHeistGameState::BroadcastBoardedChanged()
+{
+	OnBoardedChanged.Broadcast(BoardedPlayers.Num(), GetSurvivorNum());
 }

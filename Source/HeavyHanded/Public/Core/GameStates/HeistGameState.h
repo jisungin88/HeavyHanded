@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"        // FGameplayTag 를 값으로 보유 — 전방 선언 불가
 #include "Templates/SubclassOf.h"        // FHeistLoadEntry 가 값으로 보유
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — UPROPERTY 노출 enum 이라 전방 선언 불가
+#include "Core/HeistEscapeGate.h"        // FHeistEscapeConditions — 값으로 돌려준다
 #include "HeistGameState.generated.h"
 
 class ALootBase;
@@ -70,6 +71,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnHeistPhaseChanged,
 /** 적재 금액 변화. HUD 목표 게이지용 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistLoadedValueChanged,
 	int32, LoadedValue, int32, TargetValue);
+
+/**
+ * 승차 인원 변화. HUD 의 "3/4 탑승" 표시가 여기에 붙는다.
+ *
+ * 생존자 수를 같이 싣는 이유는 그것이 분모이기 때문이다. 승차 인원만 보내면 HUD 가
+ * 분모를 따로 세야 하고, 세는 시점이 달라 화면에 "4/3 탑승" 이 뜰 수 있다.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistBoardedChanged,
+	int32, NumBoarded, int32, NumSurvivors);
 
 /**
  * 작업(저택 · 박물관 · 은행) 레벨의 GameState. 코어 루프의 진리원이다.
@@ -178,6 +188,77 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Heist|Value")
 	FOnHeistLoadedValueChanged OnLoadedValueChanged;
 
+	// ── 탈출 ──
+	//
+	// [진리원은 명단이다] 누가 탔는가는 아래 BoardedPlayers 배열 하나가 정한다.
+	//   State.InVan 태그도 같이 붙지만 그것은 남에게 보이기 위한 미러이지 판정 근거가 아니다.
+	//   태그를 진리원으로 삼으면 인원을 셀 때마다 전원을 순회해야 하고, 세는 시점에 따라
+	//   답이 달라진다. 그리고 태그를 붙이는 시스템(전영배 GE)이 아직 없어도 여기는 돌아야 한다.
+
+	/** 이 플레이어가 밴에 타 있는가 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	bool IsBoarded(const APlayerState* Player) const;
+
+	/** 밴에 타 있는 인원. 다운자도 포함된 숫자다 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	int32 GetBoardedNum() const { return BoardedPlayers.Num(); }
+
+	/**
+	 * 다운되지 않고 남아 있는 인원. 탈출 판정의 분모다.
+	 *
+	 * 서버 · 클라이언트 양쪽에서 유효하다 — 명단은 복제되고, 다운 여부는 ASC 태그라
+	 * 그것도 복제된다. HUD 가 서버에 물어보지 않아도 같은 숫자를 얻는다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	int32 GetSurvivorNum() const;
+
+	/**
+	 * 지금 상황을 판정용 값으로 옮긴다.
+	 *
+	 * GameMode 의 종료 판정과 HUD 의 표시가 같은 함수를 거치게 하는 것이 목적이다.
+	 * 둘이 각자 세면 "전원 탑승" 이 뜬 화면에서 판이 안 끝나는 상황이 생긴다.
+	 */
+	FHeistEscapeConditions MakeEscapeConditions() const;
+
+	/** 이 플레이어가 체포됐는가. 도주 시간이 끝나기 전에는 아무도 체포 상태가 아니다 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	bool IsArrested(const APlayerState* Player) const;
+
+	/** 탈출한 사람들. 결과 화면의 탈출 명단 */
+	const TArray<TObjectPtr<APlayerState>>& GetBoardedPlayers() const { return BoardedPlayers; }
+
+	/** 체포된 사람들. 결과 화면의 체포 명단 */
+	const TArray<TObjectPtr<APlayerState>>& GetArrestedPlayers() const { return ArrestedPlayers; }
+
+	/**
+	 * 승차 상태를 갱신한다. (서버 전용 — AVanZone 이 부른다)
+	 *
+	 * State.InVan 태그도 여기서 같이 붙고 떨어진다. 명단과 태그를 한 함수에 묶어 둔 이유는
+	 * 둘이 갈라지면 안 되기 때문이다 — 따로 부르는 구조면 한쪽만 부른 경로가 반드시 생기고,
+	 * 그때 명단에는 있는데 태그는 없는 사람이 나와서 어느 쪽이 맞는지 코드를 봐야 알게 된다.
+	 */
+	void SetBoarded(APlayerState* Player, bool bBoarded);
+
+	/**
+	 * 체포를 확정한다. (서버 전용 — AHeistGameMode 가 Result 진입 시 한 번에 부른다)
+	 *
+	 * 도중에 부르지 말 것. 체포는 도주 시간이 끝나는 순간에만 성립하는 상태이고,
+	 * 그 전에 붙이면 아직 구조될 수 있는 사람이 체포로 찍힌다.
+	 */
+	void MarkArrested(APlayerState* Player);
+
+	/**
+	 * 이 플레이어가 다운 상태인가. ASC 가 없으면 false.
+	 *
+	 * 정적 함수인 이유는 판정에 GameState 가 필요 없기 때문이다 — PlayerState 의 ASC 만 본다.
+	 * 결과 집계처럼 GameState 밖에서도 같은 기준으로 물어봐야 하는 곳이 있어 공개한다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	static bool IsPlayerDowned(const APlayerState* Player);
+
+	UPROPERTY(BlueprintAssignable, Category = "Heist|Escape")
+	FOnHeistBoardedChanged OnBoardedChanged;
+
 protected:
 	/**
 	 * 페이즈를 바꾼다. (서버 전용 — AHeistGameMode 만 부를 수 있다)
@@ -247,4 +328,44 @@ protected:
 	 */
 	UPROPERTY()
 	TArray<FHeistLoadEntry> LoadedEntries;
+
+	/**
+	 * 지금 밴에 타 있는 사람들. 탈출 판정의 진리원이다.
+	 *
+	 * 배열인 이유는 순서(누가 먼저 탔는가)가 결과 화면에 쓰일 수 있고, 인원이 최대 4명이라
+	 * TSet 의 이점이 없기 때문이다. 복제되는 값이 작을수록 좋다.
+	 *
+	 * 폰이 아니라 PlayerState 를 담는다 — 폰은 체포 · 관전 전환으로 파괴되지만
+	 * 판정과 결과 화면은 그 뒤까지 이어진다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_BoardedPlayers, BlueprintReadOnly, Category = "Heist|Escape")
+	TArray<TObjectPtr<APlayerState>> BoardedPlayers;
+
+	/**
+	 * 체포된 사람들. Result 진입 시 한 번 채워지고 그 뒤로 바뀌지 않는다.
+	 *
+	 * RepNotify 가 없는 것은 의도다 — 이 값이 도착하는 시점에는 이미 Phase.Result 로
+	 * 넘어가 있고, 결과 화면은 페이즈 전환으로 열린다. 명단은 그때 읽으면 된다.
+	 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Escape")
+	TArray<TObjectPtr<APlayerState>> ArrestedPlayers;
+
+	UFUNCTION()
+	void OnRep_BoardedPlayers();
+
+private:
+	/**
+	 * 이 PlayerState 를 인원 계산에 넣을 것인가.
+	 *
+	 * 관전자와 접속이 끊긴 뒤 남아 있는 PlayerState 를 걸러낸다. 이걸 안 걸면
+	 * 나간 사람이 영영 안 탄 것으로 남아서 "생존자 전원 승차" 가 성립하지 않고,
+	 * 남은 사람들이 도주 시간을 끝까지 기다려야 한다.
+	 */
+	static bool IsCountedPlayer(const APlayerState* Player);
+
+	/** State.InVan / State.Arrested 미러를 갱신한다. (서버 전용) */
+	static void SetMirrorTag(APlayerState* Player, const FGameplayTag& Tag, bool bApply);
+
+	/** 명단이 바뀔 때마다 서버 · 클라 양쪽에서 부른다 */
+	void BroadcastBoardedChanged();
 };

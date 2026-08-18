@@ -106,6 +106,25 @@ namespace HHTags
 	/** 다운 — 무장 경비 접촉 / 경비견 3회 / 낙하. 동료가 5초간 복구한다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Downed);
 
+	/**
+	 * 밴 승차 완료.
+	 *
+	 * [진리원이 아니다] 탈출 판정의 근거는 AHeistGameState 의 승차 명단이고, 이 태그는
+	 *   그 결과를 남에게 보이기 위한 미러다. 태그로는 인원을 셀 수 없고(전원 순회해야 한다)
+	 *   순서도 시각도 담기지 않아서, 판정을 여기에 걸면 세는 시점마다 답이 달라진다.
+	 *   태그가 있는 이유는 경비 AI · 어빌리티 차단 · HUD 가 코어 루프 헤더를 include 하지 않고도
+	 *   "이 사람 밴 안에 있나" 를 물어볼 수 있게 하기 위해서다.
+	 *
+	 * [부여 주체 — 지금은 코어 루프다] AHeistGameState 가 명단을 갱신하면서 복제 Loose 태그로
+	 *   붙인다. State.* 는 전영배 소유이므로, 그쪽 GameplayEffect 가 같은 태그를 다루게 되면
+	 *   부여 주체를 그쪽으로 넘기고 여기서는 걷어낼 것. 두 주체가 동시에 붙이면 태그는
+	 *   카운트 방식이라 한쪽이 빼도 다른 쪽 카운트가 남아 영영 안 없어진다.
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_InVan);
+
+	/** 체포 — 도주 시간이 끝날 때까지 밴에 못 탔거나, 그 시점에 다운 상태였다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Arrested);
+
 	// ── 게임플레이 이벤트 (공용 / Config/Tags/Event.ini) ──
 
 	/** 경비견이 플레이어에 접촉했다는 사실. 3회 누적 판정은 플레이어 파트가 한다 */
@@ -113,6 +132,19 @@ namespace HHTags
 
 	/** 다운 조건 성립. GAB_Downed 의 GameplayEvent 트리거 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Player_Downed);
+
+	/**
+	 * 밴에 탔다. AVanZone 이 승차자의 ASC 로 보낸다.
+	 *
+	 * 내렸을 때는 보내지 않는다 — 이벤트는 "일어난 일" 이고, 승차 여부라는 상태는
+	 * AHeistGameState 의 명단과 State.InVan 태그가 들고 있다.
+	 *
+	 * 페이로드 규약
+	 *   Instigator      승차한 폰
+	 *   Target          승차한 폰
+	 *   EventMagnitude  이 승차로 밴에 탄 총 인원
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Player_BoardedVan);
 
 	/**
 	 * 밴 적재 확정. AVanLoadZone 이 적재자의 ASC 로 보낸다.

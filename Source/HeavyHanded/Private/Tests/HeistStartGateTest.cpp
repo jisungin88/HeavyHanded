@@ -1,6 +1,7 @@
 ﻿#include "Misc/AutomationTest.h"
 
 #include "Core/HeistPhase.h"
+#include "Core/HeistEscapeGate.h"
 #include "Core/HeistStartGate.h"
 #include "Core/HeavyHandedGameplayTags.h"
 
@@ -158,6 +159,91 @@ bool FHeistPhaseOrderTest::RunTest(const FString& Parameters)
 		HeistPhase::GetNext(HHTags::Loot_Type_Heavy).IsValid());
 	TestFalse(TEXT("빈 태그는 다음이 없다"),
 		HeistPhase::GetNext(FGameplayTag()).IsValid());
+
+	return true;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 탈출 판정 (HeistEscapeGate::HasEveryoneEscaped)
+//
+// 이것도 접속 대기와 같은 종류다 — 틀려도 크래시가 안 나고 "가끔 판이 일찍 끝나더라" 로만
+// 드러난다. 재현하려면 넷이 모여 다운과 승차를 특정 순서로 만들어야 해서 눈으로 못 잡는다.
+// ──────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHeistEscapeGateTest,
+	"HeavyHanded.Heist.EscapeGate.Decisions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHeistEscapeGateTest::RunTest(const FString& Parameters)
+{
+	using namespace HeistEscapeGate;
+
+	// ── 전원 다운 — 이 테스트가 존재하는 이유 ──
+	{
+		// 0명 중 0명이 탔으므로 산술적으로는 "전원 탈출" 이 참이다.
+		// 그대로 두면 넷이 바닥에 쓰러져 있는데 탈출 성공으로 정산된다
+		FHeistEscapeConditions C;
+		C.NumActivePlayers = 4;
+		C.NumDownedPlayers = 4;
+		C.NumBoardedSurvivors = 0;
+		TestFalse(TEXT("전원 다운은 전원 탈출이 아니다"), HasEveryoneEscaped(C));
+	}
+
+	// ── 정상 경로 ──
+	{
+		FHeistEscapeConditions C;
+		C.NumActivePlayers = 4;
+		C.NumDownedPlayers = 0;
+		C.NumBoardedSurvivors = 4;
+		TestTrue(TEXT("넷이 다 타면 끝난다"), HasEveryoneEscaped(C));
+
+		C.NumBoardedSurvivors = 3;
+		TestFalse(TEXT("한 명이 남아 있으면 안 끝난다"), HasEveryoneEscaped(C));
+	}
+
+	// ── 다운자는 분모에서 빠진다 ──
+	{
+		// 기획 확정 사항이다. 다운된 팀원을 두고 나머지가 타면 그 순간 판이 끝난다
+		FHeistEscapeConditions C;
+		C.NumActivePlayers = 4;
+		C.NumDownedPlayers = 1;
+		C.NumBoardedSurvivors = 3;
+		TestTrue(TEXT("다운자를 뺀 생존자가 다 타면 끝난다"), HasEveryoneEscaped(C));
+
+		TestEqual(TEXT("생존자는 접속자에서 다운자를 뺀 값이다"), GetSurvivorNum(C), 3);
+	}
+
+	// ── 혼자 하는 판 ──
+	{
+		FHeistEscapeConditions C;
+		C.NumActivePlayers = 1;
+		C.NumBoardedSurvivors = 1;
+		TestTrue(TEXT("혼자여도 타면 끝난다"), HasEveryoneEscaped(C));
+	}
+
+	// ── 아무도 없다 ──
+	{
+		// 전원이 접속을 끊은 판이다. 여기서 참이 나오면 빈 서버가 결과 화면으로 넘어간다
+		FHeistEscapeConditions C;
+		TestFalse(TEXT("접속자가 없으면 끝나지 않는다"), HasEveryoneEscaped(C));
+	}
+
+	// ── 값이 어긋난 경우 ──
+	{
+		// 두 값이 서로 다른 시점에 세어지면 한 프레임 어긋날 수 있다.
+		// 그때 판정이 뒤집히거나 영영 성립하지 않는 쪽으로 기울면 안 된다
+		FHeistEscapeConditions C;
+		C.NumActivePlayers = 2;
+		C.NumDownedPlayers = 5;
+		TestEqual(TEXT("다운자가 접속자보다 많아도 생존자는 음수가 되지 않는다"),
+			GetSurvivorNum(C), 0);
+		TestFalse(TEXT("그 상태에서 탈출로 판정하지 않는다"), HasEveryoneEscaped(C));
+
+		C.NumActivePlayers = 3;
+		C.NumDownedPlayers = 0;
+		C.NumBoardedSurvivors = 4;   // 셋인데 넷이 탔다
+		TestTrue(TEXT("승차 인원이 더 많아도 탈출로 본다"), HasEveryoneEscaped(C));
+	}
 
 	return true;
 }

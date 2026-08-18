@@ -4,6 +4,7 @@
 #include "GameFramework/GameMode.h"
 #include "GameplayTagContainer.h"        // FGameplayTag 를 값으로 주고받는다
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — 인자 타입
+#include "Noise/NoiseTypes.h"            // EAlertLevel — 다이내믹 델리게이트 시그니처라 전방 선언 불가
 #include "HeistGameMode.generated.h"
 
 struct FHeistStartConditions;
@@ -33,6 +34,7 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
+	virtual void Logout(AController* Exiting) override;
 
 	/**
 	 * 페이즈를 즉시 다음으로 넘긴다. 접속 대기 중이면 기다리지 않고 준비 시간을 시작한다.
@@ -52,6 +54,20 @@ protected:
 	 * EnterPhase 본문에 조건문으로 쌓지 않고 여기 한 곳에 모은다.
 	 */
 	virtual void OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason);
+
+	/**
+	 * 경계 단계가 바뀌었다. 경보(래치)면 본 작업을 즉시 끝내고 도주로 넘긴다.
+	 *
+	 * [본 작업 중일 때만이다] 준비 시간의 경보는 무시한다 — 어차피 Heist 진입에서
+	 *   ResetAlert 로 지워지므로, 그것 때문에 도주로 넘기면 작업을 시작도 못 하고 끝난다.
+	 *   이미 도주 · 결과라면 늦었다.
+	 */
+	UFUNCTION()
+	void HandleAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel OldLevel);
+
+	/** 승차 명단이 바뀌었다. 생존자가 다 탔으면 판을 끝낸다 */
+	UFUNCTION()
+	void HandleBoardedChanged(int32 NumBoarded, int32 NumSurvivors);
 
 	/**
 	 * 이 장소의 목표 금액($). 기획서 2장 — 저택 $50,000 / 박물관 $120,000 / 은행 $250,000.
@@ -96,6 +112,35 @@ private:
 
 	/** 페이즈별 지속 시간(초). 0 이면 카운트다운 없이 머문다 */
 	float GetPhaseDuration(const FGameplayTag& Phase) const;
+
+	/**
+	 * 생존자가 전부 밴에 탔으면 즉시 결과로 넘긴다.
+	 *
+	 * [언제 부르는가] 판정이 성립하는 순간이 셋이다 — 누가 타거나, 누가 다운되거나
+	 *   (남은 생존자가 줄어 이미 탄 사람들만 남는다), 누가 접속을 끊거나.
+	 *   셋 다 여기로 모인다. 조건이 아니라 계기가 셋인 것이므로 판정은 한 곳이어야 한다.
+	 *
+	 * [준비 시간은 제외한다] 플레이어는 밴 근처에서 시작한다. Prep 부터 세면 스폰 직후
+	 *   전원이 볼륨 안에 있어서 $0 으로 판이 끝난다. 본 작업에 들어가야 승차를 센다.
+	 */
+	void TryFinishByEscape();
+
+	/** 결과 진입 시 체포를 확정한다. 미승차자와 다운자가 대상이다 */
+	void ResolveArrests();
+
+	/**
+	 * 이 플레이어의 다운 상태 변화를 구독한다.
+	 *
+	 * 다운은 승차만큼이나 확실한 종료 계기다 — 마지막 한 명이 밖에서 쓰러지면 그 순간
+	 * 생존자가 이미 밴에 다 타 있는 상태가 된다. 구독이 없으면 그때 판이 안 끝나고
+	 * 도주 시간을 끝까지 기다리게 된다.
+	 *
+	 * 다운 시스템(전영배)이 아직 태그를 붙이지 않아 지금은 한 번도 불리지 않는다.
+	 */
+	void WatchDownedState(APlayerState* Player);
+
+	/** 다운 태그가 붙거나 떨어졌다 */
+	void HandleDownedTagChanged(const FGameplayTag Tag, int32 NewCount);
 
 	FTimerHandle PhaseTimerHandle;
 	FTimerHandle StartWaitHandle;

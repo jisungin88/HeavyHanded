@@ -1,7 +1,10 @@
 ﻿#include "Core/GameModes/HeistGameMode.h"
 
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -103,6 +106,21 @@ void AHeistGameMode::HandleMatchHasStarted()
 
 	GS->SetTargetValue(TargetValue);
 
+	// 경보와 승차를 여기서 구독한다. AlertComponent 는 GameState 가 만들어질 때 붙으므로
+	// (UNoiseSubsystem 의 GameStateSetEvent) 이 시점에는 이미 있다.
+	if (UAlertComponent* Alert = UAlertComponent::Get(this))
+	{
+		Alert->OnAlertLevelChanged.AddDynamic(this, &AHeistGameMode::HandleAlertLevelChanged);
+	}
+	else
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("GameState 에 AlertComponent 가 없어 경보로 도주에 들어가지 못합니다. "
+				 "제한 시간 만료 경로만 동작합니다."));
+	}
+
+	GS->OnBoardedChanged.AddDynamic(this, &AHeistGameMode::HandleBoardedChanged);
+
 	const UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -127,6 +145,14 @@ void AHeistGameMode::PostLogin(APlayerController* NewPlayer)
 {
 	Super::PostLogin(NewPlayer);
 
+	// 접속 대기와 무관하게, 들어온 사람은 전부 다운 감시 대상이다.
+	// 아래 이른 반환보다 위에 있어야 하는 이유가 이것이다 — 판이 시작된 뒤 들어온
+	// 사람(재접속)도 감시해야 한다
+	if (NewPlayer)
+	{
+		WatchDownedState(NewPlayer->PlayerState);
+	}
+
 	if (!bStartWindowOpen || bStarted)
 	{
 		return;
@@ -140,6 +166,25 @@ void AHeistGameMode::PostLogin(APlayerController* NewPlayer)
 
 	UE_LOG(LogHeist, Verbose, TEXT("접속 — 합계 %d명 (로딩 중 %d명) / 예정 %d명"),
 		GetNumPlayers(), NumTravellingPlayers, ExpectedPlayers);
+}
+
+void AHeistGameMode::Logout(AController* Exiting)
+{
+	// 나간 사람은 승차 명단에서 빠져야 한다. 안 그러면 "안 탄 사람" 으로 남아
+	// 남은 팀원이 전원 승차를 영영 성립시키지 못하고 도주 시간을 끝까지 기다린다.
+	if (AHeistGameState* GS = GetGameState<AHeistGameState>())
+	{
+		if (const APlayerController* PC = Cast<APlayerController>(Exiting))
+		{
+			GS->SetBoarded(PC->PlayerState, false);
+		}
+	}
+
+	Super::Logout(Exiting);
+
+	// 판정은 다음 틱에 한다. 지금은 PlayerArray 에 나가는 사람이 아직 남아 있어
+	// 생존자 수가 한 명 많게 세어진다 — 그 값으로 판정하면 끝날 판이 안 끝난다.
+	GetWorldTimerManager().SetTimerForNextTick(this, &AHeistGameMode::TryFinishByEscape);
 }
 
 FHeistStartConditions AHeistGameMode::MakeStartConditions()
@@ -264,7 +309,137 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 			UE_LOG(LogHeist, Warning,
 				TEXT("GameState 에 AlertComponent 가 없어 준비 시간의 경계도가 남습니다."));
 		}
+
+		// 여기서 탈출 판정을 부르지 않는다. 본 작업이 시작되는 순간은 전원이 아직 밴
+		// 근처에 있는 시점이라, 스폰 위치가 승차 볼륨과 조금이라도 겹치면 그 자리에서
+		// $0 으로 판이 끝난다. 레벨 배치에 따라 되기도 하고 안 되기도 하는 사고다.
+		//
+		// 대신 판정은 '변화' 로만 성립하게 둔다 — 승차 · 하차 · 다운 · 접속 종료.
+		// 준비 시간에 밴에 서 있던 사람도 명단에는 이미 올라와 있으므로,
+		// 마지막 한 명이 타는 순간 그들까지 포함해 판정된다. 잃는 경우가 없다.
 	}
+
+	if (Phase == HHTags::Phase_Result)
+	{
+		ResolveArrests();
+	}
+}
+
+// ──────────────────────────────────────────────────────────────
+// 도주 — 경보와 탈출
+// ──────────────────────────────────────────────────────────────
+
+void AHeistGameMode::HandleAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel /*OldLevel*/)
+{
+	if (NewLevel != EAlertLevel::Alarm)
+	{
+		return;
+	}
+
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS || !GS->IsPhase(HHTags::Phase_Heist))
+	{
+		// 준비 시간이면 무시한다 — Heist 진입에서 경계도가 리셋되므로 이 경보는 사라진다.
+		// 이미 도주 · 결과면 늦었다. 어느 쪽이든 지금 페이즈를 건드릴 이유가 없다
+		return;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("경보 발생 — 본 작업을 끝내고 도주로 넘어갑니다."));
+
+	EnterPhase(HHTags::Phase_Escape, EHeistPhaseReason::Alarm);
+}
+
+void AHeistGameMode::HandleBoardedChanged(int32 /*NumBoarded*/, int32 /*NumSurvivors*/)
+{
+	TryFinishByEscape();
+}
+
+void AHeistGameMode::WatchDownedState(APlayerState* Player)
+{
+	IAbilitySystemInterface* AsAbilitySystem = Cast<IAbilitySystemInterface>(Player);
+	if (!AsAbilitySystem)
+	{
+		return;
+	}
+
+	if (UAbilitySystemComponent* ASC = AsAbilitySystem->GetAbilitySystemComponent())
+	{
+		// 델리게이트는 ASC 가 들고 있다. PlayerState 가 사라지면 같이 사라지므로
+		// 따로 해제할 것이 없다
+		ASC->RegisterGameplayTagEvent(HHTags::State_Downed, EGameplayTagEventType::NewOrRemoved)
+			.AddUObject(this, &AHeistGameMode::HandleDownedTagChanged);
+	}
+}
+
+void AHeistGameMode::HandleDownedTagChanged(const FGameplayTag /*Tag*/, int32 /*NewCount*/)
+{
+	// 다운으로 생존자가 줄면, 이미 밴에 타 있던 사람들만으로 전원 승차가 성립할 수 있다.
+	// 복구로 생존자가 늘면 반대로 성립이 풀리는데, 그때는 아무 일도 일어나지 않는다
+	TryFinishByEscape();
+}
+
+void AHeistGameMode::TryFinishByEscape()
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS)
+	{
+		return;
+	}
+
+	// 본 작업과 도주에서만 센다. 준비 시간은 밴 근처가 시작 지점이라 전원이 볼륨 안에 있고,
+	// 결과는 이미 끝난 판이다
+	if (!GS->IsPhase(HHTags::Phase_Heist) && !GS->IsPhase(HHTags::Phase_Escape))
+	{
+		return;
+	}
+
+	if (!HeistEscapeGate::HasEveryoneEscaped(GS->MakeEscapeConditions()))
+	{
+		return;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("생존자 전원 승차 — 판을 끝냅니다. 적재 $%d / $%d"),
+		GS->GetLoadedValue(), GS->GetTargetValue());
+
+	EnterPhase(HHTags::Phase_Result, EHeistPhaseReason::AllEscaped);
+}
+
+void AHeistGameMode::ResolveArrests()
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS)
+	{
+		return;
+	}
+
+	// 배열을 복사해 도는 이유는 MarkArrested 가 GameState 의 다른 배열을 건드리기 때문이다.
+	// PlayerArray 자체는 안 바뀌지만, 여기서 순회 중에 누가 나가면 아래에서 터진다
+	TArray<TObjectPtr<APlayerState>> Players = GS->PlayerArray;
+	int32 EscapedNum = 0;
+
+	for (APlayerState* Player : Players)
+	{
+		if (!IsValid(Player) || Player->IsOnlyASpectator() || Player->IsInactive())
+		{
+			continue;
+		}
+
+		// 밴에 타 있어도 다운 상태면 체포다 (기획 확정). 쓰러진 채로 실려 나가는 것은
+		// 탈출이 아니라 붙잡힌 것이다
+		const bool bEscaped = GS->IsBoarded(Player) && !AHeistGameState::IsPlayerDowned(Player);
+
+		if (!bEscaped)
+		{
+			GS->MarkArrested(Player);
+		}
+		else
+		{
+			++EscapedNum;
+		}
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("결과 확정 — 탈출 %d명 / 체포 %d명"),
+		EscapedNum, GS->GetArrestedPlayers().Num());
 }
 
 void AHeistGameMode::HandlePhaseElapsed()
@@ -343,11 +518,12 @@ static void PhaseShowCommand(UWorld* World)
 	float Remaining = 0.f;
 	const bool bHasCountdown = GS->TryGetPhaseRemainingSeconds(Remaining);
 
-	UE_LOG(LogHeist, Log, TEXT("페이즈 %s (사유: %s) / 남은 시간 %s / 적재 $%d of $%d"),
+	UE_LOG(LogHeist, Log, TEXT("페이즈 %s (사유: %s) / 남은 시간 %s / 적재 $%d of $%d / 승차 %d of %d"),
 		Phase.IsValid() ? *Phase.ToString() : TEXT("(접속 대기)"),
 		HeistPhase::ToString(GS->GetPhaseReason()),
 		bHasCountdown ? *FString::Printf(TEXT("%.1f초"), Remaining) : TEXT("없음"),
-		GS->GetLoadedValue(), GS->GetTargetValue());
+		GS->GetLoadedValue(), GS->GetTargetValue(),
+		GS->GetBoardedNum(), GS->GetSurvivorNum());
 }
 
 static FAutoConsoleCommandWithWorld GPhaseShowCommand(
