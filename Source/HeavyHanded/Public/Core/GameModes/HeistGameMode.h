@@ -69,6 +69,28 @@ protected:
 	UFUNCTION()
 	void HandleBoardedChanged(int32 NumBoarded, int32 NumSurvivors);
 
+	/** 결과 확인 인원이 바뀌었다. 전원이 확인했으면 체류 시간을 기다리지 않는다 */
+	UFUNCTION()
+	void HandleResultConfirmChanged(int32 NumConfirmed, int32 TotalNum);
+
+	/**
+	 * 매치를 끝낸다. 결과 화면에서 나가는 유일한 출구다. (서버 전용, 한 번만)
+	 *
+	 * [여기서 레벨을 옮기지 않는다] 기본 구현은 로그만 남긴다. ServerTravel 은 세션 파트
+	 *   소관이고, 어디로 돌아갈지(로비 · 은신처)는 그쪽 흐름이 정한다.
+	 *   `BP_HeistGameMode` 에서 이 함수를 재정의해 실제 전환을 붙이면 된다 —
+	 *   AVanZone::HandleConfirmedLoot 과 같은 방식이다.
+	 *
+	 * [언제 불리는가] 둘 중 먼저 오는 쪽이다.
+	 *   - 남아 있는 전원이 결과를 확인했다
+	 *   - 결과 체류 시간(UHeistSettings::ResultSeconds)이 다 됐다
+	 *
+	 *   시간 쪽이 안전망이다. 한 명이 자리를 비웠다고 나머지가 영영 갇혀 있으면 안 된다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, Category = "Heist")
+	void FinishMatch();
+	virtual void FinishMatch_Implementation();
+
 	/**
 	 * 이 장소의 목표 금액($). 기획서 2장 — 저택 $50,000 / 박물관 $120,000 / 은행 $250,000.
 	 * 장소마다 다르므로 UHeistSettings 가 아니라 여기 있다.
@@ -152,6 +174,17 @@ private:
 	void PayoutTeamGold();
 
 	/**
+	 * 체포된 사람을 런 진행으로 넘긴다. (체포가 확정된 뒤)
+	 *
+	 * 이걸 안 하면 잡힌 사람이 결과 화면과 함께 사라진다 — 레벨이 바뀌면 GameState 도
+	 * PlayerState 도 전부 새로 생기기 때문이다. 은신처의 '팀원 구출' 이 돌아가려면
+	 * 그 사실이 레벨을 건너야 한다.
+	 *
+	 * 등급이나 지급 여부와 무관하게 항상 넘긴다. 잡힌 것은 잡힌 것이다.
+	 */
+	void CarryOverArrests();
+
+	/**
 	 * 이 플레이어의 다운 상태 변화를 구독한다.
 	 *
 	 * 다운은 승차만큼이나 확실한 종료 계기다 — 마지막 한 명이 밖에서 쓰러지면 그 순간
@@ -192,6 +225,14 @@ private:
 
 	/** 준비 시간이 시작됐는가. 접속 대기 폴링을 멈추는 기준 */
 	bool bStarted = false;
+
+	/**
+	 * 매치를 이미 끝냈는가.
+	 *
+	 * 전원 확인과 시간 만료가 같은 프레임에 겹칠 수 있고, 재정의된 FinishMatch 가
+	 * ServerTravel 을 부르는데 그것이 두 번 불리면 전환이 꼬인다.
+	 */
+	bool bFinished = false;
 
 	/**
 	 * 탈출 판정이 다음 틱에 예약돼 있는가.

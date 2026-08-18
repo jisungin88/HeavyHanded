@@ -33,6 +33,7 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHeistGameState, LoadedEntries);
 	DOREPLIFETIME(AHeistGameState, ElapsedSeconds);
 	DOREPLIFETIME(AHeistGameState, Outcome);
+	DOREPLIFETIME(AHeistGameState, ResultConfirmedPlayers);
 }
 
 AHeistGameState* AHeistGameState::Get(const UObject* WorldContext)
@@ -232,6 +233,79 @@ int32 AHeistGameState::GetContributionOf(const APlayerState* Player) const
 	}
 
 	return Total;
+}
+
+void AHeistGameState::SetResultConfirmed(APlayerState* Player, bool bConfirmed)
+{
+	if (!HasAuthority() || !IsValid(Player))
+	{
+		return;
+	}
+
+	const bool bWasConfirmed = ResultConfirmedPlayers.Contains(Player);
+	if (bWasConfirmed == bConfirmed)
+	{
+		return;   // 같은 상태를 다시 넣지 않는다
+	}
+
+	if (bConfirmed)
+	{
+		ResultConfirmedPlayers.Add(Player);
+	}
+	else
+	{
+		ResultConfirmedPlayers.Remove(Player);
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("결과 확인 %s — %s (%d명)"),
+		bConfirmed ? TEXT("완료") : TEXT("취소"),
+		*Player->GetPlayerName(), ResultConfirmedPlayers.Num());
+
+	// 서버에서는 RepNotify 가 자동으로 불리지 않는다. SetPhase 와 같은 이유다
+	OnRep_ResultConfirmedPlayers();
+}
+
+bool AHeistGameState::IsResultConfirmed(const APlayerState* Player) const
+{
+	return IsValid(Player) && ResultConfirmedPlayers.Contains(Player);
+}
+
+bool AHeistGameState::AreAllResultsConfirmed() const
+{
+	int32 CountedNum = 0;
+	int32 ConfirmedNum = 0;
+
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (!IsCountedPlayer(Player))
+		{
+			continue;
+		}
+
+		++CountedNum;
+
+		if (ResultConfirmedPlayers.Contains(Player))
+		{
+			++ConfirmedNum;
+		}
+	}
+
+	// 아무도 없는 판을 "전원 확인" 으로 읽으면 빈 서버가 스스로 매치를 끝낸다
+	return CountedNum > 0 && ConfirmedNum >= CountedNum;
+}
+
+void AHeistGameState::OnRep_ResultConfirmedPlayers()
+{
+	int32 CountedNum = 0;
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (IsCountedPlayer(Player))
+		{
+			++CountedNum;
+		}
+	}
+
+	OnResultConfirmChanged.Broadcast(ResultConfirmedPlayers.Num(), CountedNum);
 }
 
 APlayerState* AHeistGameState::GetNoisiestPlayer(float& OutContribution) const

@@ -214,6 +214,82 @@ void URunProgressSubsystem::ConsumePurchasedEquipment()
 }
 
 // ──────────────────────────────────────────────────────────────
+// 체포된 팀원
+// ──────────────────────────────────────────────────────────────
+
+void URunProgressSubsystem::RecordArrested(const TArray<FUniqueNetIdRepl>& ArrestedIds)
+{
+	if (!EnsureServerAuthority(TEXT("RecordArrested")))
+	{
+		return;
+	}
+
+	int32 AddedNum = 0;
+
+	for (const FUniqueNetIdRepl& PlayerId : ArrestedIds)
+	{
+		// 신원을 모르는 접속(OnlineSubsystemNull 로컬 테스트 등)은 키가 될 수 없다.
+		// 넣으면 서로 다른 사람이 같은 빈 키로 뭉쳐서 한 명을 구출하면 전원이 풀린다
+		if (!PlayerId.IsValid())
+		{
+			continue;
+		}
+
+		// 두 판 연속으로 잡혀도 구출은 한 번이다
+		if (ArrestedPlayers.Contains(PlayerId))
+		{
+			continue;
+		}
+
+		ArrestedPlayers.Add(PlayerId);
+		++AddedNum;
+	}
+
+	if (AddedNum > 0)
+	{
+		UE_LOG(LogHeist, Log, TEXT("체포 %d명 기록 — 구출 대기 총 %d명"),
+			AddedNum, ArrestedPlayers.Num());
+	}
+}
+
+bool URunProgressSubsystem::IsArrested(const FUniqueNetIdRepl& PlayerId) const
+{
+	return PlayerId.IsValid() && ArrestedPlayers.Contains(PlayerId);
+}
+
+bool URunProgressSubsystem::TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Cost)
+{
+	if (!EnsureServerAuthority(TEXT("TryRescue")))
+	{
+		return false;
+	}
+
+	if (!IsArrested(PlayerId))
+	{
+		// 조용히 실패하면 호출부가 "잔액이 모자란 건가" 와 구별할 수 없다.
+		// 두 사유는 대응이 완전히 다르다 — 하나는 골드를 더 벌면 되고 하나는 대상이 틀린 것이다
+		UE_LOG(LogHeist, Log, TEXT("구출 대상이 아닙니다 — 잡혀 있지 않습니다. (구출 대기 %d명)"),
+			ArrestedPlayers.Num());
+		return false;
+	}
+
+	// 잔액 판정과 차감을 한 번에 끝낸다. 모자라면 아무것도 바뀌지 않는다
+	if (!TrySpendTeamGold(Cost))
+	{
+		UE_LOG(LogHeist, Log, TEXT("구출 실패 — 잔액 $%d 로는 비용 $%d 를 낼 수 없습니다."),
+			TeamGold, Cost);
+		return false;
+	}
+
+	ArrestedPlayers.Remove(PlayerId);
+
+	UE_LOG(LogHeist, Log, TEXT("구출 — 비용 $%d, 잔액 $%d, 남은 체포자 %d명"),
+		Cost, TeamGold, ArrestedPlayers.Num());
+
+	return true;
+}
+
+// ──────────────────────────────────────────────────────────────
 // 수명 경계
 // ──────────────────────────────────────────────────────────────
 
@@ -244,6 +320,10 @@ void URunProgressSubsystem::ResetCampaign()
 	ConfirmedRoster.Reset();
 	SelectedRoles.Reset();
 	PurchasedEquipment.Reset();
+
+	// 체포는 캠페인 단위라 BeginNewRun 이 지우지 않는다. 여기서만 지운다 —
+	// 안 지우면 새 방을 열어도 지난 방에서 잡힌 사람이 계속 갇혀 있다
+	ArrestedPlayers.Reset();
 
 	UE_LOG(LogHeist, Log, TEXT("새 방을 엽니다 — 팀 골드와 역할을 포함해 전부 초기화했습니다."));
 }
@@ -319,6 +399,7 @@ static void RunShowCommand(UWorld* World)
 	UE_LOG(LogHeist, Log, TEXT("── 런 진행 (%s) ──"), bIsServer ? TEXT("서버") : TEXT("클라이언트"));
 	UE_LOG(LogHeist, Log, TEXT("  팀 골드   $%d"), Run->GetTeamGold());
 	UE_LOG(LogHeist, Log, TEXT("  참가자    %d명"), Run->GetRosterNum());
+	UE_LOG(LogHeist, Log, TEXT("  구출 대기 %d명"), Run->GetArrestedNum());
 
 	const TMap<FGameplayTag, int32>& Equipment = Run->GetPurchasedEquipment();
 	if (Equipment.IsEmpty())
@@ -451,6 +532,45 @@ static FAutoConsoleCommandWithWorldAndArgs GRunRoleCommand(
 	  TEXT("hh.Run.Role"),
 	  TEXT("hh.Run.Role <Role.태그> — 0번 로컬 플레이어의 역할을 정한다. 한 번 정하면 거부된다"),
 	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunRoleCommand),
+	  ECVF_Cheat);
+
+// 은신처 구출 UI 가 없어서 이것이 유일한 확인 수단이다.
+//
+// [로컬 플레이어가 아니라 명단의 앞에서부터 구출한다] 이 명령은 서버 전용인데
+//   (TryRescue 가 권위를 요구한다), 서버 창의 로컬 플레이어는 호스트다.
+//   보통 잡히는 쪽은 클라이언트라 "내 것을 구출" 로는 영영 대상이 안 맞는다.
+//   반복해서 치면 명단이 앞에서부터 빈다.
+static void RunRescueCommand(const TArray<FString>& Args, UWorld* World)
+{
+	URunProgressSubsystem* Run = GetRunForCheat(World);
+	if (!Run)
+	{
+		return;
+	}
+
+	if (Run->GetArrestedNum() <= 0)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("구출할 사람이 없습니다 — 잡혀 있는 팀원이 없습니다."));
+		return;
+	}
+
+	const int32 Cost = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+
+	// 배열이 구출로 줄어들므로 복사해 둔다
+	const FUniqueNetIdRepl Target = Run->GetArrestedPlayers()[0];
+
+	if (!Run->TryRescue(Target, Cost))
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("구출 실패 — 비용 $%d, 잔액 $%d, 구출 대기 %d명"),
+			Cost, Run->GetTeamGold(), Run->GetArrestedNum());
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunRescueCommand(
+	  TEXT("hh.Run.Rescue"),
+	  TEXT("hh.Run.Rescue [비용] — 구출 대기 명단의 첫 사람을 구출한다. 비용을 생략하면 무료"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunRescueCommand),
 	  ECVF_Cheat);
 
 static void RunNewRunCommand(UWorld* World)

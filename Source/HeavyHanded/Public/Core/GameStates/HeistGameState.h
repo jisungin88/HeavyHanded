@@ -82,6 +82,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistLoadedValueChanged,
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistBoardedChanged,
 	int32, NumBoarded, int32, NumSurvivors);
 
+/** 결과 화면 확인 인원 변화. HUD 의 "2/3 확인" 표시가 여기에 붙는다 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistResultConfirmChanged,
+	int32, NumConfirmed, int32, NumPlayers);
+
 /**
  * 작업(저택 · 박물관 · 은행) 레벨의 GameState. 코어 루프의 진리원이다.
  *
@@ -301,6 +305,36 @@ public:
 	APlayerState* GetNoisiestPlayer(float& OutContribution) const;
 
 	/**
+	 * 결과 화면을 확인했다고 표시한다. (서버 전용)
+	 *
+	 * HUD 의 '확인' 버튼이 여기로 들어온다. 클라이언트 → 서버 경로(PlayerController 의
+	 * Server RPC)는 세션 · UI 파트가 붙인다 — GameState 는 소유자가 없어 클라이언트 RPC 를
+	 * 받을 수 없다. 여기는 서버 쪽 입구다.
+	 */
+	void SetResultConfirmed(APlayerState* Player, bool bConfirmed);
+
+	/** 이 플레이어가 결과를 확인했는가 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	bool IsResultConfirmed(const APlayerState* Player) const;
+
+	/** 확인한 인원. HUD 의 "2/3 확인" 표시용 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	int32 GetResultConfirmedNum() const { return ResultConfirmedPlayers.Num(); }
+
+	/**
+	 * 남아 있는 사람이 전부 확인했는가.
+	 *
+	 * 아무도 없으면 false 다 — 빈 서버가 "전원 확인" 으로 넘어가면 안 된다.
+	 * HeistEscapeGate 의 전원 다운 경계와 같은 종류의 함정이다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	bool AreAllResultsConfirmed() const;
+
+	/** 확인 인원 변화. HUD 와 GameMode 의 종료 판정이 여기에 붙는다 */
+	UPROPERTY(BlueprintAssignable, Category = "Heist|Result")
+	FOnHeistResultConfirmChanged OnResultConfirmChanged;
+
+	/**
 	 * 이 플레이어가 다운 상태인가. ASC 가 없으면 false.
 	 *
 	 * 정적 함수인 이유는 판정에 GameState 가 필요 없기 때문이다 — PlayerState 의 ASC 만 본다.
@@ -404,6 +438,13 @@ protected:
 	/** 결과 등급. FinalizeOutcome() 이 한 번 정한다 */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Result")
 	EHeistOutcome Outcome = EHeistOutcome::Failure;
+
+	/** 결과 화면을 확인한 사람들. 전원이 차면 체류 시간을 기다리지 않고 넘어간다 */
+	UPROPERTY(ReplicatedUsing = OnRep_ResultConfirmedPlayers, BlueprintReadOnly, Category = "Heist|Result")
+	TArray<TObjectPtr<APlayerState>> ResultConfirmedPlayers;
+
+	UFUNCTION()
+	void OnRep_ResultConfirmedPlayers();
 
 	/**
 	 * 지금 밴에 타 있는 사람들. 탈출 판정의 진리원이다.

@@ -155,6 +155,48 @@ public:
 	 */
 	void ConsumePurchasedEquipment();
 
+	// ── 체포된 팀원 ──
+	//
+	// 도주 시간이 끝날 때 밴에 못 탄 사람은 그 판에서 잡힌다. 잡힌 사실은 판이 끝나도
+	// 사라지면 안 된다 — 은신처의 '팀원 구출'(기획서)이 그것을 보고 돌아간다.
+	//
+	// [수명이 캠페인 단위다] BeginNewRun() 이 지우지 않는다. 구출하기 전까지 남아야
+	//   하는 것이지 한 판짜리 기록이 아니다. 새 방을 열 때(ResetCampaign)만 비운다.
+	//
+	// [여기서 정하지 않는 것] 체포된 사람이 다음 판에 나갈 수 있는가는 이 클래스가 답하지
+	//   않는다. 사실만 들고 있고, 참가 가능 여부는 그것을 읽는 쪽(로비 · 은신처)이 정한다.
+
+	/**
+	 * 이번 판에서 잡힌 사람들을 기록한다. (서버 전용 — 작업 레벨의 결과 확정 시)
+	 *
+	 * 이미 잡혀 있던 사람은 다시 넣지 않는다. 두 판 연속으로 잡혀도 구출은 한 번이다.
+	 */
+	void RecordArrested(const TArray<FUniqueNetIdRepl>& ArrestedIds);
+
+	/** 이 플레이어가 잡혀 있는가 */
+	bool IsArrested(const FUniqueNetIdRepl& PlayerId) const;
+
+	/** 잡혀 있는 인원 */
+	UFUNCTION(BlueprintPure, Category = "Run|Arrest")
+	int32 GetArrestedNum() const { return ArrestedPlayers.Num(); }
+
+	/** 잡혀 있는 사람들. 은신처 구출 UI 가 이 목록을 그린다 */
+	const TArray<FUniqueNetIdRepl>& GetArrestedPlayers() const { return ArrestedPlayers; }
+
+	/**
+	 * 팀 골드를 내고 구출한다. (서버 전용)
+	 *
+	 * @return 잡혀 있지 않거나 잔액이 모자라면 false 이고 **아무것도 바꾸지 않는다**
+	 *
+	 * 비용을 인자로 받는 이유는 그것이 밸런싱이기 때문이다 — 인원수나 판 수에 따라
+	 * 달라질 수 있고, 그 규칙은 은신처가 안다. 여기는 "받고 뺀다" 만 한다.
+	 *
+	 * 차감과 해제를 한 함수에 묶은 것은 TrySpendTeamGold 와 같은 이유다. 호출부가
+	 * "잔액 되나?" 를 먼저 묻고 나중에 빼는 구조면, 두 명이 같은 프레임에 구출을 눌렀을 때
+	 * 둘 다 통과해 잔액이 음수로 내려간다.
+	 */
+	bool TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Cost);
+
 	// ── 수명 경계 ──
 
 	/**
@@ -188,4 +230,12 @@ private:
 
 	/** 은신처에서 산 장비와 수량. 런 단위 — 작업 레벨에서 스폰되며 소비된다 */
 	TMap<FGameplayTag, int32> PurchasedEquipment;
+
+	/**
+	 * 잡혀 있는 팀원. 캠페인 단위 — 구출하기 전까지 남는다.
+	 *
+	 * UPROPERTY 가 아닌 이유는 SelectedRoles 와 같다. FUniqueNetIdRepl 은 UObject 를
+	 * 참조하지 않아 GC 가 볼 것이 없다.
+	 */
+	TArray<FUniqueNetIdRepl> ArrestedPlayers;
 };

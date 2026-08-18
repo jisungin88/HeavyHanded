@@ -70,6 +70,19 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Phase", meta = (ClampMin = "0.0", Units = "s"))
 	float EscapeSeconds = 90.f;
 
+	/**
+	 * 결과 화면 체류 시간(초). 이 시간이 지나면 매치를 끝낸다.
+	 *
+	 * 전원이 확인을 누르면 그전에도 넘어간다 — 이 값은 **아무도 누르지 않았을 때의 안전망**이다.
+	 * 결과 화면을 읽을 시간은 줘야 하지만, 한 명이 자리를 비웠다고 나머지가
+	 * 영영 갇혀 있으면 안 된다.
+	 *
+	 * 0 이면 카운트다운 없이 전원 확인만 기다린다 — HUD 확인 버튼이 붙기 전에는
+	 * 그렇게 두지 말 것. 나갈 방법이 없어진다.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Phase", meta = (ClampMin = "0.0", Units = "s"))
+	float ResultSeconds = 30.f;
+
 	// ── 밴 적재 ──
 
 	/**

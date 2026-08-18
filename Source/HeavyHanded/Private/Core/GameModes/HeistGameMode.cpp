@@ -121,6 +121,7 @@ void AHeistGameMode::HandleMatchHasStarted()
 	}
 
 	GS->OnBoardedChanged.AddDynamic(this, &AHeistGameMode::HandleBoardedChanged);
+	GS->OnResultConfirmChanged.AddDynamic(this, &AHeistGameMode::HandleResultConfirmChanged);
 
 	const UWorld* World = GetWorld();
 	if (!World)
@@ -270,7 +271,14 @@ float AHeistGameMode::GetPhaseDuration(const FGameplayTag& Phase) const
 		return Settings->EscapeSeconds;
 	}
 
-	return 0.f;   // Result 는 결과 화면이 뜬 채로 머문다
+	if (Phase == HHTags::Phase_Result)
+	{
+		// 결과 화면도 카운트다운을 갖는다. 전원이 확인하면 그전에 넘어가고,
+		// 이 시간은 아무도 누르지 않았을 때의 안전망이다
+		return Settings->ResultSeconds;
+	}
+
+	return 0.f;
 }
 
 void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Reason)
@@ -332,6 +340,7 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 		}
 
 		PayoutTeamGold();
+		CarryOverArrests();
 	}
 }
 
@@ -505,11 +514,91 @@ void AHeistGameMode::PayoutTeamGold()
 		GS->GetLoadedValue(), Run->GetTeamGold());
 }
 
+void AHeistGameMode::CarryOverArrests()
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS || GS->GetArrestedPlayers().IsEmpty())
+	{
+		return;
+	}
+
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("URunProgressSubsystem 이 없어 체포 %d명을 다음 판으로 넘기지 못했습니다."),
+			GS->GetArrestedPlayers().Num());
+		return;
+	}
+
+	// PlayerState 포인터는 레벨이 바뀌면 전부 죽는다. 신원(FUniqueNetIdRepl)만 넘긴다 —
+	// 서브시스템이 역할과 명단을 같은 키로 들고 있는 이유와 같다
+	TArray<FUniqueNetIdRepl> ArrestedIds;
+	ArrestedIds.Reserve(GS->GetArrestedPlayers().Num());
+
+	for (const APlayerState* Player : GS->GetArrestedPlayers())
+	{
+		if (IsValid(Player))
+		{
+			ArrestedIds.Add(Player->GetUniqueId());
+		}
+	}
+
+	Run->RecordArrested(ArrestedIds);
+}
+
 void AHeistGameMode::HandlePhaseElapsed()
 {
+	// 결과 화면의 만료는 다음 페이즈로 가는 것이 아니라 매치의 끝이다.
+	// AdvancePhase 에 맡기면 GetNext(Result) 가 무효라 조용히 아무 일도 일어나지 않고,
+	// 아무도 결과 화면에서 나가지 못한다
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (GS && GS->IsPhase(HHTags::Phase_Result))
+	{
+		UE_LOG(LogHeist, Log, TEXT("결과 체류 시간 종료 — 매치를 끝냅니다."));
+		FinishMatch();
+		return;
+	}
+
 	// 타이머가 만료됐다는 것은 곧 "시간이 다 됐다" 는 뜻이다.
 	// 경보로 인한 조기 진입은 이 경로가 아니라 AdvancePhase 로 들어온다
 	AdvancePhase(EHeistPhaseReason::Scheduled);
+}
+
+void AHeistGameMode::HandleResultConfirmChanged(int32 NumConfirmed, int32 TotalNum)
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS || !GS->IsPhase(HHTags::Phase_Result))
+	{
+		return;
+	}
+
+	if (!GS->AreAllResultsConfirmed())
+	{
+		return;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("전원 확인 (%d/%d) — 체류 시간을 기다리지 않고 끝냅니다."),
+		NumConfirmed, TotalNum);
+
+	FinishMatch();
+}
+
+void AHeistGameMode::FinishMatch_Implementation()
+{
+	if (bFinished)
+	{
+		return;
+	}
+
+	bFinished = true;
+	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
+
+	// 여기서 레벨을 옮기지 않는다. ServerTravel 은 세션 파트 소관이고 어디로 돌아갈지도
+	// 그쪽 흐름이 정한다 — BP_HeistGameMode 에서 이 함수를 재정의해 붙이면 된다.
+	UE_LOG(LogHeist, Warning,
+		TEXT("매치 종료 — 돌아갈 레벨이 지정되지 않아 결과 화면에 머뭅니다. "
+			 "BP_HeistGameMode 에서 FinishMatch 를 재정의해 ServerTravel 을 붙이세요."));
 }
 
 void AHeistGameMode::AdvancePhase(EHeistPhaseReason Reason)
@@ -652,6 +741,40 @@ static void ResultShowCommand(UWorld* World)
 	UE_LOG(LogHeist, Log, TEXT("최다 소음 유발자: %s (%.1f)"),
 		Noisiest ? *Noisiest->GetPlayerName() : TEXT("(없음)"), NoiseContribution);
 }
+
+// HUD 확인 버튼이 붙기 전까지 전원 확인 경로를 확인할 유일한 수단이다.
+// 서버에서만 듣는다 — 클라이언트 → 서버 경로(PlayerController 의 Server RPC)는
+// 세션 · UI 파트가 붙일 몫이고, 그게 없는 지금은 호스트 창에서만 넣을 수 있다
+static void ResultConfirmCommand(UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("hh.Result.Confirm 은 서버(호스트) 창에서만 동작합니다. "
+				 "클라이언트 확인은 HUD 의 Server RPC 가 붙어야 합니다."));
+		return;
+	}
+
+	AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	// 접속 중인 전원을 확인 처리한다. 한 명씩 넣을 수단이 없어서,
+	// "전원 확인이면 즉시 끝난다" 를 보는 것이 이 명령의 목적이다
+	for (APlayerState* Player : GS->PlayerArray)
+	{
+		GS->SetResultConfirmed(Player, true);
+	}
+}
+
+static FAutoConsoleCommandWithWorld GResultConfirmCommand(
+	  TEXT("hh.Result.Confirm"),
+	  TEXT("접속 중인 전원을 결과 확인 처리한다. 체류 시간을 기다리지 않고 매치가 끝난다"),
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&ResultConfirmCommand),
+	  ECVF_Cheat);
 
 static FAutoConsoleCommandWithWorld GResultShowCommand(
 	  TEXT("hh.Result.Show"),
