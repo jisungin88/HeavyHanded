@@ -709,6 +709,16 @@ void ALootBase::AttachToCarrier(APawn* Carrier)
             {
                 SocketToUse = CarrySocketName;
             }
+            else
+            {
+                // 확인만 하고 넘어가면 "물건이 발밑에 붙는다" 로만 드러나서,
+                // 물리나 어태치 순서를 의심하며 엉뚱한 곳을 뒤지게 된다.
+                // 이름이 틀렸다는 사실을 그 자리에서 말해 준다.
+                UE_LOG(LogLoot, Warning,
+                    TEXT("[Loot:%s] 운반자 %s 의 메시에 소켓 '%s' 가 없다 — 메시 원점에 붙는다. "
+                         "노획물의 Loot|Carry > Carry Socket Name 을 실제 리그 소켓 이름으로 맞출 것"),
+                    *GetName(), *GetNameSafe(Carrier), *CarrySocketName.ToString());
+            }
         }
     }
 

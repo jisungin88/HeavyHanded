@@ -284,10 +284,15 @@ protected:
      *
      * 캐릭터 리깅이 바뀌거나 파트별로 손 소켓 이름이 달라질 수 있으므로 코드에 박지 않는다.
      * BP 자식 클래스에서 노획물마다 다른 소켓(예: 양손 물건은 별도 소켓)을 지정할 수도 있다.
-     * 소켓을 찾지 못하면 스켈레탈 메시 원점에 붙는다.
+     *
+     * [주의] 기본값은 실제 캐릭터 리그의 소켓 이름과 같아야 한다.
+     *   ABaseCharacter 도 같은 이름을 자기 CarrySocketName 으로 들고 있는데, 어태치를
+     *   ALootBase 가 맡게 되면서 실제로 쓰이는 것은 이쪽 값 하나다. 둘이 어긋나면
+     *   소켓을 못 찾아 메시 원점(= 발밑)에 붙고, 에러도 경고도 나지 않는다.
+     *   ALootBase::AttachToCarrier 가 DoesSocketExist 로 확인은 하지만 조용히 넘어간다.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry")
-    FName CarrySocketName = TEXT("hand_r");
+    FName CarrySocketName = TEXT("Hand_R_Socket");
 
     /**
      * 손 소켓을 찾지 못했을 때 운반자 기준 어디에 들 것인가(cm, X=정면).
