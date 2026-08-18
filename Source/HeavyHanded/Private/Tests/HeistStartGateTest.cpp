@@ -2,6 +2,7 @@
 
 #include "Core/HeistPhase.h"
 #include "Core/HeistEscapeGate.h"
+#include "Core/HeistOutcome.h"
 #include "Core/HeistStartGate.h"
 #include "Core/HeavyHandedGameplayTags.h"
 
@@ -244,6 +245,42 @@ bool FHeistEscapeGateTest::RunTest(const FString& Parameters)
 		C.NumBoardedSurvivors = 4;   // 셋인데 넷이 탔다
 		TestTrue(TEXT("승차 인원이 더 많아도 탈출로 본다"), HasEveryoneEscaped(C));
 	}
+
+	return true;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 결과 등급 (HeistOutcome::Evaluate)
+//
+// 규칙 자체는 두 줄이라 눈으로도 읽힌다. 그런데도 고정해 두는 이유는 이 값이
+// 팀 골드 지급 여부를 가르기 때문이다 — 한 칸 어긋나면 한 판을 통째로 날린다.
+// ──────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHeistOutcomeTest,
+	"HeavyHanded.Heist.Outcome.Grades",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHeistOutcomeTest::RunTest(const FString& Parameters)
+{
+	using namespace HeistOutcome;
+
+	TestEqual(TEXT("목표 달성 + 전원 탈출은 성공"),
+		Evaluate(/*bTargetReached=*/true, /*bEveryoneEscaped=*/true), EHeistOutcome::Success);
+
+	TestEqual(TEXT("돈은 챙겼지만 사람을 두고 왔으면 부분 성공"),
+		Evaluate(true, false), EHeistOutcome::Partial);
+
+	TestEqual(TEXT("무사히 나왔지만 목표를 못 채웠으면 부분 성공"),
+		Evaluate(false, true), EHeistOutcome::Partial);
+
+	TestEqual(TEXT("둘 다 아니면 실패"),
+		Evaluate(false, false), EHeistOutcome::Failure);
+
+	// 지급 기준선(UHeistSettings::MinOutcomeForPayout)이 이 순서에 기대어
+	// 비교 연산 하나로 판정한다. 순서가 뒤집히면 실패한 판에 돈이 들어간다
+	TestTrue(TEXT("등급은 Failure < Partial < Success 순서다"),
+		EHeistOutcome::Failure < EHeistOutcome::Partial
+		&& EHeistOutcome::Partial < EHeistOutcome::Success);
 
 	return true;
 }

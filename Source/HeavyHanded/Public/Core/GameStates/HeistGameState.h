@@ -6,6 +6,7 @@
 #include "Templates/SubclassOf.h"        // FHeistLoadEntry 가 값으로 보유
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — UPROPERTY 노출 enum 이라 전방 선언 불가
 #include "Core/HeistEscapeGate.h"        // FHeistEscapeConditions — 값으로 돌려준다
+#include "Core/HeistOutcome.h"           // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
 #include "HeistGameState.generated.h"
 
 class ALootBase;
@@ -180,8 +181,9 @@ public:
 	/**
 	 * 지금까지 실은 노획물 기록. 결과 화면의 '적재 목록'이 여기서 나온다.
 	 *
-	 * [지금은 서버에만 있다] 복제하지 않는다. 결과 화면을 붙이는 Day 4 에 복제 수단을
-	 *   정한다 — 그때까지 클라이언트에서는 항상 비어 있으므로 UI 를 여기 붙이지 말 것.
+	 * [복제한다 — FastArray 는 쓰지 않는다] 적재할 때마다 배열 전체가 다시 나간다.
+	 *   항목 하나가 30바이트 남짓이고 한 판에 수십 개라, 적재 한 번에 1KB 를 넘지 않는다.
+	 *   FFastArraySerializer 는 그 절약을 위해 지불하기엔 비싼 복잡도다.
 	 */
 	const TArray<FHeistLoadEntry>& GetLoadedEntries() const { return LoadedEntries; }
 
@@ -247,6 +249,57 @@ public:
 	 */
 	void MarkArrested(APlayerState* Player);
 
+	// ── 결과 ──
+	//
+	// 결과 화면이 물어보는 곳을 여기 하나로 모은다. 값의 주인이 다른 것(최다 소음 유발자)도
+	// 여기서 받아 넘긴다 — UI 가 코어 루프와 경계도 컴포넌트를 각각 찾아다니지 않게.
+
+	/**
+	 * 이 판의 결과 등급. Result 진입 전에는 Failure 다.
+	 *
+	 * [왜 여기서 판정하는가] 성공 여부가 팀 골드 지급을 가른다. 표시만 하는 값이면
+	 *   UI 가 해석해도 되지만, 보상에 영향을 주는 순간 판정이 한 곳이어야 한다 —
+	 *   HUD 와 은신처 정산이 각자 세면 화면에는 성공인데 돈은 안 들어오는 판이 생긴다.
+	 *
+	 * 사유(`GetPhaseReason`)와는 다른 값이다. 경보로 나갔다고 실패가 아니고,
+	 * 시간이 다 됐다고 실패도 아니다 — 등급은 목표 달성과 전원 탈출로만 정해진다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	EHeistOutcome GetOutcome() const { return Outcome; }
+
+	/**
+	 * 미션 소요 시간(초). 본 작업 진입부터 결과 확정까지.
+	 *
+	 * 준비 시간은 포함되지 않는다 (기획서 2장 — 미션 타이머는 Heist 진입부터 센다).
+	 * Result 진입 순간에 서버가 한 번 고정한다 — 흐르는 시각으로 매번 계산하면
+	 * 결과 화면이 떠 있는 동안 숫자가 계속 늘어난다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	float GetElapsedSeconds() const { return ElapsedSeconds; }
+
+	/**
+	 * 이 플레이어가 실어 온 금액 합계.
+	 *
+	 * 별도 집계표를 두지 않고 적재 목록에서 매번 계산한다. 같은 사실의 진리원이 둘이 되면
+	 * 어긋났을 때 어느 쪽이 맞는지 알 수 없고, 인원과 항목 수가 결과 화면 한 번 그리는 데
+	 * 문제될 규모가 아니다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	int32 GetContributionOf(const APlayerState* Player) const;
+
+	/**
+	 * 결과 화면 '최다 소음 유발자' (기획서 8장).
+	 *
+	 * 값의 주인은 UAlertComponent 다 — 여기서는 그대로 받아 넘기기만 한다.
+	 * 경계도 컴포넌트가 GameState 에 런타임 부착되는 구조라 UI 가 직접 찾기 번거롭고,
+	 * 결과 화면이 여덟 항목 중 일곱을 여기서 받는데 하나만 다른 곳에 물을 이유가 없다.
+	 *
+	 * @param OutContribution  그 플레이어의 누적 경계도 기여량. 아무도 없으면 0
+	 * @return                 최다 유발자. 집계가 비었거나 경계도 컴포넌트가 없으면 nullptr
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	APlayerState* GetNoisiestPlayer(float& OutContribution) const;
+
 	/**
 	 * 이 플레이어가 다운 상태인가. ASC 가 없으면 false.
 	 *
@@ -271,6 +324,17 @@ protected:
 
 	/** 이 장소의 목표 금액을 설정한다. (서버 전용 — AHeistGameMode 만) */
 	void SetTargetValue(int32 NewTargetValue);
+
+	/**
+	 * 결과 등급을 확정한다. (서버 전용 — AHeistGameMode 만)
+	 *
+	 * **체포를 확정한 뒤에 불러야 한다.** 전원 탈출 여부를 체포 명단으로 보기 때문에,
+	 * 순서를 뒤집으면 아무도 체포되지 않은 것으로 보여 항상 성공이 나온다.
+	 *
+	 * SetPhase 안에서 하지 않는 이유가 그것이다 — 체포 확정은 페이즈가 바뀐 *뒤*에
+	 * GameMode 가 한다.
+	 */
+	void FinalizeOutcome();
 
 	/**
 	 * RepNotify 에 이전 값을 받는다.
@@ -320,14 +384,26 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_LoadedValue, BlueprintReadOnly, Category = "Heist|Value")
 	int32 TargetValue = 0;
 
-	/**
-	 * 실은 노획물 기록. 적재존이 확정할 때마다 한 건씩 쌓인다.
-	 *
-	 * UPROPERTY 인 이유는 항목이 APlayerState 를 참조하기 때문이다 — GC 가 보게 해야 한다.
-	 * 복제 지정자가 없는 것은 의도다. 위 GetLoadedEntries() 주석 참고.
-	 */
-	UPROPERTY()
+	/** 실은 노획물 기록. 적재존이 확정할 때마다 한 건씩 쌓인다 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Value")
 	TArray<FHeistLoadEntry> LoadedEntries;
+
+	/**
+	 * 본 작업이 시작된 서버 시각. 소요 시간의 기준점이다.
+	 *
+	 * 복제하지 않는다 — 이 값으로 무언가를 계산해야 하는 쪽은 서버뿐이고, 결과는
+	 * ElapsedSeconds 로 고정돼 나간다. 흐르는 기준점을 클라이언트에 주면
+	 * 각자 "지금까지 몇 초" 를 계산하다가 결과 화면에서 숫자가 계속 늘어난다.
+	 */
+	float HeistStartServerTime = 0.f;
+
+	/** 미션 소요 시간(초). Result 진입 시 한 번 고정된다 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Result")
+	float ElapsedSeconds = 0.f;
+
+	/** 결과 등급. FinalizeOutcome() 이 한 번 정한다 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Result")
+	EHeistOutcome Outcome = EHeistOutcome::Failure;
 
 	/**
 	 * 지금 밴에 타 있는 사람들. 탈출 판정의 진리원이다.

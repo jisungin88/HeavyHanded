@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Core/HeistOutcome.h"          // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
 #include "HeistSettings.generated.h"
 
 /**
@@ -83,4 +84,21 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Van", meta = (ClampMin = "0.0", Units = "s"))
 	float LoadDwellSeconds = 1.5f;
+
+	// ── 정산 ──
+
+	/**
+	 * 적재 금액을 팀 공용 골드로 넘기는 최소 등급.
+	 *
+	 * 기본값은 Success — 목표를 채우고 전원이 무사히 빠져나온 판에서만 지급한다.
+	 *
+	 * [값으로 뺀 이유] "성공했을 때만 준다" 와 3단계 등급이 만나면 경계가 하나 애매하다.
+	 *   목표는 채웠는데 한 명이 잡힌 판(Partial)이 한 푼도 못 받는 것이 맞는지는
+	 *   플레이해 봐야 안다. 코드에 박아 두면 그때 코드를 고쳐야 하고, 여기 있으면
+	 *   Partial 로 한 칸 내리는 것으로 끝난다.
+	 *
+	 * 등급은 Failure < Partial < Success 순서라 이 값 이상이면 지급한다.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Payout")
+	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Success;
 };

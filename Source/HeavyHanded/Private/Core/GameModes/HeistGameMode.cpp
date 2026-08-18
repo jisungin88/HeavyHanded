@@ -16,6 +16,7 @@
 #include "Core/HeistSettings.h"
 #include "Core/HeistStartGate.h"
 #include "Core/RunProgressSubsystem.h"
+#include "Loot/LootBase.h"          // hh.Result.Show 가 TSubclassOf<ALootBase> 를 이름으로 푼다
 #include "Shared/NetAuthority.h"
 
 namespace
@@ -182,9 +183,9 @@ void AHeistGameMode::Logout(AController* Exiting)
 
 	Super::Logout(Exiting);
 
-	// 판정은 다음 틱에 한다. 지금은 PlayerArray 에 나가는 사람이 아직 남아 있어
-	// 생존자 수가 한 명 많게 세어진다 — 그 값으로 판정하면 끝날 판이 안 끝난다.
-	GetWorldTimerManager().SetTimerForNextTick(this, &AHeistGameMode::TryFinishByEscape);
+	// 지금 판정하면 PlayerArray 에 나가는 사람이 아직 남아 있어 생존자 수가 한 명 많다.
+	// 그 값으로 판정하면 끝날 판이 안 끝난다 — 다른 두 계기와 같은 이유로 다음 틱에 본다
+	RequestEscapeCheck();
 }
 
 FHeistStartConditions AHeistGameMode::MakeStartConditions()
@@ -321,7 +322,16 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 
 	if (Phase == HHTags::Phase_Result)
 	{
+		// 순서가 규칙이다. 체포를 먼저 확정해야 "전원 탈출인가" 를 셀 수 있고,
+		// 등급이 나와야 지급 여부를 판정할 수 있다.
 		ResolveArrests();
+
+		if (AHeistGameState* GS = GetGameState<AHeistGameState>())
+		{
+			GS->FinalizeOutcome();
+		}
+
+		PayoutTeamGold();
 	}
 }
 
@@ -351,7 +361,7 @@ void AHeistGameMode::HandleAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel /
 
 void AHeistGameMode::HandleBoardedChanged(int32 /*NumBoarded*/, int32 /*NumSurvivors*/)
 {
-	TryFinishByEscape();
+	RequestEscapeCheck();
 }
 
 void AHeistGameMode::WatchDownedState(APlayerState* Player)
@@ -374,12 +384,28 @@ void AHeistGameMode::WatchDownedState(APlayerState* Player)
 void AHeistGameMode::HandleDownedTagChanged(const FGameplayTag /*Tag*/, int32 /*NewCount*/)
 {
 	// 다운으로 생존자가 줄면, 이미 밴에 타 있던 사람들만으로 전원 승차가 성립할 수 있다.
-	// 복구로 생존자가 늘면 반대로 성립이 풀리는데, 그때는 아무 일도 일어나지 않는다
-	TryFinishByEscape();
+	// 복구로 생존자가 늘면 반대로 성립이 풀리는데, 그때는 아무 일도 일어나지 않는다.
+	//
+	// 여기는 특히 즉시 판정하면 안 된다 — ASC 의 태그 변경 콜백 안이라,
+	// 그 자리에서 페이즈를 넘기면 태그를 바꾸던 GameplayEffect 처리 도중에 판이 끝난다
+	RequestEscapeCheck();
+}
+
+void AHeistGameMode::RequestEscapeCheck()
+{
+	if (bEscapeCheckQueued)
+	{
+		return;
+	}
+
+	bEscapeCheckQueued = true;
+	GetWorldTimerManager().SetTimerForNextTick(this, &AHeistGameMode::TryFinishByEscape);
 }
 
 void AHeistGameMode::TryFinishByEscape()
 {
+	bEscapeCheckQueued = false;
+
 	const AHeistGameState* GS = GetGameState<AHeistGameState>();
 	if (!GS)
 	{
@@ -440,6 +466,43 @@ void AHeistGameMode::ResolveArrests()
 
 	UE_LOG(LogHeist, Log, TEXT("결과 확정 — 탈출 %d명 / 체포 %d명"),
 		EscapedNum, GS->GetArrestedPlayers().Num());
+}
+
+void AHeistGameMode::PayoutTeamGold()
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS)
+	{
+		return;
+	}
+
+	const EHeistOutcome MinOutcome = UHeistSettings::Get()->MinOutcomeForPayout;
+
+	// 등급이 Failure < Partial < Success 순서라 비교 하나로 끝난다 (EHeistOutcome 주석 참고)
+	if (GS->GetOutcome() < MinOutcome)
+	{
+		UE_LOG(LogHeist, Log, TEXT("정산 없음 — 등급 %s (지급 기준 %s 이상). 적재 $%d 는 소멸한다."),
+			HeistOutcome::ToString(GS->GetOutcome()), HeistOutcome::ToString(MinOutcome),
+			GS->GetLoadedValue());
+		return;
+	}
+
+	// 은신처 정산 · 장비 구매의 입력이다. 이 서브시스템은 복제되지 않고 서버 것만 유효한데,
+	// 여기가 서버 전용(GameMode)이라 안전하다 — 클라이언트가 알아야 하는 잔액이 생기면
+	// 서브시스템이 아니라 GameState 로 복제할 것.
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("URunProgressSubsystem 이 없어 적재 $%d 를 팀 골드로 넘기지 못했습니다."),
+			GS->GetLoadedValue());
+		return;
+	}
+
+	Run->AddTeamGold(GS->GetLoadedValue());
+
+	UE_LOG(LogHeist, Log, TEXT("정산 — 적재 $%d 를 팀 골드로 적립. 잔액 $%d"),
+		GS->GetLoadedValue(), Run->GetTeamGold());
 }
 
 void AHeistGameMode::HandlePhaseElapsed()
@@ -530,4 +593,68 @@ static FAutoConsoleCommandWithWorld GPhaseShowCommand(
 	  TEXT("hh.Phase.Show"),
 	  TEXT("현재 페이즈 · 남은 시간 · 적재 금액을 찍는다. 클라이언트 창에서도 동작한다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&PhaseShowCommand),
+	  ECVF_Cheat);
+
+// 결과 화면(오유석)이 붙기 전까지 Result 데이터를 눈으로 확인할 유일한 수단이다.
+// 클라이언트 창에서도 돌아야 한다 — 복제가 실제로 갔는지가 확인의 핵심이라,
+// 서버에서만 찍으면 "서버에는 있는데 화면에 안 나온다" 를 구별할 수 없다
+static void ResultShowCommand(UWorld* World)
+{
+	const AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("── 결과 ── %s / 사유 %s / 적재 $%d of $%d / 소요 %.1f초"),
+		HeistOutcome::ToString(GS->GetOutcome()),
+		HeistPhase::ToString(GS->GetPhaseReason()),
+		GS->GetLoadedValue(), GS->GetTargetValue(), GS->GetElapsedSeconds());
+
+	// 팀 골드는 서버에만 있다 (URunProgressSubsystem 은 복제되지 않는다).
+	// 클라이언트 창에서는 이 줄이 나오지 않는 것이 정상이다
+	if (const URunProgressSubsystem* Run = URunProgressSubsystem::Get(World))
+	{
+		UE_LOG(LogHeist, Log, TEXT("팀 골드 $%d (지급 기준 %s 이상)"),
+			Run->GetTeamGold(),
+			HeistOutcome::ToString(UHeistSettings::Get()->MinOutcomeForPayout));
+	}
+
+	const TArray<FHeistLoadEntry>& Entries = GS->GetLoadedEntries();
+	UE_LOG(LogHeist, Log, TEXT("적재 목록 %d건"), Entries.Num());
+
+	for (const FHeistLoadEntry& Entry : Entries)
+	{
+		UE_LOG(LogHeist, Log, TEXT("  %s $%d%s — %s"),
+			*GetNameSafe(Entry.LootClass),
+			Entry.Value,
+			Entry.IsValueLost() ? *FString::Printf(TEXT(" (원래 $%d)"), Entry.BaseValue) : TEXT(""),
+			Entry.Loader ? *Entry.Loader->GetPlayerName() : TEXT("(주인 없음)"));
+	}
+
+	for (const APlayerState* Player : GS->PlayerArray)
+	{
+		if (!IsValid(Player))
+		{
+			continue;
+		}
+
+		UE_LOG(LogHeist, Log, TEXT("  %s — %s / 기여 $%d"),
+			*Player->GetPlayerName(),
+			GS->IsArrested(Player) ? TEXT("체포") : (GS->IsBoarded(Player) ? TEXT("탈출") : TEXT("미승차")),
+			GS->GetContributionOf(Player));
+	}
+
+	float NoiseContribution = 0.f;
+	const APlayerState* Noisiest = GS->GetNoisiestPlayer(NoiseContribution);
+
+	UE_LOG(LogHeist, Log, TEXT("최다 소음 유발자: %s (%.1f)"),
+		Noisiest ? *Noisiest->GetPlayerName() : TEXT("(없음)"), NoiseContribution);
+}
+
+static FAutoConsoleCommandWithWorld GResultShowCommand(
+	  TEXT("hh.Result.Show"),
+	  TEXT("결과 데이터를 전부 찍는다 — 적재 목록 · 기여도 · 탈출/체포 · 소요 시간 · 최다 소음 유발자"),
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&ResultShowCommand),
 	  ECVF_Cheat);

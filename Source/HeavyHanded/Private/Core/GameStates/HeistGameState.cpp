@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 
+#include "Alert/AlertComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistLog.h"
 
@@ -29,6 +30,9 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHeistGameState, TargetValue);
 	DOREPLIFETIME(AHeistGameState, BoardedPlayers);
 	DOREPLIFETIME(AHeistGameState, ArrestedPlayers);
+	DOREPLIFETIME(AHeistGameState, LoadedEntries);
+	DOREPLIFETIME(AHeistGameState, ElapsedSeconds);
+	DOREPLIFETIME(AHeistGameState, Outcome);
 }
 
 AHeistGameState* AHeistGameState::Get(const UObject* WorldContext)
@@ -82,6 +86,21 @@ void AHeistGameState::SetPhase(const FGameplayTag& NewPhase, float DurationSecon
 	const FGameplayTag OldPhase = CurrentPhase;
 	CurrentPhase = NewPhase;
 	PhaseReason = Reason;
+
+	// 소요 시간은 페이즈 전이에 붙어 있는 사실이라 여기서 함께 기록한다.
+	// 별도 함수로 빼면 GameMode 가 전이와 기록을 두 번 불러야 하고, 한쪽을 빠뜨린 경로가
+	// 생기면 결과 화면에 0초가 찍힌다 — 그때 원인은 코드를 봐야만 알 수 있다.
+	if (NewPhase == HHTags::Phase_Heist)
+	{
+		HeistStartServerTime = GetServerWorldTimeSeconds();
+	}
+	else if (NewPhase == HHTags::Phase_Result)
+	{
+		// 본 작업에 들어가 본 적이 없으면(치트로 건너뛴 판) 기준점이 없다. 0 으로 둔다
+		ElapsedSeconds = (HeistStartServerTime > 0.f)
+			? FMath::Max(0.f, GetServerWorldTimeSeconds() - HeistStartServerTime)
+			: 0.f;
+	}
 
 	PhaseEndServerTime = (DurationSeconds > 0.f)
 		? GetServerWorldTimeSeconds() + DurationSeconds
@@ -151,6 +170,79 @@ void AHeistGameState::SetTargetValue(int32 NewTargetValue)
 void AHeistGameState::OnRep_LoadedValue()
 {
 	OnLoadedValueChanged.Broadcast(LoadedValue, TargetValue);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 결과
+// ──────────────────────────────────────────────────────────────
+
+void AHeistGameState::FinalizeOutcome()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 전원 탈출은 '체포자가 없다' 로 본다. 체포는 미승차와 다운을 모두 흡수한 결과라
+	// 여기서 그 조건을 다시 세면 두 곳이 어긋날 수 있다.
+	int32 CountedNum = 0;
+	int32 EscapedNum = 0;
+
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (!IsCountedPlayer(Player))
+		{
+			continue;
+		}
+
+		++CountedNum;
+
+		if (!IsArrested(Player))
+		{
+			++EscapedNum;
+		}
+	}
+
+	// 아무도 남지 않은 판(전원 이탈)에서 "체포자가 0명" 을 전원 탈출로 읽으면 안 된다.
+	// HeistEscapeGate 의 전원 다운 경계와 같은 종류의 함정이다.
+	const bool bEveryoneEscaped = CountedNum > 0 && EscapedNum == CountedNum;
+
+	Outcome = HeistOutcome::Evaluate(IsTargetReached(), bEveryoneEscaped);
+
+	UE_LOG(LogHeist, Log, TEXT("결과 등급 %s — 적재 $%d / $%d, 탈출 %d of %d명, 소요 %.1f초"),
+		HeistOutcome::ToString(Outcome),
+		LoadedValue, TargetValue, EscapedNum, CountedNum, ElapsedSeconds);
+}
+
+int32 AHeistGameState::GetContributionOf(const APlayerState* Player) const
+{
+	if (!IsValid(Player))
+	{
+		return 0;
+	}
+
+	int32 Total = 0;
+
+	for (const FHeistLoadEntry& Entry : LoadedEntries)
+	{
+		if (Entry.Loader == Player)
+		{
+			Total += Entry.Value;
+		}
+	}
+
+	return Total;
+}
+
+APlayerState* AHeistGameState::GetNoisiestPlayer(float& OutContribution) const
+{
+	OutContribution = 0.f;
+
+	// 작업 레벨이 아닌 테스트 맵에는 경계도 컴포넌트가 없을 수 있다.
+	// 그때는 "아무도 없음" 이 맞는 답이다 — 소음을 세는 주체가 없었다는 뜻이므로
+	const UAlertComponent* Alert = UAlertComponent::Get(this);
+
+	return Alert ? Alert->GetNoisiestPlayer(OutContribution) : nullptr;
 }
 
 // ──────────────────────────────────────────────────────────────
