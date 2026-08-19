@@ -7,9 +7,8 @@
 #include "TimerManager.h"
 
 #include "Alert/AlertComponent.h"
+#include "UI/HeavyUILog.h"
 #include "UI/UISettings.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogHeavyUI, Log, All);
 
 void UAlertGaugeWidget::NativePreConstruct()
 {
