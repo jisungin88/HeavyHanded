@@ -376,6 +376,29 @@ bool ABaseCharacter::CanCarryActor(const AActor* Target) const
         return false;
     }
 
+    // 남이 들고 있는 물건은 뺏을 수 없다.
+    //
+    // 노획물 쪽 ALootBase::CanBeCarriedBy 도 같은 것을 거부한다. 그런데 그 거부는
+    // OnGrabbed 안에서 일어나고 OnGrabbed 는 void 라, SetHeldActor 까지 올라오지 않는다 —
+    // 그 시점에는 어태치와 HeldActor 갱신이 이미 끝나 있다.
+    //
+    // 그래서 이 검사가 없으면 운반 상태가 두 곳으로 갈라진다. 물건은 내 메시에 붙고
+    // 나는 들었다고 믿는데, PrimaryCarrier 는 원래 주인으로 남는다. 원래 주인이 놓는 순간
+    // PrimaryCarrier 가 비워져서, 내 손에 들린 물건을 밴 적재존이 "아무도 안 들고 있다" 로
+    // 보고 실어 버린다. LastCarrier 도 안 바뀌어 기여도까지 원래 주인에게 붙는다.
+    //
+    // 어태치 전에 막아야 그 갈라짐 자체가 생기지 않는다.
+    if (const ICarryable* Carryable = Cast<ICarryable>(Target))
+    {
+        const APawn* Holder = Carryable->GetPrimaryCarrier();
+        if (IsValid(Holder) && Holder != this)
+        {
+            UE_LOG(LogCarry, Log, TEXT("%s 는 %s 가 들고 있어 잡을 수 없다."),
+                *GetNameSafe(Target), *GetNameSafe(Holder));
+            return false;
+        }
+    }
+
     // 방금 내가 던진 물건은 잠깐 못 잡는다. 던지고 곧바로 낚아채는 반복으로
     // 중량형의 2인 필수 규칙과 착지 소음·파손 판정을 우회하는 것을 막는다.
     if (Target == RecentlyThrownActor && RecentlyThrownTime >= 0.f)
