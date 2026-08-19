@@ -32,6 +32,8 @@ Loot_Vase         백자  $1500  ←──────────────�
 8행 (모든 노획물)                 1행 (불안정형만)             2행 (파손형만)
 ```
 
+`DT_LootHeavy` 도 같은 방식이다 — 대형 금고와 청동상 2행뿐이다.
+
 **표 사이에 부모/자식 관계는 없다.** 셋은 대등한 별개의 파일이고, 이어주는 것은
 행 이름이 같다는 약속 하나뿐이다. 관계형 DB 의 조인과 같다. 그래서
 
@@ -48,8 +50,8 @@ Loot_Vase         백자  $1500  ←──────────────�
 나누고 나면 **표에 행이 있다는 것 자체가 그 특성의 명단**이 된다.
 `DT_LootStability` 를 열면 불안정형이 무엇인지 한눈에 보인다.
 
-> 중량형은 아직 `DT_LootCatalog` 의 `Physics.WeightClass` 로 정한다. 전용 컴포넌트가
-> 없어서 생긴 임시 예외이고, `ULootHeavyComponent` 와 `DT_LootHeavy` 가 생기면 없앤다.
+> ~~중량형은 아직 `Physics.WeightClass` 로 정한다~~ → 2026-08-19 에 `ULootHeavyComponent` 와
+> `DT_LootHeavy` 로 옮겨서 예외가 사라졌다. 이제 특성 셋 다 컴포넌트가 선언한다.
 
 ## 작업 순서
 
@@ -84,15 +86,18 @@ CSV 는 UTF-8(BOM 포함)이라 엑셀에서 한글이 깨지지 않는다.
 |---|---|---|---|
 | 파손형 | `LootDurabilityComponent` | `DT_LootDurability` | `Loot.Type.Fragile` |
 | 불안정형 | `LootStabilityComponent` | `DT_LootStability` | `Loot.Type.Unstable` |
-| 중량형 | 없음 (표에서 `WeightClass=Heavy`) | — | `Loot.Type.Heavy` |
+| 중량형 | `LootHeavyComponent` | `DT_LootHeavy` | `Loot.Type.Heavy` |
 | 평범 | 없음 | — | `Loot.Type` |
 
 **컴포넌트와 행은 둘 다 있어야 한다.** 하나만 있으면 PIE 로그에 경고가 뜬다.
 어느 쪽이 빠졌는지도 메시지가 알려준다.
 
+무게 등급(`WeightClass`)은 없앴다. "중량형인가" 는 컴포넌트가 다는 `Loot.Type.Heavy` 태그가,
+"얼마나 느려지는가" 는 카탈로그의 `CarrySpeedMultiplier` 가 말한다. 등급과 배율이 같은 것을
+두 번 말하고 있었고, Light / Normal 구분은 끝까지 아무도 읽지 않았다.
+
 상속이 아니라 조합이라 특성을 섞어도 클래스가 늘어나지 않는다.
-파손형 + 중량형은 `LootDurabilityComponent` 를 붙이고 `DT_LootDurability` 에 행을 넣은 뒤
-카탈로그에서 `WeightClass=Heavy` 로 두면 된다.
+대형 금고처럼 중량형 + 경보 연동형이 되면 컴포넌트 두 개를 붙이고 표 두 곳에 행을 넣는다.
 
 ## 행 이름 규칙
 
@@ -106,8 +111,8 @@ Loot_Vase               청화백자
 특성도 장소도 이름에 넣지 않는다. 둘 다 이미 다른 곳이 알고 있는 정보이고,
 이름에 또 적으면 두 벌이 되어 한쪽만 바뀐다.
 
-- **특성**은 표의 `Physics.WeightClass` 와 BP 의 컴포넌트 조합이 정한다.
-  `Loot_Heavy_Statue` 로 적어 두면 표에서 무게를 Normal 로 낮추는 순간 이름이 거짓말이 된다.
+- **특성**은 BP 의 컴포넌트 조합이 정한다.
+  `Loot_Heavy_Statue` 로 적어 두면 BP 에서 컴포넌트를 떼는 순간 이름이 거짓말이 된다.
   조합(중량형 + 경보 연동형인 대형 금고)이 생기면 부를 이름도 없어진다.
 - **장소**는 배치의 속성이지 물건의 속성이 아니다. 행 하나는 '한 종류의 물건'이지
   '한 배치'가 아니다. 같은 은촛대를 저택과 박물관에 두면 값이 똑같은 행이 둘 생기고,
@@ -136,6 +141,7 @@ Loot_Vase_Museum        박물관 소장품 — 더 비싸고 더 잘 깨진다
 | `LootCatalog.csv` | `DT_LootCatalog` | `FLootDefinitionRow` | 모든 노획물의 이름·가치·물리 |
 | `LootStability.csv` | `DT_LootStability` | `FLootStabilityData` | 불안정형만 |
 | `LootDurability.csv` | `DT_LootDurability` | `FLootDurabilityData` | 파손형만 |
+| `LootHeavy.csv` | `DT_LootHeavy` | `FLootHeavyData` | 중량형만 (2인 캐리) |
 
 전부 김민준 담당이다.
 
@@ -177,6 +183,7 @@ Loot|Value > Base Value
 ```
 [Loot:...] DT_LootStability 에 'Loot_CoinBag' 행이 있는데 ULootStabilityComponent 가 없다
 [Loot:...] DT_LootDurability 에 'Loot_Vase' 행이 있는데 ULootDurabilityComponent 가 없다
+[Loot:...] DT_LootHeavy 에 'Loot_Statue' 행이 있는데 ULootHeavyComponent 가 없다
 ```
 
 *컴포넌트는 있는데 행이 없다* — 각 컴포넌트가 찍는다. **표를 봐야 한다.**
@@ -185,10 +192,12 @@ Project Settings 의 표 연결이 비어 있어도 같은 메시지가 나온�
 ```
 [Loot:...] ULootStabilityComponent 가 붙어 있는데 DT_LootStability 에 '...' 행이 없다
 [Loot:...] ULootDurabilityComponent 가 붙어 있는데 DT_LootDurability 에 '...' 행이 없다
+[Loot:...] ULootHeavyComponent 가 붙어 있는데 DT_LootHeavy 에 '...' 행이 없다
 ```
 
 `Loot|Tags > Loot Type Tags` 에 `Loot.Type` 하나만 있으면 컴포넌트를 빼먹은 것이다.
-파손형이면 `Loot.Type.Fragile`, 불안정형이면 `Loot.Type.Unstable` 이 자동으로 붙어 있어야 한다.
+파손형이면 `Loot.Type.Fragile`, 불안정형이면 `Loot.Type.Unstable`,
+중량형이면 `Loot.Type.Heavy` 가 자동으로 붙어 있어야 한다.
 
 ## 주의
 
@@ -196,7 +205,7 @@ Project Settings 의 표 연결이 비어 있어도 같은 메시지가 나온�
 엑셀에서 이 칸을 직접 고치는 것은 권하지 않는다 — 괄호나 쉼표 하나가 어긋나면
 그 행 전체가 기본값으로 임포트된다. **물리 수치는 에디터에서 고치는 것이 안전하다.**
 
-특성 표(`LootStability.csv` / `LootDurability.csv`)는 중첩이 없어서 열이 평평하다.
+특성 표(`LootStability.csv` / `LootDurability.csv` / `LootHeavy.csv`)는 중첩이 없어서 열이 평평하다.
 엑셀에서 고쳐도 안전하다.
 
 `DamageImpulseThreshold` 는 질량에 비례한다. 카탈로그에서 `MassKg` 를 바꾸면

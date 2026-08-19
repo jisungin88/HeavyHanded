@@ -29,8 +29,10 @@ class HEAVYHANDED_API ICarryable
 	GENERATED_BODY()
 
 public:
-	/** 무게 등급 */
-	virtual EWeightClass GetWeightClass() const = 0;
+	// [삭제됨] GetWeightClass()
+	//   무게 등급(EWeightClass)을 없애면서 같이 뺐다. 읽는 곳이 한 군데도 없었다.
+	//   "중량형인가" 는 Loot.Type.Heavy 태그로, "얼마나 느려지는가" 는 아래
+	//   GetCarrySpeedMultiplier 로 알린다. 태그는 IGameplayTagAssetInterface 로 나간다.
 
 	/** 필요한 최소 인원 (중량형 = 2) */
 	virtual int32 GetRequiredCarriers() const = 0;

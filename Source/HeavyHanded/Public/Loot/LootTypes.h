@@ -144,6 +144,62 @@ struct FLootDurabilityData : public FTableRowBase
 };
 
 /**
+ * 중량형 노획물의 설계값. (기획서 5장 — 1인 시 속도 30%, 2인이면 100%)
+ *
+ * DT_LootHeavy 의 한 행이다. RowName 은 DT_LootCatalog 의 행 이름과 같다.
+ *
+ * [여기 있는 것은 '2인 캐리를 어떻게 하는가' 뿐이다]
+ *   무게로 인한 페널티(CarrySpeedMultiplier, bAllowJumpWhileCarried)는 카탈로그에 남는다.
+ *   중량형만의 것이 아니기 때문이다 — 금괴는 중량형이 아닌데도 0.75 로 느리다.
+ *   그것까지 여기로 옮기면 중량형이 아닌 노획물이 중량형 행을 갖는 모순이 생긴다.
+ *
+ *   반대로 '두 사람이 어디를 잡는가' 는 2인 캐리에만 있는 개념이라 여기 있어야 한다.
+ *
+ * [두 그립 사이 거리는 여기 없다]
+ *   메시의 두 소켓 위치에서 계산한다. 값으로 적어 두면 메시를 바꿨을 때
+ *   숫자만 옛 메시에 맞은 채로 남아 물건이 손에서 어긋난다.
+ *
+ * [제약 튜닝 값도 아직 없다]
+ *   거리 제약을 푸는 함수를 쓰면서 어떤 손잡이가 필요한지 정해지면 그때 열을 추가한다.
+ *   미리 넣으면 실제로 필요한 것과 다른 값이 표에 남는다.
+ */
+USTRUCT(BlueprintType)
+struct FLootHeavyData : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	/**
+	 * 페널티 없이 옮기려면 필요한 인원.
+	 *
+	 * 이 인원이 안 되면 못 드는 것이 아니라 느려진다 (기획: 1인 시 30%).
+	 * 그래서 CanBeCarriedBy 는 이 값으로 막지 않는다 — 혼자 낑낑대며 옮기는 그림이
+	 * 기획 의도이고, 못 들게 하면 그 선택지가 사라진다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Heavy",
+		meta = (ClampMin = "2", ClampMax = "4"))
+	int32 RequiredCarriers = 2;
+
+	/**
+	 * 두 사람이 각각 잡는 노획물 메시의 소켓 이름.
+	 *
+	 * 리더가 끌고 팔로워가 따라오는 구조가 아니다. 두 사람이 양 끝을 잡고,
+	 * 둘의 이동을 합쳐 물체 트랜스폼이 결정된다. 한 명이 멈춰 있으면 다른 한 명은
+	 * 그 사람을 중심으로 돌 수밖에 없고, 이 '서로 방해되는' 감각이 협동의 핵심이다.
+	 *
+	 * 소켓이 없으면 어태치는 되지만 두 지점이 겹쳐서 제약이 의미를 잃는다.
+	 * 없을 때는 ULootHeavyComponent 가 경고한다.
+	 *
+	 * [B 단계 예고] 이 두 값을 실제로 읽는 것은 그립 어태치를 붙일 때다.
+	 *   지금은 메시 작업에서 소켓 이름을 맞출 수 있도록 먼저 열어 둔다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Heavy")
+	FName GripSocketA = TEXT("Grip_A");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Heavy")
+	FName GripSocketB = TEXT("Grip_B");
+};
+
+/**
  * 노획물 한 종류의 설계값. DT_LootCatalog 의 한 행이다.
  *
  * [왜 DataAsset 이 아니라 DataTable 인가]
@@ -155,20 +211,19 @@ struct FLootDurabilityData : public FTableRowBase
  *   소음 파트의 DT_NoiseProfiles 도 같은 이유로 DataTable 이다.
  *
  * [값만 담는다 — 어떤 특성인지는 여기서 정하지 않는다]
- *   파손형·불안정형은 컴포넌트를 붙이는 것이 곧 선언이다 (BP 조합).
+ *   특성 셋(중량형·파손형·불안정형)은 모두 컴포넌트를 붙이는 것이 곧 선언이다 (BP 조합).
  *   여기에 "파손형인가" 같은 칸을 만들면 컴포넌트는 없는데 표에는 파손형인 상태가
  *   만들어지고, 둘 중 무엇이 진실인지 알 수 없게 된다.
  *
- *   중량형만은 아직 Physics.WeightClass 로 결정된다. 전용 컴포넌트가 없어서 생긴
- *   임시 예외이고, ULootHeavyComponent 와 DT_LootHeavy 가 생기면 없앤다.
- *   그때 규칙은 하나로 정리된다 — 컴포넌트가 특성을 선언하고, 같은 이름의 행이 수치를 준다.
+ *   중량형이 Physics.WeightClass 로 결정되던 예외는 없앴다. 규칙은 하나다 —
+ *   컴포넌트가 특성을 선언하고, 같은 이름의 행이 수치를 준다.
  *
  * [행 이름] RowName 이 곧 노획물 ID 다. Loot_Vase 처럼 물건 이름만 적는다.
  *   특성도 장소도 넣지 않는다 — 둘 다 다른 곳이 이미 알고 있어서 이름에 또 적으면
  *   두 벌이 되고 한쪽만 바뀐다. 자세한 규칙은 Data/README.md 에 있다.
  *
- *   이 이름은 DT_LootStability / DT_LootDurability 의 조인 키이기도 하다.
- *   그래서 한번 정하면 바꾸지 않는다. 바꾸면 표 세 개가 동시에 끊긴다.
+ *   이 이름은 특성 표 셋의 조인 키이기도 하다.
+ *   그래서 한번 정하면 바꾸지 않는다. 바꾸면 표 네 개가 동시에 끊긴다.
  */
 USTRUCT(BlueprintType)
 struct FLootDefinitionRow : public FTableRowBase

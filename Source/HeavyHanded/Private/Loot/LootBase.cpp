@@ -2,6 +2,7 @@
 
 #include "Components/InputComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Loot/LootHeavyComponent.h"     // GetRequiredCarriers 를 여기서 물어본다
 #include "Loot/LootLog.h"
 #include "Loot/LootSettings.h"           // 특성 표 경로 — 컴포넌트 누락 대조에 쓴다
 #include "Loot/LootTypes.h"              // FLootDefinitionRow — DT_LootCatalog 행
@@ -261,6 +262,16 @@ void ALootBase::WarnOnUnusedTypeData() const
 				 "— 충격을 세는 코드가 없어 깨지지 않는다. BP 에 컴포넌트를 추가하거나 표에서 행을 지울 것"),
 			*GetName(), *RowName.ToString());
 	}
+
+	if (ULootSettings::FindTraitRow<FLootHeavyData>(Settings->HeavyTable, RowName, GetName())
+		&& !LootTypeTags.HasTag(HHTags::Loot_Type_Heavy))
+	{
+		UE_LOG(LogLoot, Warning,
+			TEXT("[Loot:%s] DT_LootHeavy 에 '%s' 행이 있는데 ULootHeavyComponent 가 없다 "
+				 "— 2인 캐리가 되지 않고 GetRequiredCarriers 도 1 을 돌려준다. "
+				 "BP 에 컴포넌트를 추가하거나 표에서 행을 지울 것"),
+			*GetName(), *RowName.ToString());
+	}
 }
 
 void ALootBase::BeginPlay()
@@ -277,12 +288,9 @@ void ALootBase::BeginPlay()
 		CurrentValue = BaseValue;
 		OnRep_CurrentValue();
 
-		// 중량형은 전용 컴포넌트가 없어서 여기서 직접 단다.
-		// 파손형·불안정형은 각자 컴포넌트가 BeginPlay 에서 자기 태그를 등록한다.
-		if (PhysicsData.WeightClass == EWeightClass::Heavy)
-		{
-			AddLootTypeTag(HHTags::Loot_Type_Heavy);
-		}
+		// 중량형 태그를 여기서 달던 예외는 없앴다. 이제 셋 다 컴포넌트가 스스로 단다
+		// (ULootHeavyComponent / ULootDurabilityComponent / ULootStabilityComponent).
+		// Super::BeginPlay 안에서 이미 등록이 끝나 있다.
 
 		// 특성 태그가 하나도 없으면 플레이어 파트의 집기 트레이스가 이 액터를 그냥 지나친다.
 		// Loot.Type 부모 태그 하나로 판정하므로, 특성이 없는 평범한 노획물도 부모는 달아야 한다.
@@ -410,14 +418,17 @@ FVector ALootBase::GetCarryGripOffset() const
 // ICarryable — 값 제공
 // --------------------------------------------------------------------------
 
-EWeightClass ALootBase::GetWeightClass() const
-{
-	return PhysicsData.WeightClass;
-}
-
 int32 ALootBase::GetRequiredCarriers() const
 {
-	return PhysicsData.RequiredCarriers;
+	// 2인이 필요한 것은 중량형뿐이라 값을 중량형 컴포넌트가 들고 있다.
+	// 컴포넌트가 없으면 물어볼 것도 없이 1명이다 — 표에 칸을 두고 전부 1 로 채우던 것을
+	// 없앤 것이라, 값이 사라진 게 아니라 물어볼 대상이 생긴 것이다.
+	if (const ULootHeavyComponent* Heavy = FindComponentByClass<ULootHeavyComponent>())
+	{
+		return Heavy->GetRequiredCarriers();
+	}
+
+	return 1;
 }
 
 float ALootBase::GetCarrySpeedMultiplier() const

@@ -19,9 +19,9 @@ struct FPredictProjectilePathResult;
  * 모든 노획물의 베이스.
  *
  * [설계 원칙 1] 값은 데이터, 행동은 컴포넌트.
- *   중량형·파손형·불안정형을 서브클래스로 나누지 않는다.
- *   중량형은 고유 행동이 없고 FLootPhysicsData 값만 다르며,
- *   파손형·불안정형은 각자 컴포넌트를 붙여 만든다.
+ *   중량형·파손형·불안정형을 서브클래스로 나누지 않는다. 셋 다 컴포넌트를 붙여 만들고,
+ *   수치는 각자 자기 표(DT_LootHeavy / DT_LootDurability / DT_LootStability)에서
+ *   카탈로그와 같은 행 이름으로 가져간다.
  *   대형 금고처럼 '중량형 + 경보 연동형' 조합이 반드시 생기므로 상속하면 클래스가 폭발한다.
  *   (미션 가이드도 "인터페이스와 Actor Component를 활용한 설계"를 요구한다)
  *
@@ -59,7 +59,7 @@ public:
 	 *
 	 * 파손형·불안정형은 컴포넌트를 붙이는 것이 곧 선언이므로, 태그를 BP 에서 따로
 	 * 지정하게 하면 컴포넌트는 있는데 태그는 없는 상태가 만들어진다.
-	 * 중량형은 컴포넌트가 없어 ALootBase 가 WeightClass 를 보고 직접 등록한다.
+	 * 중량형도 마찬가지다 — ULootHeavyComponent 가 스스로 단다. 예외는 없다.
 	 */
 	void AddLootTypeTag(const FGameplayTag& TypeTag);
 
@@ -72,7 +72,6 @@ public:
 	void SetLootStateTag(const FGameplayTag& NewState);
 
 	//~ ICarryable 시작 — 플레이어는 요청하고, 아이템이 허용/거부한다
-	virtual EWeightClass GetWeightClass() const override;
 	virtual int32 GetRequiredCarriers() const override;
 	virtual float GetCarrySpeedMultiplier() const override;
 	virtual bool IsJumpAllowedWhileCarried() const override;

@@ -54,6 +54,12 @@ public:
 				RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LootDurabilityData"))
 	TSoftObjectPtr<UDataTable> DurabilityTable;
 
+	/** 중량형(2인 캐리) 수치. RowName == DT_LootCatalog 의 행 이름 */
+	UPROPERTY(config, EditAnywhere, Category = "Data",
+		meta = (AllowedClasses = "/Script/Engine.DataTable",
+				RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LootHeavyData"))
+	TSoftObjectPtr<UDataTable> HeavyTable;
+
 	/**
 	 * 특성 표에서 행 하나를 찾는다. 없으면 nullptr.
 	 *

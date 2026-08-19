@@ -9,14 +9,23 @@
 class AActor;
 class APawn;
 
-/** 노획물 무게 등급 — 운반 가능 여부와 이동 페널티의 기준 */
-UENUM(BlueprintType)
-enum class EWeightClass : uint8
-{
-	Light   UMETA(DisplayName = "Light"),   // 한 손, 페널티 없음
-	Normal  UMETA(DisplayName = "Normal"),   // 1인 운반, 약한 페널티
-	Heavy   UMETA(DisplayName = "Heavy")  // 2인 필수 (기획서 5장)
-};
+// [삭제됨] EWeightClass (Light / Normal / Heavy)
+//
+// 무게 등급은 원래 "중량형인가" 를 나타내는 수단이었다. 그 역할을
+// ULootHeavyComponent 가 가져가면서 껍데기만 남았다.
+//
+// Light / Normal 구분은 끝까지 아무도 읽지 않았다. 실제 페널티는 연속값인
+// CarrySpeedMultiplier 가 정하고, 금괴가 Normal 인데 0.75 로 느린 것이 그 증거다.
+// 등급과 배율이 같은 것을 두 번 말하다 보니 어긋날 수 있었고, 그걸 막으려고
+// 불일치 경고를 두 개 넣었다가 — 경고가 이 값의 유일한 소비자가 됐다.
+//
+// 지금은 이렇게 나뉜다:
+//   중량형인가        → Loot.Type.Heavy 태그 (ULootHeavyComponent 가 단다)
+//   얼마나 느려지는가 → FLootPhysicsData::CarrySpeedMultiplier
+//   점프 가능한가     → FLootPhysicsData::bAllowJumpWhileCarried
+//
+// 애니메이션 선택처럼 이산 등급이 필요해지면 Loot.Type.Light 태그를 추가한다.
+// 값을 되살리지 않는다 — 특성을 알리는 경로는 태그 하나로 유지한다.
 
 /**
  * 충돌 원인 구분 — FLootImpactEvent 에 실려 소음 파트로 전달된다.
@@ -40,21 +49,21 @@ struct FLootPhysicsData
 {
 	GENERATED_BODY()
 
-	/** 무게 등급 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Physics")
-	EWeightClass WeightClass = EWeightClass::Normal;
-
 	/** 물리 질량(kg). 던지기 충격량과 낙하 소음 계산에 사용 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Physics",
 		meta = (ClampMin = "0.1"))
 	float MassKg = 10.f;
 
-	/** 들기 위해 필요한 최소 인원 (기획서: 중량형 2) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
-		meta = (ClampMin = "1", ClampMax = "2"))
-	int32 RequiredCarriers = 1;
+	// 필요 인원(RequiredCarriers)은 여기 없다. 2인이 필요한 것은 중량형뿐이라
+	// FLootHeavyData 로 옮겨 DT_LootHeavy 에 행 이름으로 조인한다.
+	// 중량형이 아닌 노획물은 물어볼 것도 없이 1명이다.
 
-	/** 소지 중 이동 속도 배율 (기획서: 중량형 1인 시 0.3) */
+	/**
+	 * 소지 중 이동 속도 배율 (기획서: 중량형 1인 시 0.3)
+	 *
+	 * 중량형 표로 옮기지 않은 이유는 이것이 중량형 전용이 아니기 때문이다.
+	 * 금괴는 중량형이 아닌데도 0.75 로 느리다 — 무거우면 다 느리다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
 		meta = (ClampMin = "0.05", ClampMax = "1.0"))
 	float CarrySpeedMultiplier = 1.f;
