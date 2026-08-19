@@ -17,6 +17,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAlertLevelChanged,
 /** 게이지 값 변화. HUD 위젯용 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAlertGaugeChanged, float, NewGauge01);
 
+/** 병력 증원 발동. 몇 번째 증원인지(1부터)를 같이 준다. 경비 스포너가 구독해 1명씩 추가 스폰한다 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnReinforcementTriggered, int32, ReinforcementIndex);
+
 /**
  * 저택 전체의 경계도. GameState 에 런타임 부착되며 서버가 계산하고 전원에게 복제된다.
  *
@@ -87,11 +90,34 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Alert")
 	void ResetAlert();
 
+	/**
+	 * 경비 추격(Pursue 진입)이 시작될 때마다 부른다. 서버 전용.
+	 *
+	 * UAlertSettings::PursuitsPerReinforcement 번 누적될 때마다 OnReinforcementTriggered 를
+	 * 쏘고 카운트를 0으로 되돌린다 - 한 번만 터지고 끝나는 게 아니라, 계속 잡히면 계속 증원된다.
+	 * 아래 ReportNoiseDetected() 와는 별개 카운터라 서로 간섭하지 않는다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Alert")
+	void ReportPursuitStarted();
+
+	/**
+	 * 경비가 소음 인지 게이지(PerceptionMeterComponent)를 가득 채울 때마다 부른다. 서버 전용.
+	 *
+	 * UAlertSettings::NoiseDetectionsPerReinforcement 번 누적될 때마다 OnReinforcementTriggered 를
+	 * 쏘고 카운트를 0으로 되돌린다. ReportPursuitStarted() 와는 별개 카운터다 - 추격 2번과
+	 * 소음 감지 2번은 서로 섞이지 않고 각자 자기 임계값에 도달했을 때만 증원을 발동한다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Alert")
+	void ReportNoiseDetected();
+
 	UPROPERTY(BlueprintAssignable, Category = "Alert")
 	FOnAlertLevelChanged OnAlertLevelChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Alert")
 	FOnAlertGaugeChanged OnAlertGaugeChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Alert")
+	FOnReinforcementTriggered OnReinforcementTriggered;
 
 protected:
 	UFUNCTION()
@@ -157,6 +183,12 @@ private:
 	/** 현재 단계에 맞는 무소음 유예 */
 	float GetSilenceGrace() const;
 
+	/**
+	 * ReportPursuitStarted() / ReportNoiseDetected() 가 공유하는 로직.
+	 * Counter 를 올리고 Threshold 에 도달하면 0으로 되돌린 뒤 병력 증원을 발동한다.
+	 */
+	void ReportTowardReinforcement(int32& Counter, int32 Threshold, const TCHAR* SourceLabel);
+
 	/** 결과 화면 집계. PlayerState 는 매치 내내 살아 있으므로 하드 참조로 잡는다 */
 	UPROPERTY()
 	TMap<TObjectPtr<APlayerState>, float> NoiseContribution;
@@ -171,4 +203,13 @@ private:
 	EAlertLevel LastBroadcastLevel = EAlertLevel::Calm;
 
 	FDelegateHandle NoiseReportedHandle;
+
+	/** ReportPursuitStarted() 누적 카운트. PursuitsPerReinforcement 에 도달하면 0으로 되돌린다 */
+	int32 PursuitCount = 0;
+
+	/** ReportNoiseDetected() 누적 카운트. NoiseDetectionsPerReinforcement 에 도달하면 0으로 되돌린다 */
+	int32 NoiseDetectionCount = 0;
+
+	/** 지금까지 몇 번 증원을 발동했는지. OnReinforcementTriggered 에 몇 번째인지 실어 보낸다 */
+	int32 ReinforcementCount = 0;
 };

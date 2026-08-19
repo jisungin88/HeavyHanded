@@ -4,6 +4,7 @@
 #include "AITypes.h"
 #include "AI/GuardBlackboardKeys.h"
 #include "AI/GuardTypes.h"
+#include "Alert/AlertComponent.h"
 
 UBTService_UpdateDetectionGauge::UBTService_UpdateDetectionGauge()
 {
@@ -76,12 +77,23 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	}
 
 	// 임계값 통과는 상태 전환점이라 한 번씩만 남긴다 (매 틱 로그는 의미가 없다).
+	const bool bJustCrossedFull = (CurrentGauge < 100.f) && (NewGauge >= 100.f);
 	if ((CurrentGauge < 100.f) != (NewGauge < 100.f))
 	{
 		UE_LOG(LogGuardAI, Log, TEXT("[%s] 인지 게이지 %s (%.1f -> %.1f, 시야=%s)"),
 			*GetNameSafe(AIController->GetPawn()),
 			NewGauge >= 100.f ? TEXT("가득 참") : TEXT("임계값 아래로"),
 			CurrentGauge, NewGauge, bCanSeeTarget ? TEXT("있음") : TEXT("없음"));
+	}
+
+	// 시야를 든 채로(=실제 추격) 게이지가 막 가득 찬 순간만 "추격 시작"으로 센다.
+	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
+	if (bJustCrossedFull && bCanSeeTarget)
+	{
+		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
+		{
+			Alert->ReportPursuitStarted();
+		}
 	}
 
 	// 게이지가 이번 틱에 막 100을 넘겼고(직전 틱엔 100 미만), 타겟이 안 보이는 상황이면
