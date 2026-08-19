@@ -8,17 +8,25 @@
 /**
  * 불안정형 노획물의 설계값. (기획서 5장 — 기울기 60도 초과 시 내용물 유출)
  *
- * ULootStabilityComponent 가 아니라 ALootBase 가 들고 있고 컴포넌트는 읽기만 한다.
- * FLootPhysicsData 와 같은 구조다 — 값은 데이터, 행동은 컴포넌트.
+ * DT_LootStability 의 한 행이다. RowName 은 DT_LootCatalog 의 행 이름과 같다.
  *
- * [왜 컴포넌트에서 뺐나] 이 값들은 노획물마다 달라야 하는 설계 수치다.
- *   동전 자루와 물통은 새기 시작하는 각도도, 한 번에 잃는 비율도 달라야 한다.
- *   컴포넌트 안에 있으면 기획자가 BP 를 열어야 하고, BP 는 병합이 안 된다.
- *   파손형 수치(DamageImpulseThreshold, MaxImpactCount)는 이미 표에 있는데
- *   불안정형만 BP 에 남아 있는 비대칭도 여기서 없앤다.
+ * [왜 DT_LootCatalog 의 열이 아닌가]
+ *   이 9개 값을 읽는 것은 ULootStabilityComponent 뿐이다. 카탈로그의 열로 두면
+ *   불안정형이 아닌 노획물까지 전부 이 값을 들고 다니게 된다. 실제로 그랬는데
+ *   8행 × 9필드 = 72개 중 의미 있는 값이 1개(동전 자루의 SpillTiltAngle=50)였다.
+ *
+ *   나머지 71개는 기본값이 직렬화된 것일 뿐인데, 표에 숫자로 적혀 있으니
+ *   "이 물건도 기울면 새겠구나" 하고 읽히고, 실제로는 컴포넌트가 없어서 아무 일도
+ *   일어나지 않는다. 표를 나누면 이 표에 행이 있다는 것 자체가 곧 불안정형 명단이 된다.
+ *
+ * [카탈로그와의 관계는 상속이 아니라 조인이다]
+ *   FTableRowBase 상속은 '이 구조체를 표의 행으로 쓸 수 있다' 는 표시일 뿐이고
+ *   FLootDefinitionRow 와는 아무 관계도 없다. 두 표를 잇는 것은 행 이름 하나다.
+ *   그래서 카탈로그에서 행을 지워도 여기 행은 따라 지워지지 않는다 —
+ *   고아 행은 언리얼이 막아 주지 않으므로 ALootBase 가 경고로 잡는다.
  */
 USTRUCT(BlueprintType)
-struct FLootStabilityData
+struct FLootStabilityData : public FTableRowBase
 {
 	GENERATED_BODY()
 
@@ -88,31 +96,51 @@ struct FLootStabilityData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float MinValueRatio = 0.2f;
+};
+
+/**
+ * 파손형 노획물의 설계값. (기획서: 충격 3회 누적 시 파괴, 가치 0)
+ *
+ * DT_LootDurability 의 한 행이다. RowName 은 DT_LootCatalog 의 행 이름과 같다.
+ *
+ * [왜 FLootPhysicsData 에서 뺐나]
+ *   불안정형과 같은 이유인데 눈에 덜 띄었을 뿐이다. 이 둘을 읽는 것은
+ *   ULootDurabilityComponent 뿐인데, 무게·던지기 값들과 같은 구조체에 섞여 있어서
+ *   파손형이 아닌 노획물도 전부 들고 다녔다.
+ *
+ *   덕분에 경고도 못 넣었다. DamageImpulseThreshold 는 질량에 비례해서 전 행에
+ *   관례적으로 채워 두는 값이라 '기본값과 다르다' 가 착오의 신호가 되지 못했다.
+ *   표를 나누면 그 추측 자체가 필요 없어진다 — 행이 있으면 파손형인 것이다.
+ *
+ * [임계값이 두 개인 이유] ImpactReportThreshold 는 FLootPhysicsData 에 남는다.
+ *   그건 소음 파트에 알릴 최소 충격이라 모든 노획물이 쓰기 때문이다.
+ *   여기 있는 것은 '파손으로 칠 최소 충격' 이고 더 높게 잡힌다.
+ */
+USTRUCT(BlueprintType)
+struct FLootDurabilityData : public FTableRowBase
+{
+	GENERATED_BODY()
 
 	/**
-	 * 아무도 손대지 않은 상태인가.
+	 * 이 값 이상의 충격만 파손 카운트에 반영한다. 미만은 소리만 나고 물건은 멀쩡하다.
 	 *
-	 * "컴포넌트는 없는데 표에 수치만 적혀 있다" 를 잡는 데 쓴다. 그 경우 값은 들어오지만
-	 * 읽는 코드가 없어서 조용히 무시되는데, 기본값과 같은지를 봐야 '일부러 적은 것'과
-	 * '그냥 비워 둔 것'을 구별할 수 있다.
+	 * 임펄스는 대략 [질량(kg) x 낙하속도(cm/s)] 이고, 낙하속도는 sqrt(2 * 980 * 높이cm) 다.
+	 * 10kg 기준 실측: 100cm 낙하 5031 / 150cm 6497 / 300cm 9622.
+	 * 착지 후 튀는 충격은 500~900 대로 나온다.
 	 *
-	 * 기본값을 하나씩 비교하지 않고 기본 생성한 구조체와 맞추는 이유는, 위쪽 초기값을
-	 * 나중에 바꿔도 이 함수를 같이 고칠 필요가 없게 하기 위해서다.
+	 * 3000 은 그 사이를 가르는 값이다. 처음 잡았던 600 은 '툭 스침' 수준이라
+	 * 튕김까지 파손으로 세서 한 번 떨어뜨리면 목숨이 2개씩 날아갔다.
+	 *
+	 * [주의] 질량에 비례한다. DT_LootCatalog 에서 MassKg 를 바꾸면 같이 조정해야 한다.
 	 */
-	bool IsDefault() const
-	{
-		const FLootStabilityData Default;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability",
+		meta = (ClampMin = "0.0"))
+	float DamageImpulseThreshold = 3000.f;
 
-		return FMath::IsNearlyEqual(SpillTiltAngle,        Default.SpillTiltAngle)
-			&& FMath::IsNearlyEqual(SafeCarrySpeed,        Default.SafeCarrySpeed)
-			&& FMath::IsNearlyEqual(TiltGainPerSpeed,      Default.TiltGainPerSpeed)
-			&& FMath::IsNearlyEqual(TiltRecoverRate,       Default.TiltRecoverRate)
-			&& FMath::IsNearlyEqual(TiltDirectionTurnRate, Default.TiltDirectionTurnRate)
-			&& FMath::IsNearlyEqual(TiltGraceSeconds,      Default.TiltGraceSeconds)
-			&& FMath::IsNearlyEqual(SpillIntervalSeconds,  Default.SpillIntervalSeconds)
-			&& FMath::IsNearlyEqual(SpillValueLossRatio,   Default.SpillValueLossRatio)
-			&& FMath::IsNearlyEqual(MinValueRatio,         Default.MinValueRatio);
-	}
+	/** 이 횟수만큼 충격이 쌓이면 깨진다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability",
+		meta = (ClampMin = "1"))
+	int32 MaxImpactCount = 3;
 };
 
 /**
@@ -130,9 +158,17 @@ struct FLootStabilityData
  *   파손형·불안정형은 컴포넌트를 붙이는 것이 곧 선언이다 (BP 조합).
  *   여기에 "파손형인가" 같은 칸을 만들면 컴포넌트는 없는데 표에는 파손형인 상태가
  *   만들어지고, 둘 중 무엇이 진실인지 알 수 없게 된다.
- *   중량형만은 예외로 Physics.WeightClass 로 결정된다 — 전용 컴포넌트가 없기 때문이다.
  *
- * [행 이름] RowName 이 곧 노획물 ID 다. Loot_Museum_Vase 처럼 장소_물건 순으로 적는다.
+ *   중량형만은 아직 Physics.WeightClass 로 결정된다. 전용 컴포넌트가 없어서 생긴
+ *   임시 예외이고, ULootHeavyComponent 와 DT_LootHeavy 가 생기면 없앤다.
+ *   그때 규칙은 하나로 정리된다 — 컴포넌트가 특성을 선언하고, 같은 이름의 행이 수치를 준다.
+ *
+ * [행 이름] RowName 이 곧 노획물 ID 다. Loot_Vase 처럼 물건 이름만 적는다.
+ *   특성도 장소도 넣지 않는다 — 둘 다 다른 곳이 이미 알고 있어서 이름에 또 적으면
+ *   두 벌이 되고 한쪽만 바뀐다. 자세한 규칙은 Data/README.md 에 있다.
+ *
+ *   이 이름은 DT_LootStability / DT_LootDurability 의 조인 키이기도 하다.
+ *   그래서 한번 정하면 바꾸지 않는다. 바꾸면 표 세 개가 동시에 끊긴다.
  */
 USTRUCT(BlueprintType)
 struct FLootDefinitionRow : public FTableRowBase
@@ -164,19 +200,10 @@ struct FLootDefinitionRow : public FTableRowBase
 	 * 필드를 여기에 옮겨 적지 않고 기존 구조체를 통째로 품는다. 옮겨 적으면 같은 값이
 	 * 두 벌이 되고, 한쪽만 고쳤을 때 컴파일도 통과해서 발견이 늦어진다.
 	 *
-	 * [주의] DamageImpulseThreshold 는 질량에 비례한다. MassKg 를 바꾸면 이 값도
-	 *   같이 조정해야 한다 (10kg 기준 실측: 100cm 낙하 5031 / 150cm 6497 / 300cm 9622).
+	 * 특성별 수치(불안정형·파손형)는 여기 없다. 모든 노획물이 쓰는 값만 둔다 —
+	 * 그것이 이 표가 '카탈로그' 인 이유다. 특성 수치는 DT_LootStability /
+	 * DT_LootDurability 에 같은 행 이름으로 따로 적는다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
 	FLootPhysicsData Physics;
-
-	/**
-	 * 불안정형 수치. ULootStabilityComponent 를 붙인 노획물만 쓴다.
-	 *
-	 * 컴포넌트가 없는 행에도 칸은 남아 있는데, 채워도 아무 일이 일어나지 않는다.
-	 * 특성을 표에서 정하지 않는다는 원칙 때문이다 — 컴포넌트를 붙이는 것이 곧 선언이고,
-	 * 여기서 "불안정형인가" 를 또 정하면 둘 중 무엇이 진실인지 알 수 없게 된다.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
-	FLootStabilityData Stability;
 };

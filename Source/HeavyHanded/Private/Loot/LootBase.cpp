@@ -3,6 +3,7 @@
 #include "Components/InputComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Loot/LootLog.h"
+#include "Loot/LootSettings.h"           // 특성 표 경로 — 컴포넌트 누락 대조에 쓴다
 #include "Loot/LootTypes.h"              // FLootDefinitionRow — DT_LootCatalog 행
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -183,8 +184,9 @@ void ALootBase::ApplyLootDefinition()
         return;
     }
 
+    // 특성 수치(불안정형·파손형)는 여기서 반영하지 않는다.
+    // 각 컴포넌트가 같은 행 이름으로 자기 표를 직접 조회한다 — 안 붙은 노획물은 아예 모른다.
     PhysicsData     = Row->Physics;
-    StabilityData   = Row->Stability;
     BaseValue       = Row->BaseValue;
     LootDisplayName = Row->DisplayName;
 }
@@ -210,7 +212,6 @@ bool ALootBase::CanEditChange(const FProperty* InProperty) const
     static const FName TableOwned[] =
     {
         GET_MEMBER_NAME_CHECKED(ALootBase, PhysicsData),
-        GET_MEMBER_NAME_CHECKED(ALootBase, StabilityData),
         GET_MEMBER_NAME_CHECKED(ALootBase, BaseValue),
     };
 
@@ -231,29 +232,34 @@ bool ALootBase::CanEditChange(const FProperty* InProperty) const
 
 void ALootBase::WarnOnUnusedTypeData() const
 {
-    // 불안정형 수치는 ULootStabilityComponent 말고는 읽는 데가 없다.
-    // 기본값과 다르다는 것은 누군가 일부러 적었다는 뜻이므로, 컴포넌트가 없으면 착오다.
-    if (!StabilityData.IsDefault() && !LootTypeTags.HasTag(HHTags::Loot_Type_Unstable))
+    const FName RowName = GetLootRowName();
+    if (RowName.IsNone())
     {
-        UE_LOG(LogLoot, Warning,
-            TEXT("[Loot:%s] 표에 불안정형 수치(Stability)가 적혀 있는데 ULootStabilityComponent 가 없다 "
-                 "— 이 값들은 아무도 읽지 않아 기울여도 새지 않는다. "
-                 "BP 에 컴포넌트를 추가하거나 표의 Stability 를 기본값으로 되돌릴 것"),
-            *GetName());
+        // 표를 아예 안 쓰는 노획물이다. 조인할 대상이 없으니 볼 것도 없다.
+        return;
     }
 
-    // DamageImpulseThreshold 는 일부러 보지 않는다.
-    //   질량에 비례하는 값이라 파손형이 아닌 노획물에도 관례적으로 채워 두기 때문에,
-    //   '기본값과 다르다'가 착오의 신호가 되지 못한다. 경고가 전부 거짓양성이 된다.
-    //   MaxImpactCount 는 파손 컴포넌트 외에 쓰는 데가 없어 바꿨다면 의도한 것으로 본다.
-    const FLootPhysicsData DefaultPhysics;
-    if (PhysicsData.MaxImpactCount != DefaultPhysics.MaxImpactCount
+    const ULootSettings* Settings = ULootSettings::Get();
+
+    // 특성 표에 행이 있다는 것은 '이 물건을 그 특성으로 설계했다' 는 뜻이다.
+    // 그런데 컴포넌트가 없으면 그 설계는 아무 데도 반영되지 않는다.
+    // 예전처럼 수치가 기본값인지 추측할 필요가 없어져서 파손형까지 같이 볼 수 있게 됐다.
+    if (ULootSettings::FindTraitRow<FLootStabilityData>(Settings->StabilityTable, RowName, GetName())
+        && !LootTypeTags.HasTag(HHTags::Loot_Type_Unstable))
+    {
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] DT_LootStability 에 '%s' 행이 있는데 ULootStabilityComponent 가 없다 "
+                 "— 기울여도 새지 않는다. BP 에 컴포넌트를 추가하거나 표에서 행을 지울 것"),
+            *GetName(), *RowName.ToString());
+    }
+
+    if (ULootSettings::FindTraitRow<FLootDurabilityData>(Settings->DurabilityTable, RowName, GetName())
         && !LootTypeTags.HasTag(HHTags::Loot_Type_Fragile))
     {
         UE_LOG(LogLoot, Warning,
-            TEXT("[Loot:%s] 표의 MaxImpactCount 가 %d 인데 ULootDurabilityComponent 가 없다 "
-                 "— 충격을 세는 코드가 없어 이 물건은 깨지지 않는다"),
-            *GetName(), PhysicsData.MaxImpactCount);
+            TEXT("[Loot:%s] DT_LootDurability 에 '%s' 행이 있는데 ULootDurabilityComponent 가 없다 "
+                 "— 충격을 세는 코드가 없어 깨지지 않는다. BP 에 컴포넌트를 추가하거나 표에서 행을 지울 것"),
+            *GetName(), *RowName.ToString());
     }
 }
 

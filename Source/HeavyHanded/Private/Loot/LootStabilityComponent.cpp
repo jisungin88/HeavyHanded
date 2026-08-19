@@ -6,20 +6,52 @@
 #include "GameFramework/Pawn.h"
 #include "Loot/LootBase.h"
 #include "Loot/LootLog.h"
+#include "Loot/LootSettings.h"
 #include "Loot/LootTypes.h"
 #include "Net/UnrealNetwork.h"
 
-const FLootStabilityData& ULootStabilityComponent::GetData() const
+void ULootStabilityComponent::ResolveData()
 {
-    if (IsValid(OwnerLoot))
+    if (bDataResolved)
     {
-        return OwnerLoot->GetStabilityData();
+        return;
+    }
+    bDataResolved = true;
+
+    if (!IsValid(OwnerLoot))
+    {
+        OwnerLoot = Cast<ALootBase>(GetOwner());
+        if (!IsValid(OwnerLoot))
+        {
+            return;
+        }
     }
 
-    // 소유자가 없는 경우는 BeginPlay 전이거나 잘못 붙인 상태다. 둘 다 판정이 돌지 않지만,
-    // 호출부마다 유효성 검사를 넣지 않아도 되도록 기본값을 돌려준다.
-    static const FLootStabilityData Fallback;
-    return Fallback;
+    const FName RowName = OwnerLoot->GetLootRowName();
+
+    // 표를 안 쓰는 노획물이다. BP 에 적힌 Data 를 그대로 쓴다 — 실험물용 폴백이다.
+    if (RowName.IsNone())
+    {
+        return;
+    }
+
+    const FLootStabilityData* Row = ULootSettings::FindTraitRow<FLootStabilityData>(
+        ULootSettings::Get()->StabilityTable, RowName, GetName());
+
+    if (!Row)
+    {
+        // 컴포넌트가 붙었다는 것은 불안정형으로 만들겠다는 선언인데 표에 행이 없다.
+        // 기본값(60도)으로 돌기 때문에 조용히 넘어가면 "왜 다른 물건이랑 똑같지" 가 된다.
+        // 반대 방향(행은 있는데 컴포넌트가 없다)은 ALootBase 가 잡는다.
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] ULootStabilityComponent 가 붙어 있는데 DT_LootStability 에 '%s' 행이 없다 "
+                 "— 기본값으로 돈다. 표에 행을 추가하거나 Project Settings > Game > Loot 에서 "
+                 "Stability Table 이 지정돼 있는지 확인할 것"),
+            *OwnerLoot->GetName(), *RowName.ToString());
+        return;
+    }
+
+    Data = *Row;
 }
 
 ULootStabilityComponent::ULootStabilityComponent()
@@ -56,6 +88,10 @@ void ULootStabilityComponent::BeginPlay()
 
     // 이 컴포넌트가 붙어 있다는 것이 곧 "불안정형" 이라는 선언이다.
     OwnerLoot->AddLootTypeTag(HHTags::Loot_Type_Unstable);
+
+    // 수치는 그다음에 채운다. ALootBase::PostInitializeComponents 가 이미 돌아서
+    // 노획물의 행 이름이 확정돼 있다.
+    ResolveData();
 
     // 판정도 기울기 계산도 서버 몫이다. 클라이언트는 복제된 값으로 연출만 맞춘다.
     SetComponentTickEnabled(OwnerLoot->HasAuthority());
@@ -100,7 +136,6 @@ float ULootStabilityComponent::UpdateCarriedTilt(const APawn* Carrier, float Del
 {
     UpdateTiltDirection(Carrier, DeltaTime);
 
-    const FLootStabilityData& Data = GetData();
 
     // 수직 속도는 빼고 본다. 점프나 계단 낙하로 내용물이 쏟아지는 것은 이 규칙의 의도가 아니다.
     const float Speed = Carrier->GetVelocity().Size2D();
@@ -134,7 +169,6 @@ float ULootStabilityComponent::GetPhysicalTiltDegrees() const
 
 void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bool bUseGrace)
 {
-    const FLootStabilityData& Data = GetData();
 
     if (TiltDegrees < Data.SpillTiltAngle)
     {
@@ -169,7 +203,6 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 
 void ULootStabilityComponent::Spill(float TiltDegrees)
 {
-    const FLootStabilityData& Data = GetData();
 
     const int32 CurrentValue = OwnerLoot->GetCurrentValue();
     const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * Data.MinValueRatio);
@@ -229,7 +262,7 @@ void ULootStabilityComponent::UpdateTiltDirection(const APawn* Carrier, float De
 
     // 방향을 즉시 바꾸면 좌우로 왔다 갔다 할 때 물건이 순간이동하듯 꺾인다.
     TiltDirection = FMath::VInterpNormalRotationTo(
-        TiltDirection, MoveDirection, DeltaTime, GetData().TiltDirectionTurnRate);
+        TiltDirection, MoveDirection, DeltaTime, Data.TiltDirectionTurnRate);
 }
 
 void ULootStabilityComponent::ApplyCarriedLean(float TiltDegrees)
@@ -268,7 +301,7 @@ void ULootStabilityComponent::ApplyCarriedLean(float TiltDegrees)
 
 void ULootStabilityComponent::PushReplicatedTilt(float TiltDegrees)
 {
-    const float SpillTiltAngle = GetData().SpillTiltAngle;
+    const float SpillTiltAngle = Data.SpillTiltAngle;
 
     const float Tilt01 = (SpillTiltAngle > 0.f)
         ? FMath::Clamp(TiltDegrees / SpillTiltAngle, 0.f, 1.f) : 0.f;

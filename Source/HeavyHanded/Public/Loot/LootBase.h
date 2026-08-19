@@ -6,7 +6,7 @@
 #include "GameplayTagAssetInterface.h"   // 부모 인터페이스 — 전방 선언 불가
 #include "GameplayTagContainer.h"        // FGameplayTagContainer 를 값으로 보유
 #include "Engine/DataTable.h"            // FDataTableRowHandle 을 값으로 보유
-#include "Loot/LootTypes.h"              // FLootStabilityData 를 값으로 보유
+#include "Loot/LootTypes.h"              // FLootDefinitionRow 를 조회한다
 #include "Interfaces/Carryable.h"
 #include "LootBase.generated.h"
 
@@ -176,16 +176,17 @@ public:
      */
     FOnLootImpactSignature OnLootImpact;
 
-    /** 물리·운반 수치. 파손 컴포넌트 등이 임계값을 읽어간다 */
+    /** 모든 노획물이 쓰는 물리·운반 수치. 특성별 수치는 각 컴포넌트가 자기 표에서 읽는다 */
     const FLootPhysicsData& GetPhysicsData() const { return PhysicsData; }
 
     /**
-     * 불안정형 수치. ULootStabilityComponent 가 읽어간다.
+     * 이 노획물이 DT_LootCatalog 에서 쓰는 행 이름. 지정하지 않았으면 NAME_None.
      *
-     * 컴포넌트가 아니라 여기 있는 이유는 FLootPhysicsData 와 같다 —
-     * 설계 수치는 표(DT_LootCatalog)에서 오고, 컴포넌트는 그 값으로 행동만 한다.
+     * 특성 컴포넌트(불안정형·파손형)가 자기 표를 조회할 때 조인 키로 쓴다.
+     * 컴포넌트에 별도 FDataTableRowHandle 을 두지 않는 이유는, 같은 이름을 두 번 적게 되고
+     * 빠뜨리면 경고 없이 기본값으로 돌기 때문이다. 여기서 한 번만 정한다.
      */
-    const FLootStabilityData& GetStabilityData() const { return StabilityData; }
+    FName GetLootRowName() const { return LootDefinition.RowName; }
 
     /**
      * 마지막으로 이 노획물을 든 사람. 놓거나 던진 뒤에도 남는다. 아무도 든 적 없으면 nullptr.
@@ -293,13 +294,6 @@ protected:
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
     FLootPhysicsData PhysicsData;
-
-    /**
-     * 불안정형 수치. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다 (위와 같이 잠긴다).
-     * ULootStabilityComponent 를 붙이지 않은 노획물에서는 쓰이지 않는다.
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
-    FLootStabilityData StabilityData;
 
     /**
      * 화면 표시 이름. LootDefinition 행에서 온다.
@@ -525,11 +519,16 @@ private:
     void ApplyLootDefinition();
 
     /**
-     * 표에 특성 수치를 적어 뒀는데 그 특성의 컴포넌트가 없는 경우를 경고한다. (서버 전용)
+     * 특성 표에 행이 있는데 그 특성의 컴포넌트가 없는 경우를 경고한다. (서버 전용)
      *
-     * 컴포넌트를 붙이는 것이 곧 특성 선언이라, 표에만 적으면 값은 들어오지만 읽는 코드가
-     * 아예 돌지 않는다. 에러도 경고도 없어서 "왜 안 새지" 하며 수치를 계속 만지게 되는데
-     * 원인은 수치가 아니라 BP 다. 그 착각을 끊는 것이 목적이다.
+     * 컴포넌트를 붙이는 것이 곧 특성 선언이라, 표에만 적으면 아무 일도 일어나지 않는다.
+     * 에러도 경고도 없어서 "왜 안 새지" 하며 수치를 계속 만지게 되는데 원인은 수치가 아니라 BP 다.
+     *
+     * 반대 방향(컴포넌트는 있는데 행이 없다)은 각 컴포넌트가 자기 BeginPlay 에서 잡는다.
+     * 양쪽이 서로를 확인하는 구조라 한쪽만 있어도 반드시 로그가 남는다.
+     *
+     * 표를 나누기 전에는 '수치가 기본값과 다른가' 로 추측했다. 지금은 행의 유무만 보면 되므로
+     * 이진 판정이고, 그래서 파손형까지 검사할 수 있게 됐다 (예전에는 거짓양성 때문에 포기했다).
      *
      * 컴포넌트가 자기 태그를 등록한 뒤에 불러야 한다 (Super::BeginPlay 이후).
      */

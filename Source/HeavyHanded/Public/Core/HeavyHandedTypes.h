@@ -144,26 +144,9 @@ struct FLootPhysicsData
         meta = (ClampMin = "0.0"))
     float ImpactReportThreshold = 200.f;
 
-    /**
-     * 이 값 이상의 충격만 파손 카운트에 반영한다.
-     *
-     * 임펄스는 대략 [질량(kg) x 낙하속도(cm/s)] 이고, 낙하속도는 sqrt(2 * 980 * 높이cm) 다.
-     * 10kg 기준 실측: 100cm 낙하 5031 / 150cm 6497 / 300cm 9622.
-     * 착지 후 튀는 충격은 500~900 대로 나온다.
-     *
-     * 3000 은 그 사이를 가르는 값이다. 처음 잡았던 600 은 '툭 스침' 수준이라
-     * 튕김까지 파손으로 세서 한 번 떨어뜨리면 목숨이 2개씩 날아갔다.
-     *
-     * [주의] 임펄스는 질량에 비례한다. 무게가 다른 노획물은 이 값도 같이 조정해야 한다.
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability",
-        meta = (ClampMin = "0.0"))
-    float DamageImpulseThreshold = 3000.f;
-
-    /** 파괴까지 필요한 충격 누적 횟수 (기획서: 파손형 3) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability",
-        meta = (ClampMin = "1"))
-    int32 MaxImpactCount = 3;
+    // 파손 수치(DamageImpulseThreshold / MaxImpactCount)는 여기 없다.
+    // ULootDurabilityComponent 만 읽는 값이라 파손형이 아닌 노획물까지 들고 다닐 이유가 없다.
+    // FLootDurabilityData 로 옮겨 DT_LootDurability 에 행 이름으로 조인한다.
 };
 
 /**

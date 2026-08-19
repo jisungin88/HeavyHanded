@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Loot/LootTypes.h"              // FLootStabilityData 를 값으로 보유 — 전방 선언 불가
 #include "LootStabilityComponent.generated.h"
 
 class ALootBase;
@@ -55,15 +56,20 @@ protected:
         FActorComponentTickFunction* ThisTickFunction) override;
 
     /**
-     * 설계 수치는 ALootBase 가 FLootStabilityData 로 들고 있다. 여기서는 읽기만 한다.
+     * 설계 수치. DT_LootStability 에서 노획물의 행 이름으로 찾아 채운다.
      *
-     * 컴포넌트에 UPROPERTY 로 두면 기획자가 값 하나를 고치려고 BP 를 열어야 하고,
-     * BP 는 uasset 이라 병합이 안 된다. 표(DT_LootCatalog)에서 오게 하려고 액터로 옮겼다.
-     * FLootPhysicsData 와 같은 구조다 — 값은 데이터, 행동은 컴포넌트.
+     * [왜 컴포넌트가 직접 조회하나]
+     *   이 값을 읽는 것은 여기뿐이다. 예전처럼 ALootBase 가 들고 있으면 불안정형이 아닌
+     *   노획물까지 전부 9개 필드를 갖게 되고, 카탈로그 표에도 그 열이 생겨서
+     *   "이 물건도 기울면 새나?" 로 읽힌다.
      *
-     * OwnerLoot 가 없으면 기본값 구조체를 돌려주므로 호출 전에 검사할 필요가 없다.
+     * [BP 에서 고칠 수 있게 열어 두는 이유]
+     *   표에 행이 없으면 여기 적힌 값이 그대로 쓰인다. ALootBase 가 PhysicsData 에 대해
+     *   하는 것과 같은 폴백이고, 표에 안 올린 실험물을 만들 길이다.
+     *   행이 있으면 ResolveData 가 덮어쓰므로 여기 값은 무시된다.
      */
-    const struct FLootStabilityData& GetData() const;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability")
+    FLootStabilityData Data;
 
     /**
      * 소지 중 기울기가 바뀔 때 호출된다. (모든 머신)
@@ -81,6 +87,14 @@ protected:
     void OnSpilled(int32 NewSpillCount, float TiltDegrees);
 
 private:
+    /**
+     * DT_LootStability 에서 자기 행을 찾아 Data 를 채운다. 한 번만 실제로 돈다.
+     *
+     * 클라이언트에서도 부른다. 표 조회는 모든 머신에서 같은 답이 나오는 순수 계산이라
+     * 수치를 복제할 이유가 없다 — 복제하는 것은 결과(기울기·유출 횟수)뿐이다.
+     */
+    void ResolveData();
+
     /** 소지 중 기울기를 이동에서 만든다. 반환값은 현재 기울기(도) */
     float UpdateCarriedTilt(const APawn* Carrier, float DeltaTime);
 
@@ -111,6 +125,9 @@ private:
     /** 소유 노획물. UPROPERTY 가 없으면 GC 가 회수한 뒤 엉뚱한 곳에서 크래시한다 */
     UPROPERTY()
     TObjectPtr<ALootBase> OwnerLoot;
+
+    /** ResolveData 가 이미 돌았는가. 표 조회를 매번 반복하지 않기 위한 것이다 */
+    bool bDataResolved = false;
 
     /**
      * 소지 중 누적된 기울기(도). 서버에서만 쓴다.

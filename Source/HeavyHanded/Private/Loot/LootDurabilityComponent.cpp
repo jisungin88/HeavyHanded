@@ -8,6 +8,7 @@
 #include "GameFramework/Pawn.h"
 #include "Loot/LootBase.h"
 #include "Loot/LootLog.h"
+#include "Loot/LootSettings.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -28,6 +29,50 @@ void ULootDurabilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
     DOREPLIFETIME(ULootDurabilityComponent, bIsBroken);
 }
 
+void ULootDurabilityComponent::ResolveData()
+{
+    if (bDataResolved)
+    {
+        return;
+    }
+    bDataResolved = true;
+
+    if (!IsValid(OwnerLoot))
+    {
+        OwnerLoot = Cast<ALootBase>(GetOwner());
+        if (!IsValid(OwnerLoot))
+        {
+            return;
+        }
+    }
+
+    const FName RowName = OwnerLoot->GetLootRowName();
+
+    // 표를 안 쓰는 노획물이다. BP 에 적힌 Data 를 그대로 쓴다 — 실험물용 폴백이다.
+    if (RowName.IsNone())
+    {
+        return;
+    }
+
+    const FLootDurabilityData* Row = ULootSettings::FindTraitRow<FLootDurabilityData>(
+        ULootSettings::Get()->DurabilityTable, RowName, GetName());
+
+    if (!Row)
+    {
+        // 컴포넌트가 붙었다는 것은 파손형으로 만들겠다는 선언인데 표에 행이 없다.
+        // 기본값(3000/3회)으로 도는데, 임계값은 질량에 비례해야 해서 무거운 물건이면
+        // 살짝만 부딪혀도 깨지고 가벼운 물건이면 아무리 던져도 안 깨진다.
+        // 반대 방향(행은 있는데 컴포넌트가 없다)은 ALootBase 가 잡는다.
+        UE_LOG(LogLoot, Warning,
+            TEXT("[Loot:%s] ULootDurabilityComponent 가 붙어 있는데 DT_LootDurability 에 '%s' 행이 없다 "
+                 "— 기본값(%.0f / %d회)으로 돈다. 임계값은 질량에 비례해야 하므로 표에 행을 추가할 것"),
+            *OwnerLoot->GetName(), *RowName.ToString(), Data.DamageImpulseThreshold, Data.MaxImpactCount);
+        return;
+    }
+
+    Data = *Row;
+}
+
 void ULootDurabilityComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -35,12 +80,14 @@ void ULootDurabilityComponent::BeginPlay()
     OwnerLoot = Cast<ALootBase>(GetOwner());
     if (!IsValid(OwnerLoot))
     {
-        // 수치를 ALootBase 의 FLootPhysicsData 에서 읽으므로 다른 액터에는 붙을 수 없다.
+        // 충격 이벤트·가치·행 이름을 전부 ALootBase 에서 읽으므로 다른 액터에는 붙을 수 없다.
         UE_LOG(LogLoot, Warning,
             TEXT("[%s] ULootDurabilityComponent 는 ALootBase 에만 붙일 수 있다. 파손 판정이 비활성화된다."),
             *GetNameSafe(GetOwner()));
         return;
     }
+
+    ResolveData();
 
     // 확정 충격은 서버에서만 발생한다. 클라이언트는 복제된 값으로 연출만 맞춘다.
     if (OwnerLoot->HasAuthority())
@@ -96,8 +143,6 @@ void ULootDurabilityComponent::HandleLootImpact(const FLootImpactEvent& Event)
         }
         return;
     }
-
-    const FLootPhysicsData& Data = OwnerLoot->GetPhysicsData();
 
     // 여기까지 온 충격은 이미 '소음으로 알릴 만한' 크기다.
     // 그렇다고 다 파손은 아니다. 파손 임계값은 따로 더 높게 잡혀 있다.
@@ -208,14 +253,11 @@ void ULootDurabilityComponent::DestroyOwnerLoot()
 
 void ULootDurabilityComponent::OnRep_ImpactCount()
 {
-    if (!IsValid(OwnerLoot))
-    {
-        // 초기 복제는 BeginPlay 보다 먼저 도착할 수 있다. 그때는 여기서 해결한다.
-        OwnerLoot = Cast<ALootBase>(GetOwner());
-    }
+    // 초기 복제는 BeginPlay 보다 먼저 도착할 수 있다. 그때는 여기서 해결한다.
+    // ResolveData 가 OwnerLoot 확보까지 같이 하고, 두 번째부터는 즉시 반환한다.
+    ResolveData();
 
-    const int32 MaxCount = IsValid(OwnerLoot) ? OwnerLoot->GetPhysicsData().MaxImpactCount : 0;
-    OnDamageAccumulated(ImpactCount, MaxCount);
+    OnDamageAccumulated(ImpactCount, Data.MaxImpactCount);
 }
 
 void ULootDurabilityComponent::OnRep_IsBroken()

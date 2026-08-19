@@ -13,6 +13,44 @@ CSV 는 텍스트라 git 이 줄 단위로 diff 를 보여주고, 서로 다른 
 `Content/` 밖에 두는 이유는 쿠킹 대상에서 빼기 위해서다. 게임에 들어가는 것은
 임포트된 uasset 이고, CSV 는 소스일 뿐이다.
 
+## 표가 여러 개인 이유 — 상속이 아니라 조인이다
+
+노획물 수치는 표 하나가 아니라 **공통 표 하나 + 특성별 표 여러 개**로 나뉜다.
+
+```
+DT_LootCatalog                    DT_LootStability            DT_LootDurability
+─────────────────────────         ──────────────────          ──────────────────
+Loot_Candlestick  은촛대 $800     Loot_CoinBag  50 …          Loot_Painting  1200  2
+Loot_CoinBag      자루  $1000  ←── 행 이름이 같다
+Loot_Crown        왕관  $4000                                 Loot_Vase      2400  3
+Loot_GoldBar      금괴  $3000
+Loot_LargeSafe    금고  $15000
+Loot_Painting     초상화 $2500 ←──────────────────────────────── 행 이름이 같다
+Loot_Statue       청동상 $5000
+Loot_Vase         백자  $1500  ←──────────────────────────────── 행 이름이 같다
+
+8행 (모든 노획물)                 1행 (불안정형만)             2행 (파손형만)
+```
+
+**표 사이에 부모/자식 관계는 없다.** 셋은 대등한 별개의 파일이고, 이어주는 것은
+행 이름이 같다는 약속 하나뿐이다. 관계형 DB 의 조인과 같다. 그래서
+
+- 특성 표에는 `DisplayName`·`BaseValue` 같은 열이 **없다.** 물려받지 않는다.
+- 카탈로그에서 행을 지워도 특성 표의 행은 **따라 지워지지 않는다.** 고아 행이 조용히 남고,
+  언리얼이 막아 주지 않으므로 코드가 경고로 잡는다.
+
+**왜 나눴나.** 예전에는 불안정형 9개 값이 카탈로그의 열이었는데, 8행 × 9필드 = 72개 중
+의미 있는 값이 1개(동전 자루의 `SpillTiltAngle=50`)였다. 나머지 71개는 기본값이
+직렬화된 것일 뿐인데 표에 숫자로 적혀 있으니 "이 물건도 기울면 새겠구나" 로 읽혔다.
+파손형 2개 값도 `Physics` 안에 섞여 있어서 같은 문제를 겪었고, 무게·던지기 값 사이에
+끼어 있어 눈에 덜 띄었을 뿐이다.
+
+나누고 나면 **표에 행이 있다는 것 자체가 그 특성의 명단**이 된다.
+`DT_LootStability` 를 열면 불안정형이 무엇인지 한눈에 보인다.
+
+> 중량형은 아직 `DT_LootCatalog` 의 `Physics.WeightClass` 로 정한다. 전용 컴포넌트가
+> 없어서 생긴 임시 예외이고, `ULootHeavyComponent` 와 `DT_LootHeavy` 가 생기면 없앤다.
+
 ## 작업 순서
 
 **값을 고칠 때**
@@ -31,25 +69,30 @@ CSV 는 UTF-8(BOM 포함)이라 엑셀에서 한글이 깨지지 않는다.
 
 *조합이 같으면* (메시와 수치만 다르다)
 
-1. 표에 행을 추가한다 (이름 규칙은 아래)
-2. 비슷한 `BP_Loot_*` 을 복제하고 메시를 교체한다
-3. 디테일의 `Loot|Data > Loot Definition` 에서 새 행을 고른다
+1. `DT_LootCatalog` 에 행을 추가한다 (이름 규칙은 아래)
+2. **특성이 있으면 같은 이름으로 특성 표에도 행을 추가한다** (아래 표 참고)
+3. 비슷한 `BP_Loot_*` 을 복제하고 메시를 교체한다
+4. 디테일의 `Loot|Data > Loot Definition` 에서 새 행을 고른다
 
 *새로운 조합이면* (예: 파손형이면서 중량형)
 
-새 BP 를 만들고 아래대로 컴포넌트를 붙인 뒤 위 3번을 한다.
+새 BP 를 만들고 아래대로 컴포넌트를 붙인 뒤 위 4번을 한다.
 **태그는 손으로 달지 않는다** — 컴포넌트가 BeginPlay 에서 자기 태그를 등록한다.
 그래서 "컴포넌트는 있는데 태그가 없는" 상태가 생기지 않는다.
 
-| 만들 것 | 붙일 컴포넌트 | 자동으로 붙는 태그 |
-|---|---|---|
-| 파손형 | `LootDurabilityComponent` | `Loot.Type.Fragile` |
-| 불안정형 | `LootStabilityComponent` | `Loot.Type.Unstable` |
-| 중량형 | 없음 (표에서 `WeightClass=Heavy`) | `Loot.Type.Heavy` |
-| 평범 | 없음 | `Loot.Type` |
+| 만들 것 | 붙일 컴포넌트 | 행을 추가할 표 | 자동으로 붙는 태그 |
+|---|---|---|---|
+| 파손형 | `LootDurabilityComponent` | `DT_LootDurability` | `Loot.Type.Fragile` |
+| 불안정형 | `LootStabilityComponent` | `DT_LootStability` | `Loot.Type.Unstable` |
+| 중량형 | 없음 (표에서 `WeightClass=Heavy`) | — | `Loot.Type.Heavy` |
+| 평범 | 없음 | — | `Loot.Type` |
+
+**컴포넌트와 행은 둘 다 있어야 한다.** 하나만 있으면 PIE 로그에 경고가 뜬다.
+어느 쪽이 빠졌는지도 메시지가 알려준다.
 
 상속이 아니라 조합이라 특성을 섞어도 클래스가 늘어나지 않는다.
-파손형 + 중량형은 `LootDurabilityComponent` 를 붙이고 표에서 `WeightClass=Heavy` 로 두면 된다.
+파손형 + 중량형은 `LootDurabilityComponent` 를 붙이고 `DT_LootDurability` 에 행을 넣은 뒤
+카탈로그에서 `WeightClass=Heavy` 로 두면 된다.
 
 ## 행 이름 규칙
 
@@ -86,23 +129,27 @@ Loot_Vase_Museum        박물관 소장품 — 더 비싸고 더 잘 깨진다
 
 ## 파일
 
-| CSV | DataTable | 행 구조체 | 담당 |
+모든 표는 `Content/HeavyHanded/Data/DataTables/` 아래에 있다.
+
+| CSV | DataTable | 행 구조체 | 담는 것 |
 |---|---|---|---|
-| `LootCatalog.csv` | `Content/HeavyHanded/Data/DataTables/DT_LootCatalog` | `FLootDefinitionRow` | 김민준 |
+| `LootCatalog.csv` | `DT_LootCatalog` | `FLootDefinitionRow` | 모든 노획물의 이름·가치·물리 |
+| `LootStability.csv` | `DT_LootStability` | `FLootStabilityData` | 불안정형만 |
+| `LootDurability.csv` | `DT_LootDurability` | `FLootDurabilityData` | 파손형만 |
 
-## 주의
+전부 김민준 담당이다.
 
-`Physics` 와 `Stability` 열은 구조체가 통째로 들어가 있어서 괄호 안에 필드가 나열된다.
-엑셀에서 이 칸을 직접 고치는 것은 권하지 않는다 — 괄호나 쉼표 하나가 어긋나면
-그 행 전체가 기본값으로 임포트된다. **물리 수치는 에디터에서 고치는 것이 안전하다.**
+`DT_LootCatalog` 은 BP 마다 `Loot Definition` 에서 행을 고르지만, 특성 표는 고를 것이
+없어서 **Project Settings → Game → Loot** 에 프로젝트 전체 기준으로 한 번만 지정한다.
+행 이름을 카탈로그와 공유하기 때문이다. 표를 새로 만들면 여기 연결을 잊지 말 것 —
+비어 있으면 특성 수치가 조용히 기본값으로 돈다.
 
 ## BP 에서 수치를 고칠 수 없는 이유
 
-`Loot Definition` 에 행을 지정한 BP 는 디테일 패널에서 아래 세 칸이 **회색으로 잠긴다.**
+`Loot Definition` 에 행을 지정한 BP 는 디테일 패널에서 아래 두 칸이 **회색으로 잠긴다.**
 
 ```
 Loot > Physics Data
-Loot > Stability Data
 Loot|Value > Base Value
 ```
 
@@ -112,26 +159,46 @@ Loot|Value > Base Value
 **회색으로 보이는 숫자는 마지막으로 저장된 BP 값이지 표의 값이 아니다.**
 수치를 확인할 때는 `Loot Definition` 옆 화살표로 `DT_LootCatalog` 를 열어서 본다.
 
-행을 비우면 세 칸이 다시 열린다. 표에 올리지 않은 일회성 실험물은 그렇게 만들면 된다.
+행을 비우면 두 칸이 다시 열린다. 표에 올리지 않은 일회성 실험물은 그렇게 만들면 된다.
 
 `Loot|Carry`, `Loot|Impact`, `Loot|Debug` 계열은 표에 없는 값이라 계속 BP 에서 고친다.
 
-## 주의 (계속)
+**특성 컴포넌트의 `Data` 칸은 잠기지 않는다.** 표에 행이 있으면 스폰 시 덮어쓰이므로
+거기 적힌 값은 무시된다. 잠그지 않은 것은 행이 없을 때 그대로 폴백으로 쓰이기 때문이다.
+액터의 두 칸과 같은 규칙인데, 잠금이 아직 액터에만 걸려 있다.
 
-`Stability` 는 `ULootStabilityComponent` 를 붙인 노획물(불안정형)만 쓴다.
-컴포넌트가 없는 행에도 칸은 있지만 채워도 아무 일이 일어나지 않는다 —
-특성은 표가 아니라 컴포넌트 조합이 정하기 때문이다.
+## 경고 메시지
 
-그 착오를 잡으려고 `ALootBase` 가 스폰 시 경고를 찍는다. PIE 로그에 이게 뜨면
-표가 아니라 BP 를 봐야 한다는 뜻이다.
+컴포넌트와 표의 행은 **둘 다 있어야** 특성이 동작한다. 하나만 있으면 PIE 로그에 경고가 뜬다.
+양쪽이 서로를 확인하기 때문에 어느 쪽이 빠져도 반드시 걸린다.
+
+*행은 있는데 컴포넌트가 없다* — `ALootBase` 가 찍는다. **BP 를 봐야 한다.**
 
 ```
-[Loot:...] 표에 불안정형 수치(Stability)가 적혀 있는데 ULootStabilityComponent 가 없다
-[Loot:...] 표의 MaxImpactCount 가 2 인데 ULootDurabilityComponent 가 없다
+[Loot:...] DT_LootStability 에 'Loot_CoinBag' 행이 있는데 ULootStabilityComponent 가 없다
+[Loot:...] DT_LootDurability 에 'Loot_Vase' 행이 있는데 ULootDurabilityComponent 가 없다
 ```
 
-반대로 `Loot|Tags > Loot Type Tags` 에 `Loot.Type` 하나만 있으면 컴포넌트를 빼먹은 것이다.
+*컴포넌트는 있는데 행이 없다* — 각 컴포넌트가 찍는다. **표를 봐야 한다.**
+Project Settings 의 표 연결이 비어 있어도 같은 메시지가 나온다.
+
+```
+[Loot:...] ULootStabilityComponent 가 붙어 있는데 DT_LootStability 에 '...' 행이 없다
+[Loot:...] ULootDurabilityComponent 가 붙어 있는데 DT_LootDurability 에 '...' 행이 없다
+```
+
+`Loot|Tags > Loot Type Tags` 에 `Loot.Type` 하나만 있으면 컴포넌트를 빼먹은 것이다.
 파손형이면 `Loot.Type.Fragile`, 불안정형이면 `Loot.Type.Unstable` 이 자동으로 붙어 있어야 한다.
 
-`DamageImpulseThreshold` 는 질량에 비례한다. `MassKg` 를 바꾸면 같이 조정해야 한다.
+## 주의
+
+`Physics` 열은 구조체가 통째로 들어가 있어서 괄호 안에 필드가 나열된다.
+엑셀에서 이 칸을 직접 고치는 것은 권하지 않는다 — 괄호나 쉼표 하나가 어긋나면
+그 행 전체가 기본값으로 임포트된다. **물리 수치는 에디터에서 고치는 것이 안전하다.**
+
+특성 표(`LootStability.csv` / `LootDurability.csv`)는 중첩이 없어서 열이 평평하다.
+엑셀에서 고쳐도 안전하다.
+
+`DamageImpulseThreshold` 는 질량에 비례한다. 카탈로그에서 `MassKg` 를 바꾸면
+`DT_LootDurability` 쪽도 같이 조정해야 한다.
 10kg 기준 실측값: 100cm 낙하 5031 / 150cm 6497 / 300cm 9622, 착지 후 튕김은 500~900.

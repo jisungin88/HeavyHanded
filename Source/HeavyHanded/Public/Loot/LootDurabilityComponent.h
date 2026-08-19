@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Loot/LootTypes.h"              // FLootDurabilityData 를 값으로 보유 — 전방 선언 불가
 #include "LootDurabilityComponent.generated.h"
 
 class ALootBase;
@@ -16,14 +17,15 @@ struct FLootImpactEvent;
  *   즉사한다. 기획서의 '3회'는 의미 있는 충격 3번이지 콜백 3개가 아니다.
  *
  * [임계값이 2개인 이유]
- *   ImpactReportThreshold(200)   = 소음 파트에 알릴 최소 충격
- *   DamageImpulseThreshold(3000) = 파손으로 칠 최소 충격
+ *   ImpactReportThreshold(200)   = 소음 파트에 알릴 최소 충격 — ALootBase 의 FLootPhysicsData
+ *   DamageImpulseThreshold(3000) = 파손으로 칠 최소 충격 — 여기 Data
  *   살짝 부딪히는 소리는 나야 하지만 그게 파손까지 되면 안 된다.
  *
  *   실측(10kg): 150cm 낙하는 착지 6497 + 튕김 581 로 잡힌다.
  *   둘 다 방송되어 '쿵' 다음 '탁' 소리가 나지만, 파손은 착지 하나만 센다.
  *
- * 값은 ALootBase 의 FLootPhysicsData 에서 읽는다. 여기에 수치를 중복해서 두지 않는다.
+ *   앞의 것이 액터에 있는 이유는 모든 노획물이 소리를 내기 때문이고,
+ *   뒤의 것이 여기 있는 이유는 파손형만 깨지기 때문이다.
  */
 UCLASS(ClassGroup = (Loot), meta = (BlueprintSpawnableComponent))
 class HEAVYHANDED_API ULootDurabilityComponent : public UActorComponent
@@ -46,6 +48,21 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+    /**
+     * 설계 수치. DT_LootDurability 에서 노획물의 행 이름으로 찾아 채운다.
+     *
+     * [왜 컴포넌트가 직접 조회하나]
+     *   이 값을 읽는 것은 여기뿐이다. 예전에는 FLootPhysicsData 에 섞여 있어서
+     *   파손형이 아닌 노획물까지 전부 들고 다녔다. 무게·던지기 값 사이에 끼어 있어
+     *   눈에 덜 띄었을 뿐 불안정형과 같은 문제였다.
+     *
+     * [BP 에서 고칠 수 있게 열어 두는 이유]
+     *   표에 행이 없으면 여기 적힌 값이 그대로 쓰인다. 표에 안 올린 실험물용 폴백이다.
+     *   행이 있으면 ResolveData 가 덮어쓰므로 여기 값은 무시된다.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability")
+    FLootDurabilityData Data;
 
     /**
      * 파괴 연출이 클라이언트에 도착할 때까지 액터를 남겨 두는 시간(초).
@@ -92,6 +109,15 @@ protected:
     void OnBroken();
 
 private:
+    /**
+     * DT_LootDurability 에서 자기 행을 찾아 Data 를 채운다. 한 번만 실제로 돈다.
+     *
+     * BeginPlay 뿐 아니라 OnRep_ImpactCount 앞에서도 부른다. 초기 복제는 BeginPlay 보다
+     * 먼저 도착할 수 있는데, 그때 MaxImpactCount 가 기본값이면 클라이언트의 금 간 연출이
+     * "2/3" 처럼 어긋난 단계로 뜬다.
+     */
+    void ResolveData();
+
     /** ALootBase 의 확정 충격 구독 핸들러 (서버에서만 불린다) */
     void HandleLootImpact(const FLootImpactEvent& Event);
 
@@ -120,6 +146,9 @@ private:
     /** 소유 노획물. UPROPERTY 가 없으면 GC 가 회수한 뒤 엉뚱한 곳에서 크래시한다 */
     UPROPERTY()
     TObjectPtr<ALootBase> OwnerLoot;
+
+    /** ResolveData 가 이미 돌았는가. 표 조회를 매번 반복하지 않기 위한 것이다 */
+    bool bDataResolved = false;
 
     /** EndPlay 에서 구독을 해제하기 위한 핸들 */
     FDelegateHandle ImpactDelegateHandle;
