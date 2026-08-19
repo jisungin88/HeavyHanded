@@ -59,6 +59,16 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Decay", meta = (ClampMin = "0.0"))
 	float DecayPerSecond = 0.01f;
 
+	// ── 병력 증원 ──
+
+	/** 경비 추격(Pursue 진입)이 이만큼 누적될 때마다 모든 경비 스포너에 1명씩 증원한다 */
+	UPROPERTY(config, EditAnywhere, Category = "Reinforcement", meta = (ClampMin = "1"))
+	int32 PursuitsPerReinforcement = 2;
+
+	/** 경비의 소음 인지 게이지가 이만큼 가득 찰 때마다 모든 경비 스포너에 1명씩 증원한다 */
+	UPROPERTY(config, EditAnywhere, Category = "Reinforcement", meta = (ClampMin = "1"))
+	int32 NoiseDetectionsPerReinforcement = 2;
+
 #if WITH_EDITOR
 	/** 히스테리시스가 뒤집힌 값이 저장되지 않게 막는다 */
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

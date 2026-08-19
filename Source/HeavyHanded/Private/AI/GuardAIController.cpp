@@ -19,6 +19,7 @@
 #include "Components/WidgetComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/DetectionGaugeWidget.h"
+#include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -218,6 +219,13 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 	{
 		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastNoiseLocation);
 		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+	}
+
+	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
+	// ReportPursuitStarted() 와는 별개 카운터라 추격 횟수와 섞이지 않는다.
+	if (UAlertComponent* Alert = UAlertComponent::Get(this))
+	{
+		Alert->ReportNoiseDetected();
 	}
 
 	// 리셋하지 않으면 래치가 풀리지 않아 경비가 영원히 100%에 박힌다 (PerceptionMeterComponent.h 참고)
@@ -420,6 +428,64 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 	}
 }
 
+int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
+{
+	const int32 PointCount = GuardPawn->GetPatrolPointCount();
+	if (PointCount <= 1)
+	{
+		return 0;
+	}
+
+	// 반경 안의 이웃 경비를 자신을 포함해 모은다. 레벨에 배치된 경비 수가 적어
+	// 매 OnPossess(경비당 한 번)마다 전체 순회해도 부담이 없다.
+	TArray<const AGuardCharacter*> Cluster;
+	Cluster.Add(GuardPawn);
+
+	const float RadiusSq = FMath::Square(InitialPatrolSeparationRadius);
+	for (TActorIterator<AGuardCharacter> It(GetWorld()); It; ++It)
+	{
+		AGuardCharacter* Other = *It;
+		if (!IsValid(Other) || Other == GuardPawn)
+		{
+			continue;
+		}
+
+		if (FVector::DistSquared(GuardPawn->GetActorLocation(), Other->GetActorLocation()) <= RadiusSq)
+		{
+			Cluster.Add(Other);
+		}
+	}
+
+	if (Cluster.Num() <= 1)
+	{
+		return 0;
+	}
+
+	// 두 경비가 서로를 이웃으로 보면 똑같은 반경 조건을 검사하므로 정렬 결과도 똑같이 나온다 -
+	// 그래야 "내 순번"이 양쪽에서 일관되게 계산된다. GetUniqueID는 인스턴스마다 고정이라
+	// 정렬 기준으로 안전하다.
+	Cluster.Sort([](const AGuardCharacter& A, const AGuardCharacter& B)
+	{
+		return A.GetUniqueID() < B.GetUniqueID();
+	});
+
+	const int32 MyRank = Cluster.IndexOfByKey(GuardPawn);
+	const int32 StartIndex = FMath::RoundToInt(static_cast<float>(MyRank) * PointCount / Cluster.Num()) % PointCount;
+
+	// PingPong 은 bPatrolMovingForward 기본값이 true(정방향)라, 시작 지점을 마지막 인덱스로
+	// 고르면 도착 직후 곧장 같은 지점을 다시 고르고서야 역방향으로 꺾인다. 미리 뒤집어 둔다.
+	if (GuardPawn->PatrolPattern == EPatrolPattern::PingPong && StartIndex == PointCount - 1)
+	{
+		bPatrolMovingForward = false;
+	}
+
+	UE_LOG(LogGuardAI, Log,
+		TEXT("[%s] %.0fcm 안에 이웃 경비 %d명이 있어(내 순번 %d/%d) %d번 지점에서 순찰을 시작한다 (기본 0번 대신)."),
+		*GetNameSafe(GuardPawn), InitialPatrolSeparationRadius, Cluster.Num() - 1, MyRank, Cluster.Num(), StartIndex);
+
+	return StartIndex;
+}
+
 void AGuardAIController::SelectNextPatrolPoint()
 {
 	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
@@ -471,10 +537,10 @@ void AGuardAIController::SelectNextPatrolPoint()
 		}
 	}
 
-	// 첫 호출(-1)은 항상 0번 지점에서 시작.
+	// 첫 호출(-1). 근처에 다른 경비가 있으면 그 경비에게서 가장 먼 지점에서, 없으면 0번에서 시작.
 	if (CurrentPatrolIndex < 0)
 	{
-		CurrentPatrolIndex = 0;
+		CurrentPatrolIndex = SelectInitialPatrolIndex(GuardPawn);
 	}
 	else if (PointCount == 1)
 	{

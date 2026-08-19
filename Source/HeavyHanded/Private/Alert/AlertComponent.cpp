@@ -359,8 +359,10 @@ void UAlertComponent::ResetAlert()
 		return;
 	}
 
-	AlertLevel   = EAlertLevel::Calm;   // 래치 해제. ApplyGauge 보다 먼저여야 한다
-	SilenceTimer = 0.f;
+	AlertLevel         = EAlertLevel::Calm;   // 래치 해제. ApplyGauge 보다 먼저여야 한다
+	SilenceTimer       = 0.f;
+	PursuitCount       = 0;                   // 증원까지 남은 추격 수도 같이 되돌린다
+	NoiseDetectionCount = 0;                  // 증원까지 남은 소음 감지 수도 같이 되돌린다
 
 	NoiseContribution.Reset();
 	NoisiestPlayer       = nullptr;     // 복제본도 같이 비운다
@@ -373,6 +375,46 @@ void UAlertComponent::ResetAlert()
 	OnRep_AlertLevel();
 
 	SetComponentTickEnabled(false);
+}
+
+void UAlertComponent::ReportPursuitStarted()
+{
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
+
+	ReportTowardReinforcement(PursuitCount, UAlertSettings::Get()->PursuitsPerReinforcement, TEXT("경비 추격 발생"));
+}
+
+void UAlertComponent::ReportNoiseDetected()
+{
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
+
+	ReportTowardReinforcement(NoiseDetectionCount, UAlertSettings::Get()->NoiseDetectionsPerReinforcement, TEXT("경비 소음 감지"));
+}
+
+void UAlertComponent::ReportTowardReinforcement(int32& Counter, int32 Threshold, const TCHAR* SourceLabel)
+{
+	++Counter;
+	Threshold = FMath::Max(1, Threshold);
+
+	UE_LOG(LogAlert, Log, TEXT("%s (%d/%d) - 병력 증원까지"), SourceLabel, Counter, Threshold);
+
+	if (Counter < Threshold)
+	{
+		return;
+	}
+
+	Counter = 0;
+	++ReinforcementCount;
+
+	UE_LOG(LogAlert, Log, TEXT("병력 증원 발동 (%d번째, 계기: %s) - 모든 경비 스포너에 1명씩 추가 스폰."),
+		ReinforcementCount, SourceLabel);
+	OnReinforcementTriggered.Broadcast(ReinforcementCount);
 }
 
 // ──────────────────────────────────────────────────────────────
