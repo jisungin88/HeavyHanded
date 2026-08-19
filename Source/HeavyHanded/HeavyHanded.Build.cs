@@ -28,7 +28,11 @@ public class HeavyHanded : ModuleRules
 			"Niagara",
 
 			// 소음 파라미터 프로젝트 세팅
-			"DeveloperSettings"
+			"DeveloperSettings",
+
+			// FUniqueNetIdRepl — 레벨 이동을 건너 플레이어를 식별하는 유일한 키.
+			// URunProgressSubsystem 이 공개 헤더에서 노출하므로 Public 이다
+			"CoreOnline"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
