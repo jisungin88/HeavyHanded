@@ -6,6 +6,9 @@
 #include "AlertGaugeWidget.generated.h"
 
 class UAlertComponent;
+class UProgressBar;
+class UTextBlock;
+class UWidgetAnimation;
 
 /**
  * 경계도 게이지 HUD (기획서 8장).
@@ -14,8 +17,14 @@ class UAlertComponent;
  * 위젯이 먼저 만들어질 수 있어서 붙을 때까지 재시도한다 — 한 번만 찾고 포기하면
  * 클라이언트에서만 게이지가 영원히 0 으로 남는다.
  *
- * 레이아웃 · 색 전환 · 점멸은 이 클래스를 상속한 WBP 에서 한다.
- * C++ 은 구독과 값 전달만 담당한다.
+ * [C++ 과 WBP 의 경계]
+ *   막대 채우기 · 색 · 단계 이름 · 퍼센트 · 점멸 재생은 전부 C++ 이 한다.
+ *   아래 BindWidget 프로퍼티가 그 창구다 — WBP 에 같은 이름의 위젯이 없으면
+ *   BP 컴파일이 실패한다. 이 프로젝트의 UI 버그는 "게이지가 안 움직인다" 처럼
+ *   조용히 드러나는데, 이름 불일치만큼은 컴파일 시점에 잡아 둘 수 있다.
+ *
+ *   WBP 가 하는 것은 배치와 위젯 애니메이션 저작뿐이다. 값·색·문구를 WBP 에서
+ *   따로 만지면 C++ 이 매 갱신마다 덮어써서 반영되지 않는다.
  */
 UCLASS(Abstract)
 class HEAVYHANDED_API UAlertGaugeWidget : public UUserWidget
@@ -23,7 +32,7 @@ class HEAVYHANDED_API UAlertGaugeWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** 0~1. 아직 못 붙었으면 0 */
+	/** 0~1. 아직 못 붙었으면 0. 보간 중인 표시값이 아니라 컴포넌트의 실제 값이다 */
 	UFUNCTION(BlueprintPure, Category = "UI|Alert")
 	float GetGauge01() const;
 
@@ -47,16 +56,61 @@ public:
 
 protected:
 	//~ UUserWidget
+	virtual void NativePreConstruct() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	//~ End
 
-	/** 게이지 값이 바뀌었다. 바 채우기와 보간을 여기서 한다 */
+	// ── WBP 가 배치해야 하는 위젯 ──
+	//
+	// 이름은 WBP_AlertGauge 에 이미 있는 것을 그대로 쓴다. 컨벤션과 어긋나 보이지만
+	// (Bar_Alert 가 아니라 AlertBar 여야 자연스럽다) 이름을 바꾸면 기존 WBP 의
+	// 위젯을 전부 개명해야 하고, 그 사이 BP 가 컴파일되지 않는다. 얻는 것보다 잃는 것이 크다.
+
+	/** 경계도 막대. 채우기와 색을 C++ 이 지정한다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Alert", meta = (BindWidget))
+	TObjectPtr<UProgressBar> Bar_Alert;
+
+	/** 단계 이름("평온" · "의심" · "경계" · "경보") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Alert", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_Level;
+
+	/** 퍼센트 수치("65%") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Alert", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_Percent;
+
+	/**
+	 * 경보 단계 점멸. 2Hz 로 저작한다 (UUISettings::AlarmBlinkHz 주석).
+	 *
+	 * Optional 인 이유는 점멸이 빠져도 게이지 자체는 성립하기 때문이다 —
+	 * 스킨 WBP 마다 애니메이션 저작을 강제하면 만들 때마다 컴파일이 막힌다.
+	 * 대신 경보인데 애니메이션이 없으면 로그를 남긴다 (조용히 실패하지 않게).
+	 */
+	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> AlarmBlink;
+
+	/**
+	 * 막대가 실제 값을 따라가는 속도(1/초). 0 이면 보간 없이 즉시 반영한다.
+	 *
+	 * 경계도는 0.1초마다(UAlertComponent::TickInterval) 갱신되어 그대로 그리면
+	 * 눈에 띄게 계단이 진다. 값이 아니라 속도인 이유는 남은 거리에 비례해 좁히기 때문에
+	 * 큰 변화는 빠르게, 자연 감소는 느리게 따라가기 때문이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Alert Gauge", meta = (ClampMin = "0.0"))
+	float BarInterpSpeed = 6.f;
+
+	// ── BP 연출 훅 ──
+	//
+	// 필수 표시는 위에서 C++ 이 이미 끝냈다. 이 훅은 화면 흔들림 · 파티클처럼
+	// C++ 이 다룰 수 없는 추가 연출 자리다. 여기서 게임 상태를 바꾸지 말 것 —
+	// 훅은 클라이언트에서도 돈다.
+
+	/** 게이지 값이 바뀌었다. 인자는 보간 전 실제 값이다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Alert")
 	void OnGaugeUpdated(float NewGauge01);
 
 	/**
-	 * 단계가 바뀌었다. 색 전환 · 펄스 · 경보 점멸을 여기서 한다.
+	 * 단계가 바뀌었다.
 	 * 최초 바인딩 시에도 한 번 호출되며 이때는 NewLevel == OldLevel 이다
 	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Alert")
@@ -72,6 +126,21 @@ private:
 	/** 성공할 때까지 재시도한다. 클라에서는 GameState 도 컴포넌트도 늦게 온다 */
 	void TryBind();
 
+	/** 표시값을 막대와 퍼센트 글자에 반영한다 */
+	void ApplyGaugeVisual(float Gauge01);
+
+	/** 단계에 맞는 색 · 이름 · 점멸을 반영한다 */
+	void ApplyLevelVisual(EAlertLevel NewLevel);
+
+	/** 경보 점멸을 켜고 끈다 */
+	void UpdateAlarmBlink(bool bShouldBlink);
+
+	/** 보간 1스텝. 목표에 닿으면 스스로 타이머를 끈다 */
+	void StepInterp();
+
+	void StartInterp();
+	void StopInterp();
+
 	UPROPERTY()
 	TObjectPtr<UAlertComponent> BoundAlert;
 
@@ -79,4 +148,38 @@ private:
 
 	/** 재바인딩 시도 간격 */
 	static constexpr float BindRetryInterval = 0.25f;
+
+	/**
+	 * 보간 갱신 주기(초).
+	 *
+	 * NativeTick 대신 타이머를 쓴다. UUserWidget 의 TickFrequency 기본값(Auto)은
+	 * BP 에 Tick 이벤트가 있거나 애니메이션이 재생 중일 때만 틱을 켜기 때문에,
+	 * C++ 에서만 틱하는 위젯은 WBP 구성에 따라 NativeTick 이 아예 불리지 않을 수 있다.
+	 * 타이머는 그 조건과 무관하고, 목표에 닿으면 꺼져서 평소 비용이 0 이다.
+	 */
+	static constexpr float InterpInterval = 1.f / 60.f;
+
+	/** 이 차이 아래로 좁혀지면 목표값에 스냅한다. 없으면 영원히 미세하게 수렴만 한다 */
+	static constexpr float InterpSnapTolerance = 0.001f;
+
+	/** WBP 가 저작해야 하는 점멸 주기(Hz). 재생 속도 환산의 기준값이다 */
+	static constexpr float AuthoredBlinkHz = 2.f;
+
+	FTimerHandle InterpHandle;
+
+	/** 컴포넌트가 알려준 실제 값 */
+	float TargetGauge = 0.f;
+
+	/** 화면에 그려지는 값. 보간 중이면 TargetGauge 와 다르다 */
+	float DisplayedGauge = 0.f;
+
+	/**
+	 * 마지막으로 Txt_Percent 에 쓴 정수 퍼센트.
+	 * 보간 중에는 초당 60번 갱신되는데 표시값은 정수라 대부분 같은 문자열이다.
+	 * 바뀔 때만 SetText 를 불러 매 스텝 FText 를 새로 만들지 않는다.
+	 */
+	int32 LastShownPercent = INDEX_NONE;
+
+	/** 점멸 애니메이션 부재 경고를 한 번만 남기기 위한 플래그 */
+	bool bWarnedMissingBlink = false;
 };
