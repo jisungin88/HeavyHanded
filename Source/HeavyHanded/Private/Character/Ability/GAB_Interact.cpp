@@ -7,6 +7,7 @@
 #include "Character/BaseCharacter.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTagContainer.h"
+#include "AbilitySystemComponent.h"
 
 // 상호작용 진단용. 집기 실패는 예외 없이 조용히 넘어가므로 이유를 남긴다.
 DEFINE_LOG_CATEGORY_STATIC(LogInteract, Log, All);
@@ -26,6 +27,30 @@ namespace
 	// TODO: 문 상호작용은 오유석 담당 영역이고 대응 GameplayTag 가 아직 없다.
 	//   (Hazard.Cycle.FireDoor 는 방화문 전용이라 일반 문에는 못 쓴다)
 	const FName LegacyDoorActorTagName(TEXT("Door"));
+
+	// 보조자가 이미 돕고 있는 중량물에 다시 상호작용하면(자발적 해제) 이 태그로
+	// GA_HeavyCarryAssist 를 CancelAbilities 로 찾아 끝낸다.
+	const FName HeavyCarryAssistAbilityTagName(TEXT("Ability.HeavyCarryAssist"));
+
+	//08.18 추가
+	const FName LootTypeHeavyTagName(TEXT("Loot.Type.Heavy"));
+	bool IsHeavyLoot(const AActor* Actor)
+	{
+		if (!Actor) return false;
+
+		if (const IGameplayTagAssetInterface* TagOwner = Cast<const IGameplayTagAssetInterface>(Actor))
+		{
+			const FGameplayTag HeavyTag = FGameplayTag::RequestGameplayTag(LootTypeHeavyTagName, false);
+			if (HeavyTag.IsValid())
+			{
+				FGameplayTagContainer OwnedTags;
+				TagOwner->GetOwnedGameplayTags(OwnedTags);
+				return OwnedTags.HasTag(HeavyTag);
+			}
+		}
+		return false;
+	}
+	//08.18 end
 
 	// 집을 수 있는 노획물인지 판정
 	bool IsCarryableLoot(const AActor* Actor)
@@ -154,7 +179,7 @@ void UGAB_Interact::PerformInteraction()
         AActor* HitActor = HitResult.GetActor();
 
         // 1. 집을 수 있는 노획물인 경우 (Loot.Type 하위 태그)
-        if (IsCarryableLoot(HitActor))
+        if (IsCarryableLoot(HitActor) || IsHeavyLoot(HitActor))
         {
             if (Character->GetHeldActor())
             {
@@ -163,11 +188,55 @@ void UGAB_Interact::PerformInteraction()
                 return;
             }
 
+            if (Character->GetAssistedHeavyItem())
+            {
+                // 이미 돕고 있는 중량물에 다시 상호작용 = 자발적으로 그만 돕기.
+                // GA_HeavyCarryAssist 는 AbilityTags 에 같은 태그를 등록해 두었으므로
+                // CancelAbilities 가 정확히 이 어빌리티만 찾아 EndAbility(bWasCancelled=true) 시킨다.
+                UE_LOG(LogInteract, Log, TEXT("%s 운반 돕기를 그만둔다."), *GetNameSafe(Character->GetAssistedHeavyItem()));
+
+                if (UAbilitySystemComponent* ASC = Character->GetAbilitySystemComponent())
+                {
+                    const FGameplayTag AssistAbilityTag = FGameplayTag::RequestGameplayTag(HeavyCarryAssistAbilityTagName);
+                    const FGameplayTagContainer CancelTags(AssistAbilityTag);
+                    ASC->CancelAbilities(&CancelTags, nullptr, nullptr);
+                }
+                return;
+            }
+
+            const bool bHeavy = IsHeavyLoot(HitActor);
+            const USceneComponent* HitRoot = HitActor->GetRootComponent();
+            const bool bAlreadyCarried = HitRoot && HitRoot->GetAttachParent() != nullptr;
+
+            if (bAlreadyCarried)
+            {
+                if (bHeavy)
+                {
+                    // ★ 직접 함수 호출 대신 GameplayEvent 로 GA_HeavyCarryAssist 를 발동시킨다.
+                    static const FGameplayTag AssistEventTag =
+                        FGameplayTag::RequestGameplayTag(FName("Ability.HeavyCarryAssist"));
+
+                    FGameplayEventData EventData;
+                    EventData.Target = HitActor;
+
+                    if (UAbilitySystemComponent* ASC = Character->GetAbilitySystemComponent())
+                    {
+                        ASC->HandleGameplayEvent(AssistEventTag, &EventData);
+                        UE_LOG(LogInteract, Log, TEXT("보조 운반 이벤트 발동: %s"), *HitActor->GetName());
+                    }
+                }
+                else
+                {
+                    UE_LOG(LogInteract, Log, TEXT("%s 는 이미 다른 사람이 들고 있다."), *HitActor->GetName());
+                }
+                return;
+            }
+
             // 물리 끄기 -> 부착 순서와 실패 검증은 전부 SetHeldActor 가 처리한다.
             // 클라이언트에서도 OnRep_HeldActor 가 같은 경로를 밟는다.
-            if (Character->SetHeldActor(HitActor))
+            if (Character->SetHeldActor(HitActor, bHeavy))
             {
-                UE_LOG(LogInteract, Log, TEXT("집기 성공: %s"), *HitActor->GetName());
+                UE_LOG(LogInteract, Log, TEXT("집기 성공: %s (Heavy=%s)"), *HitActor->GetName(), bHeavy ? TEXT("O") : TEXT("X"));
             }
         }
         // 2. "Door" 태그가 붙어있는 경우 (아직 GameplayTag 대응 없음 — 위 TODO 참조)

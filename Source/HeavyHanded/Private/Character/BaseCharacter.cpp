@@ -13,6 +13,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "Interfaces/Carryable.h"
+#include "GameplayTagContainer.h"
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -287,6 +288,12 @@ void ABaseCharacter::RemoveGameplayEffectFromSelf(TSubclassOf<UGameplayEffect> E
 
 void ABaseCharacter::StartCrouch(const FInputActionValue& Value)
 {
+	if (IsCarryingHeavyItem())
+	{
+		UE_LOG(LogTemp, Log, TEXT("%s 는 중량형 노획물을 들고 있어 크라우치할 수 없다."), *GetName());
+		return;
+	}
+
 	Crouch();
     Server_ApplyGameplayEffect(CrouchGameplayEffectClass, true);
 }
@@ -350,6 +357,12 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(ABaseCharacter, HeldActor);
+	// 08.18 start
+	DOREPLIFETIME(ABaseCharacter, HeavyCarryAssistant);
+	DOREPLIFETIME(ABaseCharacter, AssistingPrimaryCarrier);
+	DOREPLIFETIME(ABaseCharacter, AssistedHeavyItem);
+	DOREPLIFETIME(ABaseCharacter, HeavyCarryState);
+	// 08.18 end
 }
 
 bool ABaseCharacter::CanCarryActor(const AActor* Target) const
@@ -471,7 +484,7 @@ void ABaseCharacter::ApplyCarryState(AActor* Target, bool bCarried)
     }
 }
 
-bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
+bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot)
 {
     // 운반 상태의 소유권은 서버에 있다. 클라이언트가 직접 바꾸면
     // 다음 복제 때 덮어써지면서 물리 상태만 어긋난다.
@@ -490,9 +503,25 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     {
         ApplyCarryState(PreviousHeldActor, false);
         UE_LOG(LogCarry, Log, TEXT("[서버] 운반 해제: %s"), *GetNameSafe(PreviousHeldActor));
+
+		//08.18 Add
+		RemoveHeavySoloPenalty();
+
+		// 보조자가 있으면 AT_MonitorHeavyCarry 의 다음 틱 폴링을 기다리지 않고
+		// Event.Loot.Dropped 로 즉시 통지해 보조 상태를 바로 정리시킨다.
+		if (HeavyCarryAssistant)
+		{
+			FGameplayEventData EventData;
+			EventData.Target = PreviousHeldActor;
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+				HeavyCarryAssistant,
+				FGameplayTag::RequestGameplayTag(FName("Event.Loot.Dropped")),
+				EventData);
+		}
     }
 
     HeldActor = nullptr;
+    HeavyCarryState = EHeavyCarryState::None;
 
     if (!NewHeldActor)
     {
@@ -537,6 +566,23 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
 
     HeldActor = NewHeldActor;
 
+	// StartCrouch 입력 차단만으로는 "이미 웅크린 채로 줍는" 경우를 못 막는다.
+	if (bIsCrouched && IsCarryingHeavyItem())
+	{
+		UnCrouch();
+		RemoveGameplayEffectFromSelf(CrouchGameplayEffectClass);
+		UE_LOG(LogTemp, Log, TEXT("[서버] %s 중량형 노획물을 집어 크라우치 강제 해제"), *GetName());
+	}
+
+	//08.18 수정 start
+	if (IsCarryingHeavyItem())
+	{
+		ApplyHeavySoloPenalty();
+		HeavyCarryState = EHeavyCarryState::Solo;
+		UE_LOG(LogCarry, Log, TEXT("[서버] %s 는 무거운 물건 - 혼자 들어서 이동속도 패널티 적용"), *GetNameSafe(NewHeldActor));
+	}
+	//08.18 수정 end
+
     UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
         *GetNameSafe(NewHeldActor),
         NewHeldActor->GetIsReplicated() ? TEXT("O") : TEXT("X"),
@@ -569,4 +615,24 @@ void ABaseCharacter::OnRep_HeldActor(AActor* PreviousHeldActor)
         *GetNameSafe(PreviousHeldActor),
         *GetNameSafe(HeldActor),
         HeldRoot ? *GetNameSafe(HeldRoot->GetAttachParent()) : TEXT("(루트 없음/참조 안 풀림)"));
+}
+
+//08.18 추가
+void ABaseCharacter::OnRep_HeavyCarryAssistant()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_HeavyCarryAssistant: %s"), *GetNameSafe(HeavyCarryAssistant));
+}
+
+void ABaseCharacter::OnRep_AssistingPrimaryCarrier()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_AssistingPrimaryCarrier: %s"), *GetNameSafe(AssistingPrimaryCarrier));
+}
+
+bool ABaseCharacter::IsCarryingHeavyItem() const
+{
+	if (const ICarryable* Carryable = Cast<const ICarryable>(HeldActor))
+	{
+		return Carryable->GetWeightClass() == EWeightClass::Heavy;
+	}
+	return false;
 }

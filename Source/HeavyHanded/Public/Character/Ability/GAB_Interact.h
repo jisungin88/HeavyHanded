@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Character/BaseGameplayAbility.h"
+#include "AbilitySystemComponent.h"
 #include "GAB_Interact.generated.h"
 
 UCLASS()
