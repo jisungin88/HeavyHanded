@@ -85,8 +85,12 @@ protected:
 	 * Optional 인 이유는 점멸이 빠져도 게이지 자체는 성립하기 때문이다 —
 	 * 스킨 WBP 마다 애니메이션 저작을 강제하면 만들 때마다 컴파일이 막힌다.
 	 * 대신 경보인데 애니메이션이 없으면 로그를 남긴다 (조용히 실패하지 않게).
+	 *
+	 * [BlueprintReadOnly 가 필요한 이유] 위젯 애니메이션은 원래 WBP 가 만든 BP 변수라
+	 * 그래프에서 자유롭게 참조된다. C++ 이 같은 이름을 잡는 순간 주인이 이 프로퍼티로
+	 * 바뀌므로, 열어 두지 않으면 기존 그래프의 Get 노드가 접근 위반으로 BP 컴파일을 막는다.
 	 */
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+	UPROPERTY(BlueprintReadOnly, Transient, Category = "UI|Alert", meta = (BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> AlarmBlink;
 
 	/**
