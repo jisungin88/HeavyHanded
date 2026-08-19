@@ -5,6 +5,7 @@
 #include "DrawDebugHelpers.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Character/BaseCharacter.h"
+#include "Core/VanZone.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTagContainer.h"
 
@@ -104,6 +105,14 @@ void UGAB_Interact::PerformInteraction()
 
     if (!Character) return;
 
+    // 밴에 타고 있으면 조준을 보지 않고 내린다 (담당: 지성인).
+    // 탑승하면 몸이 밴에 고정되므로, 하차에 조준을 요구하면 차 안에서 벽을 겨눠야 내릴 수 있다.
+    // 스윕보다 위에 있는 이유가 이것이다 — 밴 안에서 할 수 있는 일은 내리는 것뿐이다.
+    if (AVanZone::TryDisembarkIfBoarded(Character))
+    {
+        return;
+    }
+
     // 캡슐 중심에서 액터 전방으로 훑으면 시선 피치가 반영되지 않는다.
     // (bUseControllerRotationYaw 만 켜져 있어 액터 전방은 항상 수평이다)
     // 그러면 가슴 높이 띠만 검사하게 되어 바닥에 놓인 물건은 영영 집을 수 없다 —
@@ -170,12 +179,25 @@ void UGAB_Interact::PerformInteraction()
                 UE_LOG(LogInteract, Log, TEXT("집기 성공: %s"), *HitActor->GetName());
             }
         }
-        // 2. "Door" 태그가 붙어있는 경우 (아직 GameplayTag 대응 없음 — 위 TODO 참조)
+        // 2. 밴 — 승차 / 하차 (담당: 지성인)
+        //
+        // TODO(구조): 여기서 코어 루프 클래스를 직접 캐스트하는 것은 임시다.
+        //   상호작용 대상이 늘어날 때마다(문·좌대·금고·협력 장치) 이 사슬이 계속 길어지고,
+        //   그때마다 남의 파트가 이 파일을 고쳐야 한다. 대상 쪽이 구현하는 인터페이스
+        //   (IInteractable::OnInteract)로 뒤집어야 하는데, 그건 담당 영역을 여럿 건너는
+        //   결정이라 전영배와 합의한 뒤에 한다.
+        //
+        //   그때까지 밴 쪽 조건과 처리는 전부 AVanZone 안에 있다 — 여기는 넘겨주기만 한다.
+        else if (AVanZone* Van = Cast<AVanZone>(HitActor))
+        {
+            Van->TryToggleBoarding(Character);
+        }
+        // 3. "Door" 태그가 붙어있는 경우 (아직 GameplayTag 대응 없음 — 위 TODO 참조)
         else if (HitActor->ActorHasTag(LegacyDoorActorTagName))
         {
             UE_LOG(LogInteract, Log, TEXT("문 상호작용: %s"), *HitActor->GetName());
         }
-        // 3. 태그가 없거나 다른 사물이 맞은 경우
+        // 4. 태그가 없거나 다른 사물이 맞은 경우
         else
         {
             UE_LOG(LogInteract, Log,
