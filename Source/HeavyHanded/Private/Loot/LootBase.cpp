@@ -114,6 +114,7 @@ void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 
 	// 등록을 빠뜨려도 컴파일 에러가 나지 않고 호스트에서는 멀쩡히 동작한다. 반드시 확인할 것.
 	DOREPLIFETIME(ALootBase, PrimaryCarrier);
+	DOREPLIFETIME(ALootBase, SecondaryCarrier);
 	DOREPLIFETIME(ALootBase, CurrentValue);
 	DOREPLIFETIME(ALootBase, LootTypeTags);
 	DOREPLIFETIME(ALootBase, LootStateTag);
@@ -431,8 +432,144 @@ int32 ALootBase::GetRequiredCarriers() const
 	return 1;
 }
 
+int32 ALootBase::GetCarrierCount() const
+{
+	return (IsValid(PrimaryCarrier) ? 1 : 0) + (IsValid(SecondaryCarrier) ? 1 : 0);
+}
+
+bool ALootBase::CanBeSecondCarrierBy(const APawn* Requester) const
+{
+	if (!IsValid(Requester))
+	{
+		return false;
+	}
+
+	// 2인 캐리는 중량형에만 있다. 왕관 하나를 둘이 나눠 드는 그림은 없다.
+	if (!FindComponentByClass<ULootHeavyComponent>())
+	{
+		return false;
+	}
+
+	// 아무도 안 들고 있으면 두 번째가 될 수 없다. 그냥 OnGrabbed 로 첫 번째가 되면 된다.
+	if (!IsValid(PrimaryCarrier))
+	{
+		return false;
+	}
+
+	// 혼자 양쪽을 잡을 수는 없다.
+	if (PrimaryCarrier.Get() == Requester)
+	{
+		return false;
+	}
+
+	// 이미 찼으면 거부한다. 셋째가 붙을 자리는 없다 —
+	// RequiredCarriers 가 3 이상이어도 그립이 두 개뿐이라 물리적으로 잡을 데가 없다.
+	if (IsValid(SecondaryCarrier))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void ALootBase::OnSecondGrabbed(APawn* Carrier)
+{
+	// Server RPC 는 요청일 뿐이다. 판정은 서버가 한다.
+	if (!HasAuthority() || !CanBeSecondCarrierBy(Carrier))
+	{
+		return;
+	}
+
+	SecondaryCarrier = Carrier;
+
+	// 밴 적재 기여도는 마지막에 손댄 사람 기준이다. 두 번째로 붙은 사람도 그 대상이 된다.
+	LastCarrier = Carrier;
+
+	// 서버에서 직접 값을 바꾸면 OnRep 이 안 불린다. 서버 몫은 손으로 부른다.
+	ApplyCarryState();
+}
+
+void ALootBase::OnSecondReleased(APawn* Carrier)
+{
+	if (!HasAuthority() || SecondaryCarrier.Get() != Carrier)
+	{
+		return;
+	}
+
+	// 물건은 첫 번째 운반자에게 어태치된 채로 남는다. 혼자가 되어 느려질 뿐이다.
+	// 여기서 떨어뜨리면 '중량형도 1인 운반은 된다' 는 규칙과 어긋난다.
+	SecondaryCarrier = nullptr;
+
+	ApplyCarryState();
+}
+
+FName ALootBase::GetGripSocketFor(const APawn* Carrier) const
+{
+	const ULootHeavyComponent* Heavy = FindComponentByClass<ULootHeavyComponent>();
+	if (!Heavy || !IsValid(Carrier))
+	{
+		return NAME_None;
+	}
+
+	// 먼저 잡은 사람이 A, 나중이 B 로 고정이다. 규칙이 단순해야 모든 머신에서 답이 같다.
+	// '가까운 쪽 소켓' 같은 방식은 위치에 따라 답이 갈려서 서버와 클라이언트가 어긋난다.
+	if (PrimaryCarrier.Get() == Carrier)
+	{
+		return Heavy->GetGripSocketA();
+	}
+	if (SecondaryCarrier.Get() == Carrier)
+	{
+		return Heavy->GetGripSocketB();
+	}
+
+	return NAME_None;
+}
+
+float ALootBase::GetGripSeparation() const
+{
+	const ULootHeavyComponent* Heavy = FindComponentByClass<ULootHeavyComponent>();
+	if (!Heavy || !IsValid(LootMesh))
+	{
+		return 0.f;
+	}
+
+	const FName SocketA = Heavy->GetGripSocketA();
+	const FName SocketB = Heavy->GetGripSocketB();
+
+	// 소켓이 없으면 두 지점이 겹쳐 거리가 0 이 된다. 그 상태로 제약을 풀면
+	// 두 사람이 같은 자리로 빨려 들어가므로, 0 을 그대로 돌려주고 부르는 쪽이 판단하게 한다.
+	if (!LootMesh->DoesSocketExist(SocketA) || !LootMesh->DoesSocketExist(SocketB))
+	{
+		return 0.f;
+	}
+
+	// 로컬 기준으로 잰다. 월드 트랜스폼은 물건이 기울거나 회전한 상태에 따라 달라지는데,
+	// 제약이 유지해야 할 것은 '물건의 길이' 이지 '지금 두 손이 얼마나 벌어져 있는가' 가 아니다.
+	const FVector LocalA = LootMesh->GetSocketTransform(SocketA, RTS_Component).GetLocation();
+	const FVector LocalB = LootMesh->GetSocketTransform(SocketB, RTS_Component).GetLocation();
+
+	// 메시 스케일이 1 이 아닐 수 있으므로 컴포넌트 스케일을 곱해 월드 길이로 바꾼다.
+	return (LocalB - LocalA).Size() * LootMesh->GetComponentScale().GetAbsMax();
+}
+
+bool ALootBase::HasEnoughCarriers() const
+{
+	// 인원을 세는 일을 물건이 한다. 두 사람이 각자 세면 서로 다른 답이 나올 수 있는데,
+	// 그러면 한 명은 뛰고 한 명은 기어가는 상태가 된다.
+	return GetCarrierCount() >= GetRequiredCarriers();
+}
+
 float ALootBase::GetCarrySpeedMultiplier() const
 {
+	// 필요 인원을 채웠으면 페널티가 없다. (기획서 5장 — 1인 시 30%, 2인이면 100%)
+	//
+	// 인원이 모자랄 때 느려지는 것이지, 무거워서 항상 느린 것이 아니다.
+	// 두 번째 사람이 반대쪽을 잡아 제 속도가 나오는 것이 협력의 보상이다.
+	if (HasEnoughCarriers())
+	{
+		return 1.f;
+	}
+
 	// 값만 준다. 실제 MaxWalkSpeed 조작은 플레이어 파트가 한다.
 	// 양쪽에서 적용하면 배율이 두 번 곱해져 중량형이 기어간다.
 	return PhysicsData.CarrySpeedMultiplier;
@@ -440,6 +577,16 @@ float ALootBase::GetCarrySpeedMultiplier() const
 
 bool ALootBase::IsJumpAllowedWhileCarried() const
 {
+	// 2인이면 점프도 풀린다.
+	//
+	// [주의] 이건 기획서에 없는 규칙이다. 기획서는 '중량형 점프 불가' 만 말하고
+	//   인원 조건이 없다. 2026-08-19 에 정했다 — 속도와 같은 규칙으로 묶어야
+	//   "둘이 들면 제대로 움직인다" 가 하나의 이해로 남기 때문이다.
+	if (HasEnoughCarriers())
+	{
+		return true;
+	}
+
 	return PhysicsData.bAllowJumpWhileCarried;
 }
 
@@ -456,6 +603,13 @@ bool ALootBase::CanBeCarriedBy(const APawn* Requester) const
 
 	// 이미 다른 사람이 들고 있으면 거부한다.
 	if (IsValid(PrimaryCarrier) && PrimaryCarrier.Get() != Requester)
+	{
+		return false;
+	}
+
+	// 반대쪽 그립을 이미 잡고 있는 사람이 첫 번째로도 잡으려는 경우를 막는다.
+	// 혼자 양쪽을 잡으면 인원이 2로 세어져 페널티가 사라진다.
+	if (SecondaryCarrier.Get() == Requester)
 	{
 		return false;
 	}
@@ -504,6 +658,20 @@ void ALootBase::OnReleased(APawn* Carrier)
 		return;
 	}
 
+	// 반대쪽을 잡은 사람이 있으면 그 사람이 이어받는다. 물건은 바닥에 떨어지지 않는다.
+	//
+	// 중량형도 1인 운반은 된다(속도 30%). 여기서 떨어뜨리면 그 규칙과 어긋나고,
+	// 둘이 옮기다 한 명이 손을 떼면 물건이 발밑으로 쏟아지는 이상한 그림이 된다.
+	// 어태치 대상이 바뀌므로 ApplyCarryState 가 새 운반자에게 다시 붙인다.
+	if (APawn* Second = SecondaryCarrier.Get())
+	{
+		PrimaryCarrier = Second;
+		SecondaryCarrier = nullptr;
+
+		ApplyCarryState();
+		return;
+	}
+
 	PrimaryCarrier = nullptr;
 
 	// 놓은 직후 바닥에 닿는 첫 충격을 Drop 으로 표시한다.
@@ -537,6 +705,18 @@ void ALootBase::OnThrown(APawn* Carrier, const FVector& AimDirection)
 	// 던질 수 없는 물건은 요청을 씹지 않고 제자리에 놓는다.
 	// 거부만 하면 플레이어는 입력이 먹지 않는 것으로 느낀다.
 	if (!CanBeThrown())
+	{
+		OnReleased(Carrier);
+		return;
+	}
+
+	// 둘이 들고 있는 물건은 혼자 던질 수 없다. 상대의 손을 떼게 만드는 셈이라
+	// 그쪽 플레이어 입장에서는 물건이 이유 없이 사라진다.
+	//
+	// 지금은 중량형만 2인 캐리이고 중량형은 bAllowThrow=false 라 위에서 이미 걸린다.
+	// 그래도 막아 두는 것은, 나중에 던질 수 있는 2인 물건이 생겼을 때
+	// 이 조건이 없으면 조용히 통과하기 때문이다.
+	if (IsValid(SecondaryCarrier))
 	{
 		OnReleased(Carrier);
 		return;
@@ -658,6 +838,13 @@ void ALootBase::OnRep_PrimaryCarrier()
 	ApplyCarryState();
 }
 
+void ALootBase::OnRep_SecondaryCarrier()
+{
+	// 두 값은 같은 액터 채널이라 순서는 보장되지만, 한쪽만 바뀐 복제도 온다.
+	// ApplyCarryState 가 두 값을 다 보고 멱등하게 처리하므로 그냥 부르면 된다.
+	ApplyCarryState();
+}
+
 // --------------------------------------------------------------------------
 // 가치
 // --------------------------------------------------------------------------
@@ -714,7 +901,9 @@ void ALootBase::ApplyCarryState()
 	//
 	// bCarryStateApplied 가 따로 필요한 이유: BeginPlay 의 첫 호출은 Carrier 가
 	// 없는 상태(둘 다 nullptr)라 이 검사만으로는 초기화 자체를 건너뛰게 된다.
-	if (bCarryStateApplied && AppliedCarrier.Get() == Carrier)
+	if (bCarryStateApplied
+		&& AppliedCarrier.Get() == Carrier
+		&& AppliedSecondaryCarrier.Get() == SecondaryCarrier.Get())
 	{
 		return;
 	}
@@ -725,6 +914,15 @@ void ALootBase::ApplyCarryState()
 	{
 		SetCarrierMoveIgnore(PreviousCarrier, false);
 		MoveIgnoredCarrier = nullptr;
+	}
+
+	// 두 번째 운반자도 같은 처리를 받는다. 안 걸면 반대쪽을 잡은 사람이
+	// 자기가 든 물건에 막혀 제자리에서 버둥거린다.
+	APawn* PreviousSecondary = MoveIgnoredSecondary.Get();
+	if (PreviousSecondary && PreviousSecondary != SecondaryCarrier.Get())
+	{
+		SetCarrierMoveIgnore(PreviousSecondary, false);
+		MoveIgnoredSecondary = nullptr;
 	}
 
 	if (bCarried)
@@ -739,6 +937,14 @@ void ALootBase::ApplyCarryState()
 		// 서버·클라이언트 양쪽에서 무시를 걸어야 한다. (그래서 이 함수가 ApplyCarryState 안에 있다)
 		SetCarrierMoveIgnore(Carrier, true);
 		MoveIgnoredCarrier = Carrier;
+
+		// 두 번째 운반자는 어태치되지 않는다 — 액터는 부모를 하나만 가진다.
+		// 하지만 물건에 막히지 않아야 하는 것은 똑같다.
+		if (APawn* Second = SecondaryCarrier.Get())
+		{
+			SetCarrierMoveIgnore(Second, true);
+			MoveIgnoredSecondary = Second;
+		}
 
 		AttachToCarrier(Carrier);
 
@@ -783,6 +989,7 @@ void ALootBase::ApplyCarryState()
 	// 무엇을 반영했는지 남긴다. 위쪽 조기 반환이 이 값을 본다.
 	bCarryStateApplied = true;
 	AppliedCarrier = Carrier;
+	AppliedSecondaryCarrier = SecondaryCarrier.Get();
 }
 
 void ALootBase::AttachToCarrier(APawn* Carrier)

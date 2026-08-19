@@ -78,6 +78,13 @@ public:
 	virtual bool CanBeCarriedBy(const APawn* Requester) const override;
 	virtual void OnGrabbed(APawn* Carrier) override;
 	virtual void OnReleased(APawn* Carrier) override;
+	virtual bool CanBeSecondCarrierBy(const APawn* Requester) const override;
+	virtual void OnSecondGrabbed(APawn* Carrier) override;
+	virtual void OnSecondReleased(APawn* Carrier) override;
+	virtual APawn* GetSecondaryCarrier() const override { return SecondaryCarrier; }
+	virtual int32 GetCarrierCount() const override;
+	virtual FName GetGripSocketFor(const APawn* Carrier) const override;
+	virtual float GetGripSeparation() const override;
 	virtual bool CanBeThrown() const override;
 	virtual void OnThrown(APawn* Carrier, const FVector& AimDirection) override;
 	// ComputeThrowAimDirection 도 ICarryable 이지만, BlueprintPure 로 열어 두어
@@ -450,12 +457,30 @@ protected:
 	float DebugGrabRange = 400.f;
 
 	/**
-	 * 현재 이 노획물을 들고 있는 대표(리더).
-	 * 2인 협력 캐리에서도 소유·이동을 결정하는 쪽은 항상 리더 한 명이다.
-	 * 물건 하나에 두 플레이어가 물리 제약을 거는 방식은 네트워크에서 깨진다.
+	 * 먼저 잡은 사람. 노획물이 이 사람에게 어태치된다.
+	 *
+	 * [리더가 아니다] 2인 캐리에서 이 사람이 끌고 다른 사람이 따라오는 구조가 아니다.
+	 *   두 사람의 이동을 합쳐 물체 위치가 정해진다. 여기가 '첫 번째' 인 이유는
+	 *   액터가 부모를 하나만 가질 수 있어서 어태치 대상을 하나 골라야 하기 때문이고,
+	 *   그 이상의 의미는 없다. 그립도 이 사람이 A, 두 번째가 B 로 갈릴 뿐이다.
 	 */
 	UPROPERTY(ReplicatedUsing = OnRep_PrimaryCarrier, VisibleInstanceOnly, Category = "Loot|Carry")
 	TObjectPtr<APawn> PrimaryCarrier;
+
+	/**
+	 * 반대쪽 그립을 잡은 사람. 중량형에서만 채워진다.
+	 *
+	 * [왜 ULootHeavyComponent 가 아니라 여기 있나]
+	 *   중량형인지 판단하는 것은 컴포넌트지만, 이 값은 운반 상태의 일부다.
+	 *   어태치·콜리전·이동 무시가 전부 ALootBase 에 있고 ApplyCarryState 하나가 같이 반영한다.
+	 *   컴포넌트로 빼면 운반 상태가 두 객체로 갈라지고, 둘은 복제 채널이 달라서
+	 *   도착 순서가 어긋난다 — ApplyCarryState 의 멱등 처리로 막아 둔 바로 그 문제다.
+	 *
+	 * 첫 번째 운반자가 손을 떼면 이 사람이 승격된다. 중량형도 1인 운반이 가능하기
+	 * 때문이다 (속도 30%). 물건만 바닥에 떨어뜨리면 그 규칙과 어긋난다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_SecondaryCarrier, VisibleInstanceOnly, Category = "Loot|Carry")
+	TObjectPtr<APawn> SecondaryCarrier;
 
 	/**
 	 * 특성 태그(Loot.Type.*). BeginPlay 에서 채워지고 그 뒤로 바뀌지 않는다.
@@ -472,6 +497,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_PrimaryCarrier();
+
+	UFUNCTION()
+	void OnRep_SecondaryCarrier();
 
 	/**
 	 * 현재 가치($). 파손·유출로 깎인다.
@@ -566,6 +594,14 @@ private:
 	void WarnOnUnusedTypeData() const;
 
 	/**
+	 * 지금 인원이 필요 인원을 채웠는가.
+	 *
+	 * 속도와 점프가 같은 조건을 봐야 해서 한 곳에 둔다. 따로 쓰면 나중에 한쪽만 고쳐서
+	 * "속도는 돌아왔는데 점프는 안 되는" 상태가 생긴다.
+	 */
+	bool HasEnoughCarriers() const;
+
+	/**
 	 * ApplyCarryState 가 한 번이라도 돌았는가.
 	 *
 	 * AppliedCarrier 만으로는 '아직 아무것도 반영 안 됨'과 '놓인 상태를 반영함'을
@@ -581,6 +617,15 @@ private:
 	 * 둘이 같으면 할 일이 없다.
 	 */
 	TWeakObjectPtr<APawn> AppliedCarrier;
+
+	/**
+	 * 위와 같은 짝을 두 번째 운반자에 대해서도 둔다.
+	 *
+	 * 없으면 두 번째 사람이 붙거나 떨어질 때 ApplyCarryState 가 조기 반환에 걸린다.
+	 * 첫 번째 운반자는 그대로이므로 "이미 같은 상태" 로 보이기 때문이다.
+	 * 그러면 그 사람에게 이동 무시가 안 걸려서 자기가 잡은 물건에 막혀 못 움직인다.
+	 */
+	TWeakObjectPtr<APawn> AppliedSecondaryCarrier;
 
 	/**
 	 * [임시] 이번 G 입력이 다룰 노획물 하나를 고른다.
@@ -602,6 +647,9 @@ private:
 
 	/** 상호 무시를 걸어 둔 운반자. 운반자가 바뀔 때 해제 대상을 놓치지 않기 위해 따로 들고 있는다 */
 	TWeakObjectPtr<APawn> MoveIgnoredCarrier;
+
+	/** 두 번째 운반자 몫. 이유는 위와 같다 */
+	TWeakObjectPtr<APawn> MoveIgnoredSecondary;
 
 	/** 마지막으로 이 노획물을 든 사람. PrimaryCarrier 와 달리 놓은 뒤에도 지워지지 않는다 */
 	TWeakObjectPtr<APawn> LastCarrier;

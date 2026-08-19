@@ -55,6 +55,57 @@ public:
 	/** 놓임 처리 (서버 전용). 물리 ON + 소음 발행 */
 	virtual void OnReleased(APawn* Carrier) = 0;
 
+	// ── 2인 캐리 ──────────────────────────────────────────────────────────
+	//
+	// 아래는 기본 구현을 준다. 대부분의 노획물은 1인 운반이고, 그때 답이 전부 자명하다.
+	// 순수 가상으로 두면 중량형과 무관한 구현체까지 6개를 채워야 한다.
+	//
+	// [쓰는 법] 이미 누가 들고 있는 중량형에 다른 사람이 상호작용하면,
+	//   CanBeSecondCarrierBy 로 물어보고 참이면 OnSecondGrabbed 를 부른다.
+	//   놓기는 OnSecondReleased 다. 어느 쪽을 부를지는 GetPrimaryCarrier 와 비교해 고른다.
+
+	/**
+	 * 이 폰이 두 번째 운반자로 붙을 수 있는가.
+	 *
+	 * 중량형이 아니거나, 아직 아무도 안 들고 있거나, 이미 두 번째 자리가 찼거나,
+	 * 요청자가 이미 첫 번째 운반자면 거짓이다.
+	 */
+	virtual bool CanBeSecondCarrierBy(const APawn* Requester) const { return false; }
+
+	/** 두 번째 운반자로 붙는다 (서버 전용) */
+	virtual void OnSecondGrabbed(APawn* Carrier) {}
+
+	/** 두 번째 운반자가 손을 뗀다 (서버 전용) */
+	virtual void OnSecondReleased(APawn* Carrier) {}
+
+	/** 두 번째 운반자. 없으면 nullptr */
+	virtual APawn* GetSecondaryCarrier() const { return nullptr; }
+
+	/**
+	 * 지금 몇 명이 들고 있는가 (0~2).
+	 *
+	 * 속도·점프 판정이 이 값을 쓴다. 세는 일을 물건이 하는 이유는, 두 사람이 각자 세면
+	 * 서로 다른 답이 나올 수 있기 때문이다. 물건 하나가 정답을 정해서 양쪽에 같은 값을 준다.
+	 */
+	virtual int32 GetCarrierCount() const { return GetPrimaryCarrier() ? 1 : 0; }
+
+	/**
+	 * 이 사람이 잡아야 할 노획물 메시의 그립 소켓 이름. 해당 없으면 NAME_None.
+	 *
+	 * 두 사람이 양 끝을 잡게 하려면 각자 어느 쪽인지 알아야 한다.
+	 * 첫 번째 운반자가 A, 두 번째가 B 로 고정이라 모든 머신에서 답이 같다.
+	 */
+	virtual FName GetGripSocketFor(const APawn* Carrier) const { return NAME_None; }
+
+	/**
+	 * 두 그립 사이의 거리(cm). 2인 캐리가 아니면 0.
+	 *
+	 * 메시의 두 소켓 위치에서 계산한다 — 거리 제약이 유지해야 할 목표 길이다.
+	 * 값으로 적어 두지 않는 이유는 메시를 바꿨을 때 숫자만 옛 메시에 맞은 채 남기 때문이다.
+	 */
+	virtual float GetGripSeparation() const { return 0.f; }
+	// ── 2인 캐리 끝 ───────────────────────────────────────────────────────
+
 	/** 던질 수 있는가. 중량형처럼 놓기만 되는 물건이 있다 */
 	virtual bool CanBeThrown() const = 0;
 
