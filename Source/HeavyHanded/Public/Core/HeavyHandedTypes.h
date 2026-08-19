@@ -35,6 +35,7 @@ UENUM(BlueprintType)
 enum class ELootImpactCause : uint8
 {
 	Drop      UMETA(DisplayName = "Drop"),      // 놓기
+	HeavyDrop UMETA(DisplayName = "HeavyDrop"), // 중량형 놓기 — 같은 '놓기'라도 사건의 무게가 다르다
 	Throw     UMETA(DisplayName = "Throw"),     // 던지기
 	Collision UMETA(DisplayName = "Collision"), // 일반 충돌 (낙하·튕김·구름)
 	Break     UMETA(DisplayName = "Break")      // 파괴

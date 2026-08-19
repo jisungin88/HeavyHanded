@@ -507,7 +507,12 @@ void ALootBase::OnReleased(APawn* Carrier)
 	PrimaryCarrier = nullptr;
 
 	// 놓은 직후 바닥에 닿는 첫 충격을 Drop 으로 표시한다.
-	SetPendingImpactCause(ELootImpactCause::Drop, Carrier);
+	//
+	// 중량형은 따로 구분한다. 임펄스만으로는 갈리지 않기 때문이다 — 청동상을 살짝 내려놓는 것과
+	// 왕관을 높은 데서 떨어뜨리는 것이 비슷한 숫자로 나오는데, 플레이어에게는 전혀 다른 사건이다.
+	// 무거운 물건은 살살 놓아도 '쿵' 이어야 한다. 그 판단을 임계값이 아니라 종류로 한다.
+	const bool bHeavy = FindComponentByClass<ULootHeavyComponent>() != nullptr;
+	SetPendingImpactCause(bHeavy ? ELootImpactCause::HeavyDrop : ELootImpactCause::Drop, Carrier);
 
 	ApplyCarryState();
 }
@@ -1018,6 +1023,7 @@ void ALootBase::ReportImpact(ELootImpactCause InCause, float ImpulseMagnitude,
 	Event.ImpactNormal = FVector::UpVector;
 
 	OnLootImpact.Broadcast(Event);
+	OnImpact(Event);
 }
 
 void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
@@ -1088,9 +1094,12 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	}
 
 	// 여기까지 온 것이 '확정 충격 1개'다.
-	// 소음 파트와 파손 컴포넌트가 이 하나를 같이 소비한다.
 	// 아이템은 물리적 사실만 알린다 — 얼마나 시끄러운지는 판단하지 않는다.
+	//
+	// 델리게이트는 파손 컴포넌트가 듣고, BP 훅은 연출을 붙인다. 소음은 여기 없다 —
+	// UNoiseEmitterComponent 가 자기 경로로 따로 발행한다.
 	OnLootImpact.Broadcast(Event);
+	OnImpact(Event);
 
 	// 낙하 1회에 OnHit 5~15회가 확정 1회로 묶이는지를 이 비율로 확인한다.
 	++DebugConfirmedCount;

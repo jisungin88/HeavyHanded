@@ -28,7 +28,7 @@ struct FPredictProjectilePathResult;
  * [설계 원칙 2] 충돌 게이팅은 여기 한 곳에서만 한다.
  *   물리 낙하 1회에 OnHit 은 5~15회 발생한다. 튕김·구름·미세 접촉이 전부 개별 콜백으로 온다.
  *   ALootBase 가 [임계값 + 디바운스]로 걸러 '확정 충격 1개'를 만들고,
- *   그 하나를 OnLootImpact 로 방송해 소음 파트와 파손 컴포넌트가 함께 소비한다.
+ *   그 하나를 OnLootImpact 로 방송하고 OnImpact BP 훅으로 연출을 부른다.
  *   파손 컴포넌트가 raw OnHit 을 따로 세면 파손형이 한 번 낙하로 즉사한다.
  *
  * 서버 권위 + 클라이언트 보간. 클라이언트 예측은 쓰지 않는다.
@@ -169,9 +169,14 @@ public:
 	/**
 	 * 게이팅을 통과한 '확정 충격'만 방송된다. 서버에서만 발생한다.
 	 *
-	 * 구독자는 두 종류다. 둘 다 같은 이벤트를 소비한다.
-	 *   - 소음 파트  : 이 충격이 얼마나 시끄러운지 해석한다 (여기서는 판단하지 않는다)
-	 *   - 파손 컴포넌트: DamageImpulseThreshold 이상만 골라 누적한다
+	 * 지금 구독자는 ULootDurabilityComponent 하나다 — DamageImpulseThreshold 이상만
+	 * 골라 파손으로 누적한다. 연출은 델리게이트가 아니라 OnImpact BP 훅으로 나간다.
+	 *
+	 * [소음 파트는 여기를 구독하지 않는다]
+	 *   노획물의 소음은 UNoiseEmitterComponent 가 자기 경로로 발행한다.
+	 *   그래서 충돌 게이팅이 두 벌 돌지만 목적이 달라 합치지 않는다 —
+	 *   이쪽은 '파손으로 칠 충격' 을 고르고, 소음 쪽은 '얼마나 시끄러운가' 를
+	 *   연속값으로 뽑은 뒤 스팸을 AlertScale 로만 억제한다.
 	 */
 	FOnLootImpactSignature OnLootImpact;
 
@@ -356,6 +361,33 @@ protected:
 	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Loot|Value")
 	void OnValueChanged(int32 NewValue, int32 InBaseValue);
+
+	/**
+	 * 확정 충격 하나가 났을 때 호출된다. 충돌 연출 전용 훅이다. (서버에서만)
+	 *
+	 * [무엇을 하라는 훅인가] 소리·먼지 파티클·자국 데칼·카메라 셰이크.
+	 *   게이팅을 통과한 것만 오므로, 낙하 한 번에 5~15번 터지지 않는다.
+	 *   BP 는 Cause 를 보고 연출을 고른다 — HeavyDrop 이면 낮고 긴 '쿵' 에
+	 *   먼지와 셰이크를 얹고, Drop 이면 가벼운 '탁' 으로 끝낸다.
+	 *
+	 * [왜 임펄스가 아니라 Cause 로 고르나] 세기만으로는 갈리지 않는다.
+	 *   청동상을 살살 내려놓는 것과 왕관을 높은 데서 떨어뜨리는 것이 비슷한 숫자로 나오는데
+	 *   플레이어에게는 전혀 다른 사건이다. 세기는 연출의 '정도' 를 정하는 데 쓰고,
+	 *   무엇을 재생할지는 종류로 고른다.
+	 *
+	 * [왜 서버에서만인가] 확정 충격을 만드는 게이팅이 서버에만 있다. 물리 시뮬레이션
+	 *   결과가 머신마다 미세하게 달라서, 클라이언트가 각자 판정하면 사람마다 다른 순간에
+	 *   다른 횟수로 소리가 난다.
+	 *
+	 *   그래서 지금은 리슨 서버 창에서만 연출이 보인다. 클라이언트까지 보내는 것은
+	 *   Unreliable Multicast 한 번이면 되지만, 연출 자산이 붙고 무엇을 보낼지
+	 *   정해진 뒤에 하는 게 맞다 — 지금 만들면 빈 이벤트를 복제하게 된다.
+	 *
+	 * [경계] 여기서 게임 상태를 바꾸지 않는다. 가치·파손·태그는 이미 C++ 이 정했다.
+	 *   소음도 여기서 내지 않는다 — 그건 UNoiseEmitterComponent 가 별도 경로로 한다.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Loot|Impact")
+	void OnImpact(const FLootImpactEvent& Event);
 
 	/**
 	 * 놓을 때 운반자 몸에서 앞으로 띄우는 여유(cm).
