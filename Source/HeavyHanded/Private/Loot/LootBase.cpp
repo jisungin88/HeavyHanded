@@ -189,6 +189,46 @@ void ALootBase::ApplyLootDefinition()
     LootDisplayName = Row->DisplayName;
 }
 
+#if WITH_EDITOR
+bool ALootBase::CanEditChange(const FProperty* InProperty) const
+{
+    if (!Super::CanEditChange(InProperty) || !InProperty)
+    {
+        return false;
+    }
+
+    // 행이 비어 있으면 아무것도 잠그지 않는다.
+    // ApplyLootDefinition 이 그때는 인라인 값을 그대로 쓰기 때문에 편집이 실제로 먹는다.
+    // 표에 안 올린 실험물을 BP 에서 바로 만드는 길을 UI 에서도 열어 두는 셈이다.
+    if (!LootDefinition.DataTable || LootDefinition.RowName.IsNone())
+    {
+        return true;
+    }
+
+    // 이름을 문자열로 적지 않고 GET_MEMBER_NAME_CHECKED 를 쓴다.
+    // 멤버 이름을 바꾸면 컴파일이 깨져서 잠금이 조용히 풀리는 일이 없다.
+    static const FName TableOwned[] =
+    {
+        GET_MEMBER_NAME_CHECKED(ALootBase, PhysicsData),
+        GET_MEMBER_NAME_CHECKED(ALootBase, StabilityData),
+        GET_MEMBER_NAME_CHECKED(ALootBase, BaseValue),
+    };
+
+    // 구조체 안쪽 필드를 눌러도 부모가 잠겨 있으면 같이 회색이 된다.
+    // 그래서 최상위 세 개만 보면 된다.
+    const FName PropertyName = InProperty->GetFName();
+    for (const FName& Locked : TableOwned)
+    {
+        if (PropertyName == Locked)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+#endif
+
 void ALootBase::WarnOnUnusedTypeData() const
 {
     // 불안정형 수치는 ULootStabilityComponent 말고는 읽는 데가 없다.

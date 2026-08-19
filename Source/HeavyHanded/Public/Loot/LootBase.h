@@ -252,6 +252,18 @@ protected:
 
     virtual void BeginPlay() override;
 
+#if WITH_EDITOR
+    /**
+     * LootDefinition 행이 연결돼 있으면 표가 덮어쓰는 칸들을 디테일 패널에서 잠근다.
+     *
+     * 잠그지 않으면 BP 에서 고칠 수 있는데 PostInitializeComponents 가 그 값을
+     * 표의 값으로 덮어써서 아무 일도 일어나지 않는다. 저장까지 되기 때문에
+     * "고쳤는데 왜 안 먹지" 로 시간을 버리게 된다. 어제 넣은 경고와 같은 종류의
+     * 조용한 실패이고 방향만 반대다.
+     */
+    virtual bool CanEditChange(const FProperty* InProperty) const override;
+#endif
+
     /** 평소에는 꺼져 있고 조준 중에만 켜진다 (궤적 갱신용) */
     virtual void Tick(float DeltaSeconds) override;
 
@@ -273,14 +285,17 @@ protected:
     FDataTableRowHandle LootDefinition;
 
     /**
-     * 무게·질량·임계값. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다.
-     * BP 자식 클래스가 값만 지정하는 껍데기가 되도록 EditAnywhere 로 연다.
+     * 무게·질량·임계값. LootDefinition 을 지정했으면 그 행의 값으로 덮어써지고,
+     * 그때는 CanEditChange 가 이 칸을 회색으로 잠근다. 수치는 표에서 본다.
+     *
+     * EditAnywhere 를 유지하는 것은 행을 비웠을 때 다시 열리게 하기 위해서다.
+     * VisibleAnywhere 로 바꾸면 표에 안 올린 실험물을 BP 에서 만들 길이 사라진다.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
     FLootPhysicsData PhysicsData;
 
     /**
-     * 불안정형 수치. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다.
+     * 불안정형 수치. LootDefinition 을 지정했으면 그 행의 값으로 덮어써진다 (위와 같이 잠긴다).
      * ULootStabilityComponent 를 붙이지 않은 노획물에서는 쓰이지 않는다.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
@@ -333,7 +348,7 @@ protected:
     bool bCarryGripAtBottom = true;
 
     /**
-     * 손상되지 않았을 때의 가치($). 노획물 종류별로 BP 에서 지정한다.
+     * 손상되지 않았을 때의 가치($). LootDefinition 행에서 오며 그때는 회색으로 잠긴다.
      *
      * 기획서의 목표 금액은 저택 $50,000 / 박물관 $120,000 / 은행 $250,000 이고,
      * 이 값들은 전부 임시라 플레이테스트로 조정된다. 8단계에서 DataAsset 으로 뺀다.
