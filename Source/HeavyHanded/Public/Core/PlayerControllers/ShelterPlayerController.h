@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
+#include "Core/PlayerStates/ShelterPlayerState.h"
 
 #include "ShelterPlayerController.generated.h"
 
@@ -62,5 +63,20 @@ public:
 
 	/** 채팅 한 줄의 최대 길이. 서버 검증에 쓰인다 */
 	static constexpr int32 MaxChatMessageLength = 200;
+
+	// --------------------------------------------------
+
+public:
+
+	// 클라이언트에서 호출 - 서버에서 실제로 실행됨
+	// Widget에서 직업 버튼을 눌렀을 때 사용
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSelectJob(EJobType NewJob);
+
+	// 현재 직업 선택 해제
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerClearJob();
+
+
 
 };

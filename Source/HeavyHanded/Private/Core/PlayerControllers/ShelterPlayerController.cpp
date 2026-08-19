@@ -35,6 +35,7 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
+
 //void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
 //{
 //}
@@ -80,10 +81,7 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 		}
 	}
 
-	FString PlayerName = FString::Printf(
-		TEXT("Player_%d"),
-		PlayerIndex
-	);
+	FString PlayerName = FString::Printf(TEXT("Player_%d"),PlayerIndex);
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -98,8 +96,49 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 }
 
+// -----------------------------------------------------------------
 
 
+void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
+{
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
+	if (!MyPlayerState)
+	{
+		return;
+	}
+
+	const bool bSuccess = GameState->SelectJob(MyPlayerState, NewJob);
+	if (!bSuccess)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("직업 선택 실패"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("직업 선택 성공"));
+}
+
+void AShelterPlayerController::ServerClearJob_Implementation()
+{
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
+	if (!MyPlayerState)
+	{
+		return;
+	}
+
+	GameState->ClearJob(MyPlayerState);
+}
 
 
 
