@@ -12,6 +12,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Net/UnrealNetwork.h"
+#include "Interfaces/Carryable.h"   // 운반 상태를 노획물에게 알린다 (SetHeldActor)
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -460,6 +461,15 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     if (AActor* PreviousHeldActor = HeldActor)
     {
         ApplyCarryState(PreviousHeldActor, false);
+
+        // 노획물에게도 알린다. 이쪽이 PrimaryCarrier 를 비우고 Loot.State.Dropped 를 붙인다 —
+        // 그게 없으면 밴 적재존은 "아무도 안 들고 있다" 를 영영 참으로 보고,
+        // 압력판 같은 상태 기반 판정도 물건이 놓였다는 것을 모른다.
+        if (ICarryable* Carryable = Cast<ICarryable>(PreviousHeldActor))
+        {
+            Carryable->OnReleased(this);
+        }
+
         UE_LOG(LogCarry, Log, TEXT("[서버] 운반 해제: %s"), *GetNameSafe(PreviousHeldActor));
     }
 
@@ -493,6 +503,17 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     }
 
     HeldActor = NewHeldActor;
+
+    // 부착 성공을 확인한 뒤에 알린다. 위 검증에서 되돌아가는 경로가 있어서,
+    // 먼저 알리면 붙지도 않은 물건을 노획물 쪽이 "들렸다" 고 믿는다.
+    //
+    // 이쪽이 PrimaryCarrier / LastCarrier 를 채우고 소켓에 다시 붙인다.
+    // 위 ApplyCarryState 와 하는 일이 겹치지만 대상 메시가 같아 결과는 노획물 설계대로 남는다 —
+    // 소지 중 콜리전 프로파일(CarriedLoot)과 운반자 상호 무시는 이쪽에만 있다.
+    if (ICarryable* Carryable = Cast<ICarryable>(NewHeldActor))
+    {
+        Carryable->OnGrabbed(this);
+    }
 
     UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
         *GetNameSafe(NewHeldActor),
