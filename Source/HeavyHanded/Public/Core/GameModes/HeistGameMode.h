@@ -105,6 +105,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Heist", meta = (ClampMin = "1.0", Units = "s"))
 	float HeistSeconds = 420.f;
 
+	/**
+	 * 이 작업 레벨이 어느 장소인가 (Site.*). 기획서 2장 — 저택 · 박물관 · 은행.
+	 *
+	 * 캠페인 진행(3개 장소 통과 = 최종 성공)을 기록하는 키다. 비워 두면 이 판을 성공해도
+	 * 진행이 올라가지 않으므로, 결과 확정에서 경고를 남긴다.
+	 *
+	 * 기본값을 주지 않는다 — 저택 값을 박아 두면 박물관 BP 가 지정을 잊었을 때
+	 * 조용히 저택을 두 번 통과한 것으로 기록된다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Heist")
+	FGameplayTag SiteTag;
+
 private:
 	/**
 	 * 이 판에 몇 명이 올 예정인지 알아낸다. 모르면 0.
@@ -168,10 +180,22 @@ private:
 	/**
 	 * 적재 금액을 팀 공용 골드로 넘긴다. (결과 등급이 확정된 뒤)
 	 *
-	 * 지급 기준은 `UHeistSettings::MinOutcomeForPayout` — 기본값은 성공에서만이다.
+	 * 지급 기준은 `UHeistSettings::MinOutcomeForPayout` — 기본값은 부분 성공 이상이다.
 	 * 여기서 넘긴 값이 은신처 정산과 장비 구매의 입력이 된다.
 	 */
 	void PayoutTeamGold();
+
+	/**
+	 * 이 장소를 통과했으면 런 진행에 기록한다. (결과 등급이 확정된 뒤)
+	 *
+	 * 통과 기준은 등급 `Success` 뿐이다 — 기획서 2장의 작업 성공(목표 금액 달성 + 최소 1인
+	 * 승차)과 같은 선이고, 그 아래는 "실패한 장소를 처음부터 재시작" 대상이다.
+	 * 목표를 못 채운 판(Partial)은 실어 온 돈은 받아 가지만 장소는 다시 해야 한다.
+	 *
+	 * [여기서 하지 않는 것] 통과 뒤에 어디로 가는가(은신처 · 최종 성공 연출)는 정하지 않는다.
+	 *   사실만 남기고 이동은 FinishMatch 재정의(세션 파트)가 정한다.
+	 */
+	void RecordSiteProgress();
 
 	/**
 	 * 체포된 사람을 런 진행으로 넘긴다. (체포가 확정된 뒤)

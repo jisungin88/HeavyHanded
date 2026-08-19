@@ -103,15 +103,18 @@ public:
 	/**
 	 * 적재 금액을 팀 공용 골드로 넘기는 최소 등급.
 	 *
-	 * 기본값은 Success — 목표를 채우고 전원이 무사히 빠져나온 판에서만 지급한다.
+	 * 기본값은 Partial — **밴이 한 명이라도 태우고 떠났으면 실어 온 돈은 들어온다** (기획 확정).
+	 *   목표 금액을 못 채운 판도 마찬가지다. 목표 미달의 대가는 등급(Partial)과
+	 *   장소 재도전이지 무보수가 아니고, 미승차자의 대가는 체포다.
 	 *
-	 * [값으로 뺀 이유] "성공했을 때만 준다" 와 3단계 등급이 만나면 경계가 하나 애매하다.
-	 *   목표는 채웠는데 한 명이 잡힌 판(Partial)이 한 푼도 못 받는 것이 맞는지는
-	 *   플레이해 봐야 안다. 코드에 박아 두면 그때 코드를 고쳐야 하고, 여기 있으면
-	 *   Partial 로 한 칸 내리는 것으로 끝난다.
+	 *   Failure 는 전멸뿐이라, 이 기본값에서 지급이 빠지는 판은 아무도 돌아오지 못한 판 하나다.
+	 *
+	 * [값으로 남겨 둔 이유] 밸런싱에서 가장 먼저 흔들릴 자리다. 목표 미달 판이 전액을
+	 *   가져가는 것이 후반 장소($250,000)에서도 성립하는지는 플레이해 봐야 안다.
+	 *   Success 로 한 칸 올리면 "목표를 채운 판에서만 지급" 이 된다.
 	 *
 	 * 등급은 Failure < Partial < Success 순서라 이 값 이상이면 지급한다.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Payout")
-	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Success;
+	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Partial;
 };

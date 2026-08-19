@@ -293,6 +293,40 @@ bool URunProgressSubsystem::TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Co
 // 수명 경계
 // ──────────────────────────────────────────────────────────────
 
+void URunProgressSubsystem::RecordSiteCleared(const FGameplayTag& SiteTag)
+{
+	if (!EnsureServerAuthority(TEXT("RecordSiteCleared")))
+	{
+		return;
+	}
+
+	// 빈 태그를 받으면 목록의 개수가 곧 진행도라는 계약이 깨진다. 그 값이 최종 성공을
+	// 가르므로 조용히 넣지 않고 어느 GameMode 가 빠뜨렸는지 알 수 있게 남긴다
+	if (!SiteTag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("장소 통과를 기록하지 못했습니다 — 사이트 태그가 비어 있습니다. "
+				 "작업 레벨의 GameMode 블루프린트에 SiteTag 를 지정하세요."));
+		return;
+	}
+
+	if (ClearedSites.Contains(SiteTag))
+	{
+		// 재도전해서 다시 통과했다. 진행도는 '어디까지 왔는가' 라 두 번 세지 않는다
+		return;
+	}
+
+	ClearedSites.Add(SiteTag);
+
+	UE_LOG(LogHeist, Log, TEXT("장소 통과 — %s (통과 %d곳)"),
+		*SiteTag.ToString(), ClearedSites.Num());
+}
+
+bool URunProgressSubsystem::IsSiteCleared(FGameplayTag SiteTag) const
+{
+	return SiteTag.IsValid() && ClearedSites.Contains(SiteTag);
+}
+
 void URunProgressSubsystem::BeginNewRun()
 {
 	if (!EnsureServerAuthority(TEXT("BeginNewRun")))
@@ -300,13 +334,15 @@ void URunProgressSubsystem::BeginNewRun()
 		return;
 	}
 
-	// 팀 골드와 역할은 건드리지 않는다 — 둘 다 캠페인 단위다.
-	// 골드는 판을 건너 누적되고, 역할은 한 번 고르면 바뀌지 않는다
+	// 팀 골드 · 역할 · 통과한 장소는 건드리지 않는다 — 셋 다 캠페인 단위다.
+	// 골드는 판을 건너 누적되고, 역할은 한 번 고르면 바뀌지 않으며,
+	// 진행도는 "이 방에서 어디까지 왔는가" 라 판마다 초기화될 값이 아니다
 	ConfirmedRoster.Reset();
 	PurchasedEquipment.Reset();
 
-	UE_LOG(LogHeist, Log, TEXT("새 판을 시작합니다 — 명단·장비 초기화 (팀 골드 $%d, 확정 역할 %d개 유지)"),
-		TeamGold, SelectedRoles.Num());
+	UE_LOG(LogHeist, Log,
+		TEXT("새 판을 시작합니다 — 명단·장비 초기화 (팀 골드 $%d, 확정 역할 %d개, 통과 %d곳 유지)"),
+		TeamGold, SelectedRoles.Num(), ClearedSites.Num());
 }
 
 void URunProgressSubsystem::ResetCampaign()
@@ -321,9 +357,11 @@ void URunProgressSubsystem::ResetCampaign()
 	SelectedRoles.Reset();
 	PurchasedEquipment.Reset();
 
-	// 체포는 캠페인 단위라 BeginNewRun 이 지우지 않는다. 여기서만 지운다 —
-	// 안 지우면 새 방을 열어도 지난 방에서 잡힌 사람이 계속 갇혀 있다
+	// 체포와 진행도는 캠페인 단위라 BeginNewRun 이 지우지 않는다. 여기서만 지운다 —
+	// 안 지우면 새 방을 열어도 지난 방에서 잡힌 사람이 계속 갇혀 있고,
+	// 지난 방에서 턴 저택이 통과한 것으로 남아 첫 판부터 박물관으로 간다
 	ArrestedPlayers.Reset();
+	ClearedSites.Reset();
 
 	UE_LOG(LogHeist, Log, TEXT("새 방을 엽니다 — 팀 골드와 역할을 포함해 전부 초기화했습니다."));
 }

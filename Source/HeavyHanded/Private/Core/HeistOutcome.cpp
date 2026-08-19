@@ -2,23 +2,22 @@
 
 namespace HeistOutcome
 {
-	EHeistOutcome Evaluate(bool bTargetReached, bool bEveryoneEscaped)
+	EHeistOutcome Evaluate(bool bTargetReached, bool bAnyoneEscaped)
 	{
-		if (bTargetReached && bEveryoneEscaped)
+		// 전멸은 목표를 채웠어도 실패다 (기획서 2장 — "목표 금액 미달 또는 플레이어 전멸").
+		//
+		// 두 조건이 대칭이 아닌 곳이 여기다. 금고를 다 털었어도 아무도 밴에 못 탔다면
+		// 그 돈은 현장에 남는다 — 등급이 되지 않고 정산도 없다.
+		if (!bAnyoneEscaped)
 		{
-			return EHeistOutcome::Success;
+			return EHeistOutcome::Failure;
 		}
 
-		// 둘 중 하나만 된 경우는 성격이 다르지만 같은 등급이다.
-		// 돈을 못 채우고 무사히 나온 판과, 돈은 챙겼지만 사람을 두고 온 판을 굳이 갈라
-		// 등급을 넷으로 만들면 결과 화면이 설명해야 할 것만 늘어난다 —
-		// 무엇이 모자랐는지는 등급이 아니라 적재액과 체포 명단이 말해 준다.
-		if (bTargetReached || bEveryoneEscaped)
-		{
-			return EHeistOutcome::Partial;
-		}
-
-		return EHeistOutcome::Failure;
+		// 여기부터는 최소 1인이 밴에 탔다. 남은 것은 목표 금액뿐이다.
+		//
+		// 몇 명을 두고 왔는지는 등급에 반영하지 않는다. 그 대가는 체포(다음 작업 관전)로
+		// 이미 치르고, 누가 남았는지는 등급이 아니라 결과 화면의 체포 명단이 말해 준다.
+		return bTargetReached ? EHeistOutcome::Success : EHeistOutcome::Partial;
 	}
 
 	const TCHAR* ToString(EHeistOutcome Outcome)

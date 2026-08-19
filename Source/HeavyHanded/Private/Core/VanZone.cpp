@@ -342,9 +342,21 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 		return false;
 	}
 
+	// 결과 화면이 뜬 뒤에는 타지도 내리지도 못한다.
+	//
+	// 명단은 이미 얼어 있으므로(AHeistGameState::SetBoarded) 여기를 안 막아도 집계는
+	// 안전하다. 그런데도 막는 것은 몸 때문이다 — 명단에는 탈출로 남은 사람이 밴에서
+	// 걸어 나오면 결과 화면과 눈앞의 장면이 어긋난다.
+	if (HeistState->IsPhase(HHTags::Phase_Result))
+	{
+		ShowLoadDebug(TEXT("거부 — 결과 화면에서는 타고 내릴 수 없다"),
+			FColor::Red, Player->GetActorLocation());
+		return false;
+	}
+
 	const bool bWasBoarded = HeistState->IsBoarded(PlayerState);
 
-	// 내리는 것은 언제나 된다. 탈 때만 조건을 본다 —
+	// 내리는 것은 (결과 화면을 빼면) 언제나 된다. 탈 때만 조건을 본다 —
 	// 페이즈가 넘어갔다고 탄 사람을 밴에 가둬 둘 이유가 없다
 	if (!bWasBoarded && !CanBoardNow(Player))
 	{

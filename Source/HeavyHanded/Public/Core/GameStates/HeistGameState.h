@@ -266,7 +266,7 @@ public:
 	 *   HUD 와 은신처 정산이 각자 세면 화면에는 성공인데 돈은 안 들어오는 판이 생긴다.
 	 *
 	 * 사유(`GetPhaseReason`)와는 다른 값이다. 경보로 나갔다고 실패가 아니고,
-	 * 시간이 다 됐다고 실패도 아니다 — 등급은 목표 달성과 전원 탈출로만 정해진다.
+	 * 시간이 다 됐다고 실패도 아니다 — 등급은 목표 달성과 '최소 1인 탈출' 로만 정해진다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	EHeistOutcome GetOutcome() const { return Outcome; }
@@ -335,6 +335,20 @@ public:
 	FOnHeistResultConfirmChanged OnResultConfirmChanged;
 
 	/**
+	 * 이 PlayerState 를 인원 계산에 넣을 것인가.
+	 *
+	 * 관전자와 접속이 끊긴 뒤 남아 있는 PlayerState 를 걸러낸다. 이걸 안 걸면
+	 * 나간 사람이 영영 안 탄 것으로 남아서 "생존자 전원 승차" 가 성립하지 않고,
+	 * 남은 사람들이 도주 시간을 끝까지 기다려야 한다.
+	 *
+	 * [왜 공개돼 있는가] 체포 확정(AHeistGameMode::ResolveArrests)이 같은 기준으로 돌아야 한다.
+	 *   전원 탈출 여부를 체포 명단으로 판정하기 때문에, 세는 모집단이 두 곳에서 갈라지면
+	 *   체포되지 않은 사람이 생기면서 등급이 조용히 한 칸 올라간다. 규칙은 여기 하나뿐이다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
+	static bool IsCountedPlayer(const APlayerState* Player);
+
+	/**
 	 * 이 플레이어가 다운 상태인가. ASC 가 없으면 false.
 	 *
 	 * 정적 함수인 이유는 판정에 GameState 가 필요 없기 때문이다 — PlayerState 의 ASC 만 본다.
@@ -362,8 +376,8 @@ protected:
 	/**
 	 * 결과 등급을 확정한다. (서버 전용 — AHeistGameMode 만)
 	 *
-	 * **체포를 확정한 뒤에 불러야 한다.** 전원 탈출 여부를 체포 명단으로 보기 때문에,
-	 * 순서를 뒤집으면 아무도 체포되지 않은 것으로 보여 항상 성공이 나온다.
+	 * **체포를 확정한 뒤에 불러야 한다.** 탈출 여부를 체포 명단으로 보기 때문에,
+	 * 순서를 뒤집으면 아무도 체포되지 않은 것으로 보여 등급이 실제보다 높게 나온다.
 	 *
 	 * SetPhase 안에서 하지 않는 이유가 그것이다 — 체포 확정은 페이즈가 바뀐 *뒤*에
 	 * GameMode 가 한다.
@@ -471,15 +485,6 @@ protected:
 	void OnRep_BoardedPlayers();
 
 private:
-	/**
-	 * 이 PlayerState 를 인원 계산에 넣을 것인가.
-	 *
-	 * 관전자와 접속이 끊긴 뒤 남아 있는 PlayerState 를 걸러낸다. 이걸 안 걸면
-	 * 나간 사람이 영영 안 탄 것으로 남아서 "생존자 전원 승차" 가 성립하지 않고,
-	 * 남은 사람들이 도주 시간을 끝까지 기다려야 한다.
-	 */
-	static bool IsCountedPlayer(const APlayerState* Player);
-
 	/** State.InVan / State.Arrested 미러를 갱신한다. (서버 전용) */
 	static void SetMirrorTag(APlayerState* Player, const FGameplayTag& Tag, bool bApply);
 

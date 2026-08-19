@@ -330,8 +330,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 
 	if (Phase == HHTags::Phase_Result)
 	{
-		// 순서가 규칙이다. 체포를 먼저 확정해야 "전원 탈출인가" 를 셀 수 있고,
-		// 등급이 나와야 지급 여부를 판정할 수 있다.
+		// 순서가 규칙이다. 체포를 먼저 확정해야 "빠져나온 사람이 있는가" 를 셀 수 있고,
+		// 등급이 나와야 지급 여부와 장소 통과 여부를 판정할 수 있다.
 		ResolveArrests();
 
 		if (AHeistGameState* GS = GetGameState<AHeistGameState>())
@@ -341,6 +341,7 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 
 		PayoutTeamGold();
 		CarryOverArrests();
+		RecordSiteProgress();
 	}
 }
 
@@ -454,7 +455,10 @@ void AHeistGameMode::ResolveArrests()
 
 	for (APlayerState* Player : Players)
 	{
-		if (!IsValid(Player) || Player->IsOnlyASpectator() || Player->IsInactive())
+		// 세는 모집단은 GameState 와 같아야 한다. 여기서 조건을 다시 적으면 한쪽만 고쳐졌을 때
+		// 체포되지 않은 사람이 생기고, 전원 탈출을 체포 명단으로 보는 FinalizeOutcome 이
+		// 그를 탈출로 세어 등급이 조용히 한 칸 올라간다
+		if (!AHeistGameState::IsCountedPlayer(Player))
 		{
 			continue;
 		}
@@ -512,6 +516,36 @@ void AHeistGameMode::PayoutTeamGold()
 
 	UE_LOG(LogHeist, Log, TEXT("정산 — 적재 $%d 를 팀 골드로 적립. 잔액 $%d"),
 		GS->GetLoadedValue(), Run->GetTeamGold());
+}
+
+void AHeistGameMode::RecordSiteProgress()
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS)
+	{
+		return;
+	}
+
+	// 통과는 '작업 성공' 뿐이다 (기획서 2장 — 실패한 장소는 처음부터 재시작).
+	// 목표를 못 채운 판(Partial)은 실어 온 돈은 받아 가지만 장소는 다시 해야 한다.
+	if (GS->GetOutcome() < EHeistOutcome::Success)
+	{
+		UE_LOG(LogHeist, Log, TEXT("장소 미통과 — 등급 %s. 이 장소는 재도전 대상이다."),
+			HeistOutcome::ToString(GS->GetOutcome()));
+		return;
+	}
+
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("URunProgressSubsystem 이 없어 장소 통과를 기록하지 못했습니다."));
+		return;
+	}
+
+	// 무효 태그 경고는 서브시스템이 남긴다 — 목록을 오염시키지 않는 것이 그쪽 책임이라
+	// 판정을 여기서 한 번 더 적지 않는다
+	Run->RecordSiteCleared(SiteTag);
 }
 
 void AHeistGameMode::CarryOverArrests()
