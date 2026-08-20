@@ -37,6 +37,9 @@ void AShelterPlayerController::BeginPlay()
 
 AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 {
+	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, GetPlayerState<AShelterPlayerState>(), *GetPlayerState<AShelterPlayerState>()->GetName());
+	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+
 	return GetPlayerState<AShelterPlayerState>();
 }
 
@@ -106,7 +109,7 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 {
-
+	/*
 	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
 	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
 	if (GEngine)
@@ -139,6 +142,51 @@ void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 	{
 		return;
 	}
+	*/
+
+
+	AShelterGameState* GameState =
+		GetWorld()->GetGameState<AShelterGameState>();
+
+	AShelterPlayerState* MyPlayerState =
+		GetPlayerState<AShelterPlayerState>();
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[1 PC] PS=%p / %s / Authority=%s"),
+			MyPlayerState,
+			MyPlayerState ? *MyPlayerState->GetName() : TEXT("NULL"),
+			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT")
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f, FColor::Yellow, Message
+		);
+	}
+
+	if (!GameState || !MyPlayerState)
+	{
+		return;
+	}
+
+	const bool bSuccess =
+		GameState->SelectJob(MyPlayerState, NewJob);
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[1 PC] SelectJob 결과: %s"),
+			bSuccess ? TEXT("SUCCESS") : TEXT("FAIL")
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f,
+			bSuccess ? FColor::Green : FColor::Red,
+			Message
+		);
+	}
+
 
 }
 

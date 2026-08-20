@@ -30,21 +30,6 @@ void AShelterGameState::UpdateLobbyPlayerCount()
 	OnLobbyPlayerCountChanged.Broadcast(PlayerCount);
 }
 
-void AShelterGameState::OnRep_JobStateChanged()
-{
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Client GameState JobState Changed"));
-	}
-
-	OnJobStateChanged.Broadcast();
-}
-
-void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(AShelterGameState, JobStateChanged);
-}
 
 // 해당 직업을 누군가 이미 선택했는지 검사
 bool AShelterGameState::IsJobAlreadySelected(EJobType Job) const
@@ -126,6 +111,21 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 		return false;
 	}
 
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[2 GS] PS=%p / %s / Authority=%s"),
+			PlayerState,
+			*PlayerState->GetName(),
+			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT")
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f, FColor::Yellow, Message
+		);
+	}
+
+
 
 	// None은 선택 불가능
 	if (NewJob == EJobType::None)
@@ -152,12 +152,26 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 
 	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("2. GS -> SelectJob 호출"));
 
+
+
+
+	UE_LOG(LogTemp, Error,
+		TEXT("[SET JOB] PS=%p Name=%s Authority=%s Job=%s"),
+		this,
+		*GetName(),
+		HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"),
+		*UEnum::GetValueAsString(NewJob));
+
+
+
+
 	// 직업 변경
 	PlayerState->SetSelectedJob(NewJob);
 
 	// 값 자체를 변경해야 클라이언트에서 OnRep가 실행됨
 	JobStateChanged++;
-	OnJobStateChanged.Broadcast();
+	//OnJobStateChanged.Broadcast();
+
 
 	return true;
 
@@ -184,3 +198,19 @@ bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
 	return true;
 }
 
+
+void AShelterGameState::OnRep_JobStateChanged()
+{
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Client GameState JobState Changed"));
+	}
+
+	OnJobStateChanged.Broadcast();
+}
+
+void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AShelterGameState, JobStateChanged);
+}

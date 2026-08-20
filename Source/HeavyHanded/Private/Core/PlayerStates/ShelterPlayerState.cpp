@@ -14,9 +14,28 @@ void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 		return;
 	}
 
-	FString Message2 = FString::Printf(TEXT("3. PS : %s -> SelectJob 호출 / %s -> %s"),
-		*GetName(), *UEnum::GetValueAsString(SelectedJob), *UEnum::GetValueAsString(NewJob));
-	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, Message2);
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[3 PS SERVER] PS=%p / %s / %s -> %s"),
+			this,
+			*GetName(),
+			*UEnum::GetValueAsString(SelectedJob),
+			*UEnum::GetValueAsString(NewJob)
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f, FColor::Yellow, Message
+		);
+
+
+		FString Message2 = FString::Printf(TEXT("[server] 3. PS : %s -> SelectJob 호출 / %s -> %s"),
+			*GetName(), *UEnum::GetValueAsString(SelectedJob), *UEnum::GetValueAsString(NewJob));
+		//GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, Message2);
+
+	}
+
 
 	// 새로운 직업 저장
 	SelectedJob = NewJob;
@@ -33,26 +52,29 @@ void AShelterPlayerState::OnRep_SelectedJob()
 	FString JobName = UEnum::GetValueAsString(SelectedJob);
 	if (GEngine)
 	{
-		FString Message = FString::Printf(TEXT("4. PS -> SelectedJob Replicated: %s - OnRep_SelectedJob 호출"), *JobName);
-		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Green, Message);
+		//FString Message = FString::Printf(TEXT("4. PS -> SelectedJob Replicated: %s - OnRep_SelectedJob 호출"), *JobName);
+		//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Green, Message);
 
-		if (OnSelectedJobChanged.IsBound())
-		{
-			//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("델리게이트 바인딩됨"));
-		}
-		else
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, TEXT("델리게이트 바인딩 안됨"));
-		}
+		//if (OnSelectedJobChanged.IsBound())
+		//{
+		//	//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("델리게이트 바인딩됨"));
+		//}
+		//else
+		//{
+		//	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, TEXT("델리게이트 바인딩 안됨"));
+		//}
 
-		FString Message2 = FString::Printf(TEXT("[%s]OnRep PS: %s"),
-			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), *GetName());
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, Message2);
-		
+		//FString Message2 = FString::Printf(TEXT("4. PS -> OnRep_SelectedJob 호출[%s]OnRep PS: %s / Bound: %s"),
+			//HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), *GetName(), OnSelectedJobChanged.IsBound() ? TEXT("TRUE") : TEXT("FALSE"));
+		//GEngine->AddOnScreenDebugMessage(-1, 10.0f, OnSelectedJobChanged.IsBound() ? FColor::Green : FColor::Red, Message2);
+	}
 
 
-		Message2 = FString::Printf(TEXT("Delegate Bound: %s"), OnSelectedJobChanged.IsBound() ? TEXT("TRUE") : TEXT("FALSE"));
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, Message2);
+	FString Message = FString::Printf(TEXT("[4 OnRep] PS=%p / %s / Authority=%s / Job=%s"), this, *GetName(), HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), *UEnum::GetValueAsString(SelectedJob));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, Message);
 	}
 
 
