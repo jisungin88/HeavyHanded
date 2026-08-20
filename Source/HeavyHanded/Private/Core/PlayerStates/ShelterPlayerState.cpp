@@ -14,18 +14,49 @@ void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 		return;
 	}
 
+	FString Message2 = FString::Printf(TEXT("3. PS : %s -> SelectJob 호출 / %s -> %s"),
+		*GetName(), *UEnum::GetValueAsString(SelectedJob), *UEnum::GetValueAsString(NewJob));
+	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, Message2);
+
 	// 새로운 직업 저장
 	SelectedJob = NewJob;
 
 	// 서버에서는 RepNotify가 자동 호출되지 않기 때문에
 	// 서버에서도 UI 갱신이 필요하다면 직접 호출
-	OnRep_SelectedJob();
+	//OnRep_SelectedJob();
+	OnSelectedJobChanged.Broadcast();
+
 }
 
 void AShelterPlayerState::OnRep_SelectedJob()
 {
-	UE_LOG(LogTemp, Warning, TEXT("SelectedJob Replicated: %d"),
-		static_cast<int32>(SelectedJob));
+	FString JobName = UEnum::GetValueAsString(SelectedJob);
+	if (GEngine)
+	{
+		FString Message = FString::Printf(TEXT("4. PS -> SelectedJob Replicated: %s - OnRep_SelectedJob 호출"), *JobName);
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Green, Message);
+
+		if (OnSelectedJobChanged.IsBound())
+		{
+			//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("델리게이트 바인딩됨"));
+		}
+		else
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, TEXT("델리게이트 바인딩 안됨"));
+		}
+
+		FString Message2 = FString::Printf(TEXT("[%s]OnRep PS: %s"),
+			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), *GetName());
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, Message2);
+		
+
+
+		Message2 = FString::Printf(TEXT("Delegate Bound: %s"), OnSelectedJobChanged.IsBound() ? TEXT("TRUE") : TEXT("FALSE"));
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, Message2);
+	}
+
+
+
 	// 직업 UI 갱신 이벤트 등을 연결
 	OnSelectedJobChanged.Broadcast();
 }

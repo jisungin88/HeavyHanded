@@ -2,6 +2,7 @@
 
 
 #include "Core/GameStates/ShelterGameState.h"
+#include "Net/UnrealNetwork.h"
 
 int32 AShelterGameState::GetLobbyPlayerCount() const
 {
@@ -27,6 +28,22 @@ void AShelterGameState::UpdateLobbyPlayerCount()
 	const int32 PlayerCount = PlayerArray.Num();
 
 	OnLobbyPlayerCountChanged.Broadcast(PlayerCount);
+}
+
+void AShelterGameState::OnRep_JobStateChanged()
+{
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Client GameState JobState Changed"));
+	}
+
+	OnJobStateChanged.Broadcast();
+}
+
+void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AShelterGameState, JobStateChanged);
 }
 
 // 해당 직업을 누군가 이미 선택했는지 검사
@@ -97,9 +114,15 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	}
 
 
+
+
 	// PlayerState가 없으면 실패
 	if (!PlayerState)
 	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("GS -> PlayerState 없음"));
+		}
 		return false;
 	}
 
@@ -123,12 +146,18 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	// 다른 플레이어가 이미 이 직업을 선택했는지 검사
 	if (IsJobAlreadySelected(NewJob))
 	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("GS -> 이미 선택된 직업입니다."));
 		return false;
 	}
 
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("2. GS -> SelectJob 호출"));
 
 	// 직업 변경
 	PlayerState->SetSelectedJob(NewJob);
+
+	// 값 자체를 변경해야 클라이언트에서 OnRep가 실행됨
+	JobStateChanged++;
+	OnJobStateChanged.Broadcast();
 
 	return true;
 

@@ -35,7 +35,6 @@ class HEAVYHANDED_API AShelterPlayerState : public APlayerState
 
 
 public:
-
 	// 현재 플레이어가 선택한 직업
 	// 서버에서 변경하면 클라이언트들에게 자동으로 복제됨
 	UPROPERTY(ReplicatedUsing = OnRep_SelectedJob, BlueprintReadOnly)

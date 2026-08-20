@@ -36,6 +36,11 @@ protected:
 
 public:
 
+
+	UFUNCTION(BlueprintPure)
+	AShelterPlayerState* GetMyPlayerState() const;
+
+
 	/**
 	 * 채팅 한 줄을 서버로 보낸다. 채팅 UI(WBP_ChatBox)가 호출한다.
 	 *

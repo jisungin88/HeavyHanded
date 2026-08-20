@@ -35,6 +35,11 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
+AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
+{
+	return GetPlayerState<AShelterPlayerState>();
+}
+
 
 //void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
 //{
@@ -101,26 +106,40 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 {
+
 	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
+	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
+	if (GEngine)
 	{
-		return;
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("1. PC->ServerSelectJob 호출"));
+		if (!GameState)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> GameState 없음"));
+			return;
+		}
+
+		if (!MyPlayerState)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> PlayerState 없음"));
+			return;
+		}
 	}
 
-	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
-	if (!MyPlayerState)
-	{
-		return;
-	}
 
 	const bool bSuccess = GameState->SelectJob(MyPlayerState, NewJob);
+
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(TEXT("직업 선택 결과: %s"), bSuccess ? TEXT("성공") : TEXT("실패"));
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, bSuccess ? FColor::Green : FColor::Red, Message);
+	}
+
 	if (!bSuccess)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("직업 선택 실패"));
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("직업 선택 성공"));
 }
 
 void AShelterPlayerController::ServerClearJob_Implementation()
