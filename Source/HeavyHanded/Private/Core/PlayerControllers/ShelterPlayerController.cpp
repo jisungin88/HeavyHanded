@@ -4,12 +4,51 @@
 #include "Core/PlayerControllers/ShelterPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
+#include "Core/GameInstances/NetGameInstanceSubsystem.h"
+
+#include "OnlineSubsystem.h"
+#include "OnlineSubsystemUtils.h"
+
+
 
 void AShelterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
+	UNetGameInstanceSubsystem* NetSubsystem =
+		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
+
+	if (!NetSubsystem)
+	{
+		return;
+	}
+
+	const FString& RoomName =
+		NetSubsystem->JoinedRoomName;
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Lobby Room Name = %s"),
+		*RoomName
+	);
+
 }
+
+AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
+{
+	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, GetPlayerState<AShelterPlayerState>(), *GetPlayerState<AShelterPlayerState>()->GetName());
+	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+
+	return GetPlayerState<AShelterPlayerState>();
+}
+
+
+//void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
+//{
+//}
+
+
 
 void AShelterPlayerController::Client_ReceiveChatMessage_Implementation(const FString& PlayerName, const FString& Message)
 {
@@ -50,10 +89,7 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 		}
 	}
 
-	FString PlayerName = FString::Printf(
-		TEXT("Player_%d"),
-		PlayerIndex
-	);
+	FString PlayerName = FString::Printf(TEXT("Player_%d"),PlayerIndex);
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -68,8 +104,108 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 }
 
+// -----------------------------------------------------------------
 
 
+void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
+{
+	/*
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("1. PC->ServerSelectJob 호출"));
+		if (!GameState)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> GameState 없음"));
+			return;
+		}
+
+		if (!MyPlayerState)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> PlayerState 없음"));
+			return;
+		}
+	}
+
+
+	const bool bSuccess = GameState->SelectJob(MyPlayerState, NewJob);
+
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(TEXT("직업 선택 결과: %s"), bSuccess ? TEXT("성공") : TEXT("실패"));
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, bSuccess ? FColor::Green : FColor::Red, Message);
+	}
+
+	if (!bSuccess)
+	{
+		return;
+	}
+	*/
+
+
+	AShelterGameState* GameState =
+		GetWorld()->GetGameState<AShelterGameState>();
+
+	AShelterPlayerState* MyPlayerState =
+		GetPlayerState<AShelterPlayerState>();
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[1 PC] PS=%p / %s / Authority=%s"),
+			MyPlayerState,
+			MyPlayerState ? *MyPlayerState->GetName() : TEXT("NULL"),
+			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT")
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f, FColor::Yellow, Message
+		);
+	}
+
+	if (!GameState || !MyPlayerState)
+	{
+		return;
+	}
+
+	const bool bSuccess =
+		GameState->SelectJob(MyPlayerState, NewJob);
+
+	if (GEngine)
+	{
+		FString Message = FString::Printf(
+			TEXT("[1 PC] SelectJob 결과: %s"),
+			bSuccess ? TEXT("SUCCESS") : TEXT("FAIL")
+		);
+
+		GEngine->AddOnScreenDebugMessage(
+			-1, 10.f,
+			bSuccess ? FColor::Green : FColor::Red,
+			Message
+		);
+	}
+
+
+}
+
+void AShelterPlayerController::ServerClearJob_Implementation()
+{
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
+	if (!MyPlayerState)
+	{
+		return;
+	}
+
+	GameState->ClearJob(MyPlayerState);
+}
 
 
 

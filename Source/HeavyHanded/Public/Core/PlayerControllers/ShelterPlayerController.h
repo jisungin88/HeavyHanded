@@ -4,7 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"
+#include "Core/PlayerStates/ShelterPlayerState.h"
+
 #include "ShelterPlayerController.generated.h"
+
 
 /**
  *
@@ -17,11 +22,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	const FString&, Message
 );
 
+
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerController : public APlayerController
 {
 	GENERATED_BODY()
-
 
 
 protected:
@@ -30,6 +35,11 @@ protected:
 
 
 public:
+
+
+	UFUNCTION(BlueprintPure)
+	AShelterPlayerState* GetMyPlayerState() const;
+
 
 	/**
 	 * 채팅 한 줄을 서버로 보낸다. 채팅 UI(WBP_ChatBox)가 호출한다.
@@ -42,17 +52,36 @@ public:
 	void Server_SendChatMessage(const FString& Message);
 
 	/** 서버가 해당 클라이언트에게 채팅 한 줄을 전달한다 */
+
 	UFUNCTION(Client, Reliable)
 	void Client_ReceiveChatMessage(
 		const FString& PlayerName,
 		const FString& Message
 	);
 
+
+	// 채팅 UI에서 바인딩
 	/** 채팅 UI 가 바인딩하는 수신 델리게이트 */
+
 	UPROPERTY(BlueprintAssignable)
 	FOnChatMessageReceived OnChatMessageReceived;
 
 	/** 채팅 한 줄의 최대 길이. 서버 검증에 쓰인다 */
 	static constexpr int32 MaxChatMessageLength = 200;
+
+	// --------------------------------------------------
+
+public:
+
+	// 클라이언트에서 호출 - 서버에서 실제로 실행됨
+	// Widget에서 직업 버튼을 눌렀을 때 사용
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSelectJob(EJobType NewJob);
+
+	// 현재 직업 선택 해제
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerClearJob();
+
+
 
 };
