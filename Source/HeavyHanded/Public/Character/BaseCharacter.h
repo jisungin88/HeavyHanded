@@ -198,6 +198,13 @@ protected:
 	UFUNCTION()
 	virtual void OnRep_HeldActor(AActor* PreviousHeldActor);
 
+	// GAB_Interact 의 부활 채널링 진행률(0~1). 지금은 빈 훅 — UI는 나중에 연결한다.
+	UPROPERTY(ReplicatedUsing = OnRep_ReviveProgress, BlueprintReadOnly, Category = "State")
+	float ReviveProgress = 0.f;
+
+	UFUNCTION()
+	void OnRep_ReviveProgress();
+
 	// 물건을 붙일 손 소켓 이름.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction")
 	FName CarrySocketName = TEXT("Hand_R_Socket");
@@ -249,6 +256,15 @@ private:
 public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool IsCarryingHeavyItem() const;
+
+	// State.Downed 태그 보유 여부를 ASC에서 조회한다. 새 태그를 만들지 않고
+	// 이미 있는 State.Downed 를 조회만 하는 헬퍼 — AnimBP 폴링 지점으로도 쓴다.
+	UFUNCTION(BlueprintPure, Category = "State")
+	bool IsDowned() const;
+
+	// GAB_Interact 의 부활 채널링 진행률(0~1). UI는 나중에 연결 — 지금은 값만 존재한다.
+	UFUNCTION(BlueprintCallable, Category = "State")
+	void SetReviveProgress(float NewProgress);
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

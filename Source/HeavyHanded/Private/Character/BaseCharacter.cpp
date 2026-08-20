@@ -14,6 +14,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Interfaces/Carryable.h"
 #include "GameplayTagContainer.h"
+#include "Core/HeavyHandedGameplayTags.h"
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -363,6 +364,7 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABaseCharacter, AssistedHeavyItem);
 	DOREPLIFETIME(ABaseCharacter, HeavyCarryState);
 	// 08.18 end
+	DOREPLIFETIME(ABaseCharacter, ReviveProgress);
 }
 
 bool ABaseCharacter::CanCarryActor(const AActor* Target) const
@@ -635,4 +637,20 @@ bool ABaseCharacter::IsCarryingHeavyItem() const
 		return Carryable->GetWeightClass() == EWeightClass::Heavy;
 	}
 	return false;
+}
+
+bool ABaseCharacter::IsDowned() const
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	return ASC && ASC->HasMatchingGameplayTag(HHTags::State_Downed);
+}
+
+void ABaseCharacter::SetReviveProgress(float NewProgress)
+{
+	ReviveProgress = FMath::Clamp(NewProgress, 0.f, 1.f);
+}
+
+void ABaseCharacter::OnRep_ReviveProgress()
+{
+	// 지금은 빈 훅 — UI는 나중에 연결한다.
 }

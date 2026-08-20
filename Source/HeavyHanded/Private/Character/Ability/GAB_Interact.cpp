@@ -8,6 +8,8 @@
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTagContainer.h"
 #include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
+#include "Core/HeavyHandedGameplayTags.h"
 
 // 상호작용 진단용. 집기 실패는 예외 없이 조용히 넘어가므로 이유를 남긴다.
 DEFINE_LOG_CATEGORY_STATIC(LogInteract, Log, All);
@@ -51,6 +53,23 @@ namespace
 		return false;
 	}
 	//08.18 end
+
+	// 다운 상태 판정 — 새 태그가 아니라 이미 있는 State.Downed(전영배 / Config/Tags/State.ini)를
+	// 조회만 한다. 대상이 IAbilitySystemInterface 를 구현하면(플레이어는 PlayerState 를 통해
+	// 항상 그렇다) 그 ASC 에 태그가 붙어 있는지만 본다.
+	bool IsDownedTarget(const AActor* Actor)
+	{
+		if (!Actor) return false;
+
+		if (const IAbilitySystemInterface* ASI = Cast<const IAbilitySystemInterface>(Actor))
+		{
+			if (UAbilitySystemComponent* TargetASC = ASI->GetAbilitySystemComponent())
+			{
+				return TargetASC->HasMatchingGameplayTag(HHTags::State_Downed);
+			}
+		}
+		return false;
+	}
 
 	// 집을 수 있는 노획물인지 판정
 	bool IsCarryableLoot(const AActor* Actor)
@@ -105,7 +124,8 @@ void UGAB_Interact::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 
     // 몽타주가 없으면 어빌리티를 끝내줄 콜백이 없다.
     // 상호작용은 한 번에 끝나는 동작이므로 여기서 바로 종료한다.
-    if (!IsPlayingSkillMontage())
+    // 단, 부활 채널링 타이머가 막 시작됐다면 그 타이머가 어빌리티 수명을 이어받는다.
+    if (!IsPlayingSkillMontage() && !ReviveChannelTimerHandle.IsValid())
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
     }
@@ -117,9 +137,105 @@ void UGAB_Interact::OnMontageFinished()
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
+void UGAB_Interact::TickReviveChannel()
+{
+    ABaseCharacter* Target = ReviveChannelTarget.Get();
+    ABaseCharacter* Reviver = ReviveChannelReviver.Get();
+
+    const bool bValid = IsValid(Target) && IsValid(Reviver);
+    const bool bInRange = bValid && FVector::Dist(Reviver->GetActorLocation(), Target->GetActorLocation()) <= InteractionRange;
+    const bool bStillDowned = bValid && Target->IsDowned();
+
+    if (!bValid || !bInRange || !bStillDowned)
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+        if (bValid)
+        {
+            Target->SetReviveProgress(0.f);
+        }
+        ReviveChannelElapsed = 0.f;
+
+        UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (유효=%d 사거리=%d 다운유지=%d)"), bValid, bInRange, bStillDowned);
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
+    }
+
+    ReviveChannelElapsed += 0.1f;
+    Target->SetReviveProgress(ReviveChannelElapsed / ReviveChannelDuration);
+
+    if (ReviveChannelElapsed >= ReviveChannelDuration)
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+
+        // 기존 즉시 실행 분기에 있던 제거 코드 그대로. 상호작용을 건 쪽이 대상의 GE 클래스를
+        // 알 필요가 없도록 소스이펙트가 아닌 태그로 지운다.
+        if (UAbilitySystemComponent* TargetASC = Target->GetAbilitySystemComponent())
+        {
+            TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(HHTags::State_Downed));
+            UE_LOG(LogInteract, Log, TEXT("%s 를 다운 상태에서 복구시켰다."), *Target->GetName());
+        }
+        Target->SetReviveProgress(0.f);
+        ReviveChannelElapsed = 0.f;
+
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+    }
+}
+
+void UGAB_Interact::InputReleased(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo)
+{
+    Super::InputReleased(Handle, ActorInfo, ActivationInfo);
+
+    if (ReviveChannelTimerHandle.IsValid())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+        if (ABaseCharacter* Target = ReviveChannelTarget.Get())
+        {
+            Target->SetReviveProgress(0.f);
+        }
+        ReviveChannelElapsed = 0.f;
+
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+    }
+}
+
 void UGAB_Interact::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
+    // 정상 경로(TickReviveChannel)를 거치지 않고 여기로 바로 들어온 경우
+    // (외부 강제 취소, 캐릭터 사망 등) 대비 안전망. ClearTimer 는 핸들 자체를 무효화하므로
+    // 정상 경로에서 이미 정리된 뒤라면 아래 IsValid() 가 걸러줘서 중복 실행되지 않는다.
+    if (ReviveChannelTimerHandle.IsValid())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+        if (ABaseCharacter* Target = ReviveChannelTarget.Get())
+        {
+            Target->SetReviveProgress(0.f);
+        }
+        ReviveChannelElapsed = 0.f;
+    }
+
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+}
+
+void UGAB_Interact::OnMontageCompleted()
+{
+    // 채널링 중(서버)이거나 비권위(클라이언트 예측 인스턴스)면 몽타주가 먼저 끝나도
+    // 스스로 EndAbility 를 부르지 않는다. 클라이언트가 자기 로컬 몽타주 타이밍만으로
+    // EndAbility(bReplicateEndAbility=true) 를 부르면 그게 서버로 리플리케이트되어
+    // 서버 쪽의 진짜 채널링 인스턴스까지 강제 종료시켜버리기 때문 — 실제로 재현된 버그다.
+    if (ReviveChannelTimerHandle.IsValid() || (GetCurrentActorInfo() && !GetCurrentActorInfo()->IsNetAuthority()))
+    {
+        return;
+    }
+    Super::OnMontageCompleted();
+}
+
+void UGAB_Interact::OnMontageBlendOut()
+{
+    if (ReviveChannelTimerHandle.IsValid() || (GetCurrentActorInfo() && !GetCurrentActorInfo()->IsNetAuthority()))
+    {
+        return;
+    }
+    Super::OnMontageBlendOut();
 }
 
 void UGAB_Interact::PerformInteraction()
@@ -178,8 +294,25 @@ void UGAB_Interact::PerformInteraction()
     {
         AActor* HitActor = HitResult.GetActor();
 
+        // 0. 대상이 다운 상태인 경우 — 부활. 즉시 처리하지 않고 0.1초 반복 타이머로 채널링을
+        //    시작한다. 실제 태그 제거(RemoveActiveEffectsWithGrantedTags)는 TickReviveChannel 이
+        //    ReviveChannelDuration 을 다 채웠을 때 실행한다.
+        if (IsDownedTarget(HitActor))
+        {
+            if (ABaseCharacter* TargetChar = Cast<ABaseCharacter>(HitActor))
+            {
+                ReviveChannelTarget = TargetChar;
+                ReviveChannelReviver = Character;
+                ReviveChannelElapsed = 0.f;
+
+                GetWorld()->GetTimerManager().SetTimer(
+                    ReviveChannelTimerHandle, this, &UGAB_Interact::TickReviveChannel, 0.1f, /*bLoop*/ true);
+
+                UE_LOG(LogInteract, Log, TEXT("%s 부활 채널링 시작"), *HitActor->GetName());
+            }
+        }
         // 1. 집을 수 있는 노획물인 경우 (Loot.Type 하위 태그)
-        if (IsCarryableLoot(HitActor) || IsHeavyLoot(HitActor))
+        else if (IsCarryableLoot(HitActor) || IsHeavyLoot(HitActor))
         {
             if (Character->GetHeldActor())
             {
