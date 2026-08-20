@@ -1,7 +1,6 @@
 ﻿#include "UI/HeistHUDWidget.h"
 
 #include "Animation/WidgetAnimation.h"
-#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -58,11 +57,6 @@ void UHeistHUDWidget::NativePreConstruct()
 	{
 		Txt_Objective->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
 		Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::Money)));
-	}
-
-	if (Bar_Objective)
-	{
-		Bar_Objective->SetFillColorAndOpacity(UUISettings::GetUIColor(EUIColorToken::Money));
 	}
 }
 
@@ -227,29 +221,19 @@ void UHeistHUDWidget::RefreshTimer()
 
 void UHeistHUDWidget::ApplyObjective(int32 LoadedValue, int32 TargetValue)
 {
-	if (Bar_Objective)
-	{
-		// 목표가 0 인 판(설정 누락)에서 0 나누기를 하지 않는다.
-		// 초과 적재도 있으므로 1 로 자른다
-		const float Ratio = (TargetValue > 0)
-			? FMath::Clamp(static_cast<float>(LoadedValue) / static_cast<float>(TargetValue), 0.f, 1.f)
-			: 0.f;
-
-		Bar_Objective->SetPercent(Ratio);
-
-		// 목표를 채우면 금색으로 바꾼다. 초과분은 바가 더 안 차므로 색이 유일한 신호다
-		const EUIColorToken Token = (TargetValue > 0 && LoadedValue >= TargetValue)
-			? EUIColorToken::Gold
-			: EUIColorToken::Money;
-		Bar_Objective->SetFillColorAndOpacity(UUISettings::GetUIColor(Token));
-	}
-
 	if (Txt_Objective)
 	{
 		Txt_Objective->SetText(FText::Format(
 				LOCTEXT("ObjectiveFormat", "${0} / ${1}"),
 				FText::AsNumber(LoadedValue),
 				FText::AsNumber(TargetValue)));
+
+		// 목표를 채우면 금색으로 바꾼다. 진행도 바가 없으므로 색이 유일한 신호다 —
+		// 초과 적재는 숫자로만 드러나서 눈에 잘 띄지 않는다
+		const EUIColorToken Token = (TargetValue > 0 && LoadedValue >= TargetValue)
+			? EUIColorToken::Gold
+			: EUIColorToken::Money;
+		Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(Token)));
 	}
 }
 
@@ -298,7 +282,6 @@ void UHeistHUDWidget::SetHeistWidgetsVisible(bool bVisible)
 	if (Txt_Timer)     { Txt_Timer->SetVisibility(Vis); }
 	if (Txt_Phase)     { Txt_Phase->SetVisibility(Vis); }
 	if (Txt_Objective) { Txt_Objective->SetVisibility(Vis); }
-	if (Bar_Objective) { Bar_Objective->SetVisibility(Vis); }
 }
 
 // ──────────────────────────────────────────────────────────────

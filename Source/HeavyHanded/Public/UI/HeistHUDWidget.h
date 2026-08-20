@@ -7,7 +7,6 @@
 #include "HeistHUDWidget.generated.h"
 
 class AHeistGameState;
-class UProgressBar;
 class UTextBlock;
 class UWidgetAnimation;
 
@@ -26,8 +25,11 @@ class UWidgetAnimation;
  *   GuardTest 같은 맵에서는 붙을 대상이 없으므로, 잠시 기다린 뒤 포기하고
  *   타이머 · 목표 금액을 숨긴다. 빈 값이 화면에 남아 있는 것보다 낫다.
  *
- * [C++ 과 WBP 의 경계] 문자열 · 퍼센트 · 가시성은 C++ 이 정한다.
+ * [C++ 과 WBP 의 경계] 문자열 · 색 · 가시성은 C++ 이 정한다.
  *   WBP 는 배치와 애니메이션 저작만 한다.
+ *
+ * [진행도 바가 없는 이유] 기획서 8장은 "현재/목표 금액" 수치만 요구한다.
+ *   바는 UStatBarWidget(체력 · 스태미나 · 무게 공용 베이스)을 만들 때 같이 붙인다.
  */
 UCLASS(Abstract)
 class HEAVYHANDED_API UHeistHUDWidget : public UUserWidget
@@ -76,10 +78,6 @@ protected:
 	/** 남은 시간 ("6:52") */
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidget))
 	TObjectPtr<UTextBlock> Txt_Timer;
-
-	/** 목표 금액 진행도 */
-	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidget))
-	TObjectPtr<UProgressBar> Bar_Objective;
 
 	/**
 	 * 페이즈 이름 ("본 작업"). 아직 WBP 에 없어서 Optional 이다 —
