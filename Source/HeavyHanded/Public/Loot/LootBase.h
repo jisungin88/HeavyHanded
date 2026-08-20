@@ -12,6 +12,7 @@
 
 class UStaticMeshComponent;
 class UPrimitiveComponent;
+class UNoiseEmitterComponent;
 class APawn;
 struct FPredictProjectilePathResult;
 
@@ -282,6 +283,28 @@ protected:
 	/** 물리 바디이자 루트. 플레이어 파트가 Attach 대상으로 쓴다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loot")
 	TObjectPtr<UStaticMeshComponent> LootMesh;
+
+	/**
+	 * 충돌을 소음으로 바꾼다. 소음 파트의 컴포넌트이고 여기서는 붙이기만 한다.
+	 *
+	 * [내가 부를 일이 없다] BeginPlay 에서 스스로 루트의 OnComponentHit 을 물고,
+	 *   임펄스와 표면 재질로 크기를 뽑아 발행한다. 서버가 아니면 델리게이트를 아예 안 건다.
+	 *   ImpactTag 를 안 채우면 Noise.Loot.Impact 로 폴백하는데 그게 바로 우리가 쓸 태그다.
+	 *
+	 * [BP 가 아니라 C++ 에서 붙이는 이유]
+	 *   노획물 종류가 늘 때 BP 마다 추가하는 방식이면 언젠가 빼먹는다. 그러면 그 물건만
+	 *   소리를 안 내는데, 경고도 안 뜨고 눈에도 안 보여서 발견이 아주 늦다.
+	 *   모든 노획물이 소리를 내야 하므로 생성자에서 붙인다. 기존 BP 는 재저장 없이 물려받는다.
+	 *
+	 * [소지 중에는 저절로 조용하다] 물리를 끄고 CarriedLoot(QueryOnly) 로 바꾸므로
+	 *   히트 자체가 오지 않는다. 들고 다닐 때 소리를 막는 코드를 따로 둘 필요가 없다.
+	 *
+	 * [충돌 게이팅이 두 벌 도는 것은 의도다] 내 HandleMeshHit 과 이 컴포넌트가 같은
+	 *   델리게이트에 둘 다 붙는다. 내 쪽은 '파손으로 칠 충격' 하나를 고르고, 소음 쪽은
+	 *   '얼마나 시끄러운가' 를 연속값으로 뽑아 자기 스팸 필터로 억제한다. 목적이 달라 합치지 않는다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loot|Noise")
+	TObjectPtr<UNoiseEmitterComponent> NoiseEmitter;
 
 	/**
 	 * DT_LootCatalog 에서 이 노획물의 설계값을 가져올 행.

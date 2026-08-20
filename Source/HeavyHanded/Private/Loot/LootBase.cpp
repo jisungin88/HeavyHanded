@@ -18,6 +18,7 @@
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "Noise/NoiseEmitterComponent.h" // 충돌 소음 — 붙이기만 하고 발행은 저쪽이 한다
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
 
@@ -106,6 +107,10 @@ ALootBase::ALootBase()
 
 	// 이게 없으면 OnComponentHit 이 아예 오지 않는다. 물리 바디는 기본값이 꺼져 있다.
 	LootMesh->SetNotifyRigidBodyCollision(true);
+
+	// 충돌 소음. 붙이는 것 외에 해 줄 것이 없다 — 히트 바인딩도 서버 판정도 스스로 한다.
+	// ImpactComponentName 을 비워 두면 루트를 쓰는데, 루트가 곧 LootMesh 라 그대로 맞는다.
+	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
 }
 
 void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
