@@ -12,10 +12,13 @@
 #include "Alert/AlertComponent.h"
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Core/HeistEntryGate.h"
+#include "Core/HeistEntryPoint.h"
 #include "Core/HeistLog.h"
 #include "Core/HeistSettings.h"
 #include "Core/HeistStartGate.h"
 #include "Core/RunProgressSubsystem.h"
+#include "Core/VanZone.h"
 #include "Loot/LootBase.h"          // hh.Result.Show 가 TSubclassOf<ALootBase> 를 이름으로 푼다
 #include "Shared/NetAuthority.h"
 
@@ -92,9 +95,224 @@ int32 AHeistGameMode::ResolveExpectedPlayers(const FString& Options) const
 	return 0;   // 모른다 — 호출부가 폴백으로 떨어진다
 }
 
+// ──────────────────────────────────────────────────────────────
+// 진입점
+//
+// 기획서 2장 — 팀은 은신처에서 진입로를 고르고 전원이 그 자리에서 시작한다.
+// 밴도 같이 간다. 진입점은 곧 밴에서 내리는 자리다.
+// ──────────────────────────────────────────────────────────────
+
+void AHeistGameMode::ResolveEntryPoint()
+{
+	// 한 판의 진입점은 한 번 정해지면 끝까지 같다. 사람마다 다시 판정하면
+	// 그사이 은신처 값이 바뀌었을 때(치트 · 재접속) 각자 다른 곳에서 시작한다
+	if (bEntryResolved)
+	{
+		return;
+	}
+
+	bEntryResolved = true;
+
+	TArray<AHeistEntryPoint*> Entries;
+	AHeistEntryPoint::CollectEntryPoints(this, Entries);
+
+	TArray<FGameplayTag> AvailableTags;
+	AvailableTags.Reserve(Entries.Num());
+
+	for (const AHeistEntryPoint* Entry : Entries)
+	{
+		AvailableTags.Add(Entry->GetEntryTag());
+	}
+
+	FGameplayTag SelectedTag;
+
+	if (const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+		SelectedTag = Run->GetSelectedEntry();
+	}
+
+	// 레벨이 지정한 기본 진입점. 없으면 INDEX_NONE 이고 게이트가 첫 번째로 떨어뜨린다
+	const int32 DefaultIndex = AHeistEntryPoint::FindDefaultIndex(Entries);
+
+	const FHeistEntryResolution Resolution = HeistEntryGate::Resolve(AvailableTags, SelectedTag, DefaultIndex);
+
+	switch (Resolution.Decision)
+	{
+	case EHeistEntryDecision::Selected:
+		ResolvedEntry = Entries[Resolution.Index];
+
+		UE_LOG(LogHeist, Log, TEXT("진입점 확정 — %s (%s)"),
+			*ResolvedEntry->GetEntryTag().ToString(),
+			*ResolvedEntry->GetDisplayName().ToString());
+		break;
+
+	case EHeistEntryDecision::Fallback:
+	{
+		ResolvedEntry = Entries[Resolution.Index];
+
+		// 지정된 기본값으로 떨어진 것과 "그냥 첫 번째" 로 떨어진 것은 다르다.
+		// 후자는 태그 이름에 따라 흔들리는 자리라, 레벨에 기본 진입점을 체크하라고 알려야 한다
+		const bool bUsedDesignatedDefault = (Resolution.Index == DefaultIndex);
+
+		const TCHAR* Which = bUsedDesignatedDefault
+			? TEXT("기본 진입점")
+			: TEXT("첫 번째 진입점(기본 지정 없음)");
+
+		// 조용히 폴백하면 "왜 자꾸 여기서 시작하지" 가 된다. 이유를 갈라서 남긴다
+		if (SelectedTag.IsValid())
+		{
+			UE_LOG(LogHeist, Warning,
+				TEXT("진입점 %s 가 이 레벨에 없습니다. %s %s 로 시작합니다 — "
+					 "레벨에서 진입점을 지웠거나 태그가 어긋났습니다."),
+				*SelectedTag.ToString(), Which, *ResolvedEntry->GetEntryTag().ToString());
+		}
+		else
+		{
+			UE_LOG(LogHeist, Log,
+				TEXT("고른 진입점이 없어 %s %s 로 시작합니다. (은신처를 거치지 않았거나 hh.Run.Entry 미사용)"),
+				Which, *ResolvedEntry->GetEntryTag().ToString());
+		}
+
+		if (!bUsedDesignatedDefault)
+		{
+			UE_LOG(LogHeist, Warning,
+				TEXT("이 레벨에 기본 진입점이 지정돼 있지 않습니다. 지금은 태그 이름순 첫 번째가 쓰이므로 "
+					 "진입점을 추가하면 기본 시작 위치가 바뀝니다 — AHeistEntryPoint 하나에 bIsDefaultEntry 를 체크하세요."));
+		}
+
+		break;
+	}
+
+	case EHeistEntryDecision::None:
+	default:
+		ResolvedEntry = nullptr;
+
+		// 테스트 맵에는 진입점이 없는 것이 정상이다. 그래서 Error 가 아니라 Log 다 —
+		// 엔진 기본 스폰으로 돌아가고, 코어 루프의 나머지는 그대로 돈다
+		UE_LOG(LogHeist, Log,
+			TEXT("이 레벨에 AHeistEntryPoint 가 없습니다. 엔진 기본 스폰(PlayerStart 무작위)을 씁니다."));
+		break;
+	}
+
+	// HUD 가 "정문으로 진입" 을 그리려면 클라이언트도 알아야 한다.
+	// 은신처 값(URunProgressSubsystem)은 복제되지 않으므로 여기서 GameState 로 옮긴다.
+	//
+	// GameState 가 아직 없을 수 있다 — 첫 스폰이 매치 시작보다 먼저인 경로다.
+	// 그때는 HandleMatchHasStarted 가 다시 넣는다
+	if (AHeistGameState* GS = GetGameState<AHeistGameState>())
+	{
+		GS->SetEntryTag(IsValid(ResolvedEntry) ? ResolvedEntry->GetEntryTag() : FGameplayTag());
+	}
+
+	MoveVanToEntry();
+}
+
+void AHeistGameMode::MoveVanToEntry()
+{
+	// 재정의된 PlaceVan 은 연출일 수 있다. 두 번 부르면 밴이 두 번 달려 들어온다
+	if (bVanPlaced || !IsValid(ResolvedEntry))
+	{
+		return;
+	}
+
+	AVanZone* Van = AVanZone::Get(this);
+
+	if (!Van)
+	{
+		// 밴 없이도 진입점 스폰은 동작한다. 다만 적재·탈출이 불가능한 레벨이라는 뜻이라 경고다
+		UE_LOG(LogHeist, Warning,
+			TEXT("이 레벨에 AVanZone 이 없어 밴을 진입점으로 보내지 못했습니다. 적재와 탈출이 동작하지 않습니다."));
+		return;
+	}
+
+	// 앵커가 없으면 **밴을 옮기지 않는다.** 진입점 자리로 보내면 그 위에서 폰이 스폰되지 못한다.
+	// 밴이 레벨에 놓인 자리에 그대로 있으면 멀기는 해도 판은 돌아간다
+	FTransform VanTransform;
+
+	if (!ResolvedEntry->TryGetVanTransform(VanTransform))
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("밴을 옮기지 않고 레벨에 놓인 자리에 둡니다. 진입점에서 멀 수 있습니다."));
+		return;
+	}
+
+	bVanPlaced = true;
+
+	PlaceVan(Van, VanTransform);
+
+	WarnIfVanBlocksEntry();
+}
+
+void AHeistGameMode::PlaceVan_Implementation(AVanZone* Van, const FTransform& EntryTransform)
+{
+	if (!IsValid(Van))
+	{
+		return;
+	}
+
+	// 기본 구현은 순간이동이다. 연출은 BP_HeistGameMode 에서 이 함수를 재정의해 붙인다 —
+	// 어디에 서는가(EntryTransform)는 그대로 두고 어떻게 가는가만 바꾸면 된다
+	Van->SetActorTransform(EntryTransform, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr,
+		ETeleportType::TeleportPhysics);
+
+	UE_LOG(LogHeist, Log, TEXT("밴을 진입점으로 옮겼습니다 — %s"),
+		*EntryTransform.GetLocation().ToCompactString());
+}
+
+void AHeistGameMode::WarnIfVanBlocksEntry() const
+{
+	const AVanZone* Van = AVanZone::Get(this);
+
+	if (!IsValid(ResolvedEntry) || !Van)
+	{
+		return;
+	}
+
+	// 밴 전체 바운즈로 본다. 어느 컴포넌트가 막았는지는 중요하지 않고,
+	// "스폰 지점이 밴 안에 들어가 있다" 는 사실만 알리면 된다
+	FVector Origin;
+	FVector BoxExtent;
+	Van->GetActorBounds(/*bOnlyCollidingComponents=*/true, Origin, BoxExtent);
+
+	const FVector EntryLocation = ResolvedEntry->GetActorLocation();
+	const FBox VanBounds(Origin - BoxExtent, Origin + BoxExtent);
+
+	if (!VanBounds.IsInsideOrOn(EntryLocation))
+	{
+		return;
+	}
+
+	// 이 상황의 증상은 "이동도 회전도 안 된다" 뿐이다. 폰이 스폰되지 않았다는 사실도,
+	// 그 원인이 밴이라는 것도 화면에서는 알 수 없다
+	UE_LOG(LogHeist, Warning,
+		TEXT("밴이 진입점 %s 를 덮고 있습니다. 폰이 스폰되지 못해 아무도 움직일 수 없게 됩니다 — "
+			 "진입점의 VanAnchor 화살표를 스폰 지점에서 떨어뜨려 놓으세요."),
+		*ResolvedEntry->GetEntryTag().ToString());
+}
+
+AActor* AHeistGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	// 첫 스폰이 매치 시작보다 먼저 올 수 있다 (리슨 서버 호스트).
+	// 그래서 여기서도 한 번 확인한다 — 안에서 이미 정해졌으면 즉시 돌아온다
+	ResolveEntryPoint();
+
+	if (IsValid(ResolvedEntry))
+	{
+		// 전원이 같은 진입점이다. 엔진 기본 구현처럼 "빈 곳" 을 찾지 않는다 —
+		// 밴에서 같이 내리는 것이 전제라 겹치는 것이 정상이고, 캡슐은 서로 밀어낸다
+		return ResolvedEntry;
+	}
+
+	// 진입점이 없는 레벨(테스트 맵)에서는 엔진 기본 동작으로 돌아간다
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
 void AHeistGameMode::HandleMatchHasStarted()
 {
 	Super::HandleMatchHasStarted();
+
+	// 아무도 아직 스폰되지 않았을 수 있다. 진입점과 밴은 준비 시간보다 먼저 자리를 잡아야 한다
+	ResolveEntryPoint();
 
 	AHeistGameState* GS = GetGameState<AHeistGameState>();
 	if (!GS)
@@ -106,6 +324,10 @@ void AHeistGameMode::HandleMatchHasStarted()
 	}
 
 	GS->SetTargetValue(TargetValue);
+
+	// 진입점 판정이 첫 스폰에서 먼저 끝났다면 그때는 GameState 가 없었을 수 있다.
+	// 여기서 한 번 더 넣는다 — 이미 같은 값이면 복제가 dirty 되지 않는다
+	GS->SetEntryTag(IsValid(ResolvedEntry) ? ResolvedEntry->GetEntryTag() : FGameplayTag());
 
 	// 경보와 승차를 여기서 구독한다. AlertComponent 는 GameState 가 만들어질 때 붙으므로
 	// (UNoiseSubsystem 의 GameStateSetEvent) 이 시점에는 이미 있다.

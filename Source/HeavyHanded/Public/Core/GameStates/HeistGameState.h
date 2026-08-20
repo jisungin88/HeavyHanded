@@ -130,6 +130,16 @@ public:
 	EHeistPhaseReason GetPhaseReason() const { return PhaseReason; }
 
 	/**
+	 * 이 판에 실제로 쓰인 진입점(Entry.*). 진입점이 없는 레벨이면 무효 태그.
+	 *
+	 * 은신처에서 고른 것과 다를 수 있다 — 그 진입점이 이 레벨에 없으면 폴백하기 때문이다.
+	 * HUD 는 이 값을 그린다. 은신처 쪽(URunProgressSubsystem)은 복제되지 않으므로
+	 * 거기서 직접 읽으면 호스트 화면에만 맞는 값이 뜬다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Entry")
+	FGameplayTag GetEntryTag() const { return EntryTag; }
+
+	/**
 	 * 현재 페이즈가 끝나기까지 남은 초.
 	 *
 	 * @param OutSeconds  카운트다운이 있을 때만 채워진다
@@ -374,6 +384,14 @@ protected:
 	void SetTargetValue(int32 NewTargetValue);
 
 	/**
+	 * 이 판에 실제로 쓰인 진입점을 알린다. (서버 전용 — AHeistGameMode 만)
+	 *
+	 * 은신처에서 고른 값이 아니라 **판정을 통과한 결과**다. 고른 진입점이 이 레벨에 없어
+	 * 폴백했다면 폴백한 쪽이 들어온다 — 화면에 뜨는 것은 실제로 시작한 자리여야 한다.
+	 */
+	void SetEntryTag(const FGameplayTag& NewEntryTag);
+
+	/**
 	 * 결과 등급을 확정한다. (서버 전용 — AHeistGameMode 만)
 	 *
 	 * **체포를 확정한 뒤에 불러야 한다.** 탈출 여부를 체포 명단으로 보기 때문에,
@@ -397,6 +415,15 @@ protected:
 	/** 적재액과 목표액 중 하나라도 도착하면 불린다 — HUD 는 둘을 같이 그리기 때문이다 */
 	UFUNCTION()
 	void OnRep_LoadedValue();
+
+	/**
+	 * 이 판에 쓰인 진입점(Entry.*). 진입점이 없는 레벨에서는 비어 있다.
+	 *
+	 * OnRep 이 없는 이유는 판이 시작될 때 한 번 정해지고 끝나는 값이기 때문이다.
+	 * HUD 는 페이즈 전환에서 같이 읽으면 되고, 늦게 들어온 사람에게도 복제 프로퍼티라 전달된다.
+	 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Entry")
+	FGameplayTag EntryTag;
 
 	/** 현재 페이즈. 접속 대기 중에는 비어 있다 */
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentPhase, BlueprintReadOnly, Category = "Heist|Phase")

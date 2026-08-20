@@ -24,6 +24,7 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AHeistGameState, CurrentPhase);
+	DOREPLIFETIME(AHeistGameState, EntryTag);
 	DOREPLIFETIME(AHeistGameState, PhaseEndServerTime);
 	DOREPLIFETIME(AHeistGameState, PhaseReason);
 	DOREPLIFETIME(AHeistGameState, LoadedValue);
@@ -166,6 +167,16 @@ void AHeistGameState::SetTargetValue(int32 NewTargetValue)
 
 	// 목표가 바뀌면 게이지의 분모가 바뀐다. 적재액이 그대로여도 HUD 는 다시 그려야 한다
 	OnRep_LoadedValue();
+}
+
+void AHeistGameState::SetEntryTag(const FGameplayTag& NewEntryTag)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	EntryTag = NewEntryTag;
 }
 
 void AHeistGameState::OnRep_LoadedValue()

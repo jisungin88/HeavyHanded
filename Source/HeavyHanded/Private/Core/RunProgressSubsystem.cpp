@@ -327,6 +327,49 @@ bool URunProgressSubsystem::IsSiteCleared(FGameplayTag SiteTag) const
 	return SiteTag.IsValid() && ClearedSites.Contains(SiteTag);
 }
 
+bool URunProgressSubsystem::TrySelectEntry(const FGameplayTag& EntryTag)
+{
+	if (!EnsureServerAuthority(TEXT("TrySelectEntry")))
+	{
+		return false;
+	}
+
+	if (!EntryTag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("진입점 선택 거부 — 태그가 유효하지 않습니다."));
+		return false;
+	}
+
+	// 역할과 달리 다시 고를 수 있다. 출발 전까지는 팀이 상의하며 바꾸는 것이 정상이고,
+	// 한 번에 고정하면 잘못 누른 사람이 판 하나를 망친다
+	const FGameplayTag Previous = SelectedEntry;
+	SelectedEntry = EntryTag;
+
+	if (Previous.IsValid() && Previous != EntryTag)
+	{
+		UE_LOG(LogHeist, Log, TEXT("진입점 변경 — %s → %s"),
+			*Previous.ToString(), *EntryTag.ToString());
+	}
+	else
+	{
+		UE_LOG(LogHeist, Log, TEXT("진입점 선택 — %s"), *EntryTag.ToString());
+	}
+
+	return true;
+}
+
+void URunProgressSubsystem::ClearSelectedEntry()
+{
+	if (!EnsureServerAuthority(TEXT("ClearSelectedEntry")))
+	{
+		return;
+	}
+
+	SelectedEntry = FGameplayTag();
+
+	UE_LOG(LogHeist, Log, TEXT("진입점 선택을 지웠습니다 — 기본 진입점에서 시작합니다."));
+}
+
 void URunProgressSubsystem::BeginNewRun()
 {
 	if (!EnsureServerAuthority(TEXT("BeginNewRun")))
@@ -340,8 +383,12 @@ void URunProgressSubsystem::BeginNewRun()
 	ConfirmedRoster.Reset();
 	PurchasedEquipment.Reset();
 
+	// 진입점은 런 단위다 — 다음 판은 장소가 달라서 태그도 달라진다.
+	// 남겨 두면 박물관에서 Entry.Mansion.* 을 들고 있게 되고, 폴백으로만 살아난다
+	SelectedEntry = FGameplayTag();
+
 	UE_LOG(LogHeist, Log,
-		TEXT("새 판을 시작합니다 — 명단·장비 초기화 (팀 골드 $%d, 확정 역할 %d개, 통과 %d곳 유지)"),
+		TEXT("새 판을 시작합니다 — 명단·장비·진입점 초기화 (팀 골드 $%d, 확정 역할 %d개, 통과 %d곳 유지)"),
 		TeamGold, SelectedRoles.Num(), ClearedSites.Num());
 }
 
@@ -356,6 +403,7 @@ void URunProgressSubsystem::ResetCampaign()
 	ConfirmedRoster.Reset();
 	SelectedRoles.Reset();
 	PurchasedEquipment.Reset();
+	SelectedEntry = FGameplayTag();
 
 	// 체포와 진행도는 캠페인 단위라 BeginNewRun 이 지우지 않는다. 여기서만 지운다 —
 	// 안 지우면 새 방을 열어도 지난 방에서 잡힌 사람이 계속 갇혀 있고,
@@ -452,6 +500,10 @@ static void RunShowCommand(UWorld* World)
 	const FGameplayTag LocalRole = Run->GetSelectedRole(GetLocalPlayerId(World));
 	UE_LOG(LogHeist, Log, TEXT("  내 역할   %s"),
 		LocalRole.IsValid() ? *LocalRole.ToString() : TEXT("(미선택)"));
+
+	const FGameplayTag Entry = Run->GetSelectedEntry();
+	UE_LOG(LogHeist, Log, TEXT("  진입점    %s"),
+		Entry.IsValid() ? *Entry.ToString() : TEXT("(미선택 — 기본 진입점에서 시작)"));
 
 	if (!bIsServer)
 	{
@@ -570,6 +622,41 @@ static FAutoConsoleCommandWithWorldAndArgs GRunRoleCommand(
 	  TEXT("hh.Run.Role"),
 	  TEXT("hh.Run.Role <Role.태그> — 0번 로컬 플레이어의 역할을 정한다. 한 번 정하면 거부된다"),
 	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunRoleCommand),
+	  ECVF_Cheat);
+
+// 은신처 목표 선택 UI 가 붙기 전까지 진입점을 정하는 유일한 수단이다.
+// 인자를 비우면 선택을 지운다 — 폴백 경로를 손으로 만들어 보는 용도다
+static void RunEntryCommand(const TArray<FString>& Args, UWorld* World)
+{
+	URunProgressSubsystem* Run = GetRunForCheat(World);
+	if (!Run)
+	{
+		return;
+	}
+
+	if (!Args.IsValidIndex(0))
+	{
+		Run->ClearSelectedEntry();
+		return;
+	}
+
+	const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Args[0]), /*ErrorIfNotFound=*/false);
+	if (!Tag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("'%s' 는 등록된 태그가 아닙니다."), *Args[0]);
+		return;
+	}
+
+	Run->TrySelectEntry(Tag);
+
+	UE_LOG(LogHeist, Log,
+		TEXT("※ 이미 작업 레벨에 들어와 있다면 이번 판에는 반영되지 않는다. 진입점은 레벨 진입 시 한 번 정해진다."));
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunEntryCommand(
+	  TEXT("hh.Run.Entry"),
+	  TEXT("hh.Run.Entry [Entry.태그] — 팀 진입점을 정한다. 인자를 비우면 선택을 지운다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunEntryCommand),
 	  ECVF_Cheat);
 
 // 은신처 구출 UI 가 없어서 이것이 유일한 확인 수단이다.

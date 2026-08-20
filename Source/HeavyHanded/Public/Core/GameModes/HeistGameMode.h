@@ -8,6 +8,8 @@
 #include "HeistGameMode.generated.h"
 
 struct FHeistStartConditions;
+class AHeistEntryPoint;
+class AVanZone;
 
 /**
  * 작업 레벨의 상태머신 구동부. Prep → Heist → Escape → Result.
@@ -35,6 +37,18 @@ public:
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
+
+	/**
+	 * 스폰 위치를 고른다. **전원이 같은 진입점에서 시작한다.**
+	 *
+	 * 엔진 기본 구현은 빈 PlayerStart 중 하나를 무작위로 고른다 — 넷이 흩어져서 시작한다.
+	 * 이 게임은 밴에서 같이 내리는 것이 전제라 그러면 안 된다.
+	 *
+	 * 어느 진입점인가는 은신처에서 팀이 고른 값(URunProgressSubsystem::GetSelectedEntry)이고,
+	 * 그것이 이 레벨에 실제로 있는지는 HeistEntryGate 가 판정한다.
+	 * 진입점이 하나도 없는 레벨(테스트 맵 등)에서는 엔진 기본 동작으로 돌아간다.
+	 */
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
 	/**
 	 * 페이즈를 즉시 다음으로 넘긴다. 접속 대기 중이면 기다리지 않고 준비 시간을 시작한다.
@@ -92,6 +106,28 @@ protected:
 	virtual void FinishMatch_Implementation();
 
 	/**
+	 * 밴을 진입점으로 옮긴다. (서버 전용, 레벨당 한 번)
+	 *
+	 * [연출을 갈아 끼우는 자리다] 기본 구현은 **즉시 순간이동**시킨다.
+	 *   "밴이 달려 들어와 서고 그때 시작" 같은 연출을 넣으려면 `BP_HeistGameMode` 에서
+	 *   이 함수만 재정의하면 된다 — 어디에 서는가는 이미 정해져 있고, 어떻게 가는가만 바뀐다.
+	 *   AVanZone::HandleConfirmedLoot · FinishMatch 와 같은 방식이다.
+	 *
+	 *   재정의할 때 지켜야 할 것은 하나다 — **끝나는 자리가 EntryTransform 이어야 한다.**
+	 *   플레이어는 그 자리를 기준으로 이미 스폰돼 있고, 탈출 판정도 밴 볼륨으로 한다.
+	 *
+	 * [언제 불리는가] 진입점이 정해지는 순간, 레벨당 한 번. 준비 시간(Prep)보다 먼저다.
+	 *   판정 시점은 첫 스폰과 매치 시작 중 **먼저 오는 쪽**이다 — 리슨 서버에서는
+	 *   호스트의 PostLogin 이 HandleMatchHasStarted 보다 먼저 올 수 있기 때문이다.
+	 *
+	 * @param Van             이 레벨의 밴. 없으면 이 함수는 아예 불리지 않는다
+	 * @param EntryTransform  밴이 서야 하는 자리 (AHeistEntryPoint 의 VanAnchor)
+	 */
+	UFUNCTION(BlueprintNativeEvent, Category = "Heist|Entry")
+	void PlaceVan(AVanZone* Van, const FTransform& EntryTransform);
+	virtual void PlaceVan_Implementation(AVanZone* Van, const FTransform& EntryTransform);
+
+	/**
 	 * 이 장소의 목표 금액($). 기획서 2장 — 저택 $50,000 / 박물관 $120,000 / 은행 $250,000.
 	 * 장소마다 다르므로 UHeistSettings 가 아니라 여기 있다.
 	 */
@@ -131,6 +167,33 @@ private:
 	 * (const 가 아닌 이유는 AGameMode::GetNumPlayers() 가 non-const 이기 때문이다)
 	 */
 	FHeistStartConditions MakeStartConditions();
+
+	/**
+	 * 이 판의 진입점을 정하고 캐시한다. 레벨당 한 번, 첫 스폰보다 먼저.
+	 *
+	 * [왜 캐시하는가] ChoosePlayerStart 는 사람마다 불린다. 매번 다시 판정하면
+	 *   그사이에 은신처 값이 바뀌었을 때(치트 · 재접속) **사람마다 다른 곳에서 시작한다.**
+	 *   한 판의 진입점은 한 번 정해지면 끝까지 같아야 한다.
+	 *
+	 * 진입점이 없는 레벨에서는 캐시가 비고, 스폰은 엔진 기본 동작으로 돌아간다.
+	 */
+	void ResolveEntryPoint();
+
+	/**
+	 * 밴을 진입점으로 보낸다. 진입점이나 밴이 없으면 아무것도 하지 않는다.
+	 *
+	 * **밴 배치가 실패해도 스폰은 살아 있어야 한다.** 예전에 앵커가 없을 때 밴을 스폰 지점에
+	 * 세웠고, 폰 스폰이 콜리전에 막혀 아무도 움직이지 못했다. 밴은 못 옮기면 그냥 두는 것이 낫다.
+	 */
+	void MoveVanToEntry();
+
+	/**
+	 * 밴이 스폰 지점을 덮고 있으면 경고한다.
+	 *
+	 * 앵커가 멀쩡해도 배치자가 화살표를 진입점 위에 겹쳐 놓으면 폰이 스폰되지 않는다.
+	 * 그때 증상은 "이동도 회전도 안 된다" 뿐이라 원인을 짐작할 수 없다 — 로그로 알려 준다.
+	 */
+	void WarnIfVanBlocksEntry() const;
 
 	/** 주기적으로 HeistStartGate 에 물어보고, 답에 따라 시작하거나 계속 기다린다 */
 	void TickStartWait();
@@ -221,6 +284,26 @@ private:
 
 	/** 다운 태그가 붙거나 떨어졌다 */
 	void HandleDownedTagChanged(const FGameplayTag Tag, int32 NewCount);
+
+	/**
+	 * 이 판의 진입점. 한 번 정해지면 판이 끝날 때까지 바뀌지 않는다.
+	 *
+	 * nullptr 이면 이 레벨에 진입점이 없다는 뜻이고, 스폰은 엔진 기본 동작을 쓴다.
+	 * (아직 정하지 않은 상태와 구분하는 것은 bEntryResolved 다)
+	 */
+	UPROPERTY()
+	TObjectPtr<AHeistEntryPoint> ResolvedEntry = nullptr;
+
+	/** 진입점 판정을 이미 했는가. 진입점이 없는 레벨에서 매 스폰마다 다시 훑지 않게 한다 */
+	bool bEntryResolved = false;
+
+	/**
+	 * 밴을 이미 보냈는가.
+	 *
+	 * PlaceVan 은 재정의되면 연출이 될 수 있다. 두 번 불리면 밴이 두 번 달려 들어온다 —
+	 * 진입점 판정이 첫 스폰과 매치 시작 양쪽에서 불릴 수 있어서 이 가드가 필요하다.
+	 */
+	bool bVanPlaced = false;
 
 	FTimerHandle PhaseTimerHandle;
 	FTimerHandle StartWaitHandle;
