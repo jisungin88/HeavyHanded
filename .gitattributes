@@ -80,6 +80,9 @@
 *.ini     text eol=lf
 *.md      text eol=lf
 *.json    text eol=lf
+# DataTable 원본 (Data/*.csv). 엑셀로 저장하면 CRLF 가 되는데,
+# 그대로 커밋하면 한 칸만 고쳐도 파일 전체가 diff 로 잡혀 CSV 를 쓴 의미가 없어진다
+*.csv     text eol=lf
 *.uproject   text eol=lf
 *.uplugin    text eol=lf
 *.bat     text eol=crlf

@@ -18,10 +18,10 @@ namespace
 	// HasTag 는 부모 매칭이라 Loot.Type.Heavy 등 하위 태그가 전부 걸린다.
 	const FName LootTypeRootTagName(TEXT("Loot.Type"));
 
-	// TODO(임시 폴백): 김민준의 ALootBase / ICarryable 이 develop 에 머지되면 제거한다.
-	//   현재 프로젝트에는 IGameplayTagAssetInterface 를 구현한 액터가 하나도 없어서
-	//   (Source/HeavyHanded/*/Loot/ 는 .gitkeep 뿐) GameplayTag 판정만 남기면
-	//   테스트 맵에서 아무것도 집히지 않는다.
+	// 폴백: ALootBase 가 IGameplayTagAssetInterface 로 Loot.Type 을 내놓게 됐으므로
+	//   (develop 머지 완료) 진짜 노획물은 위 태그 경로로 전부 걸린다.
+	//   이 태그는 이제 태그가 없는 테스트 맵 액터 전용이다.
+	//   테스트 맵의 임시 액터가 정리되면 이 줄과 아래 3번 분기를 같이 지운다. [전영배]
 	const FName LegacyItemActorTagName(TEXT("Item"));
 
 	// TODO: 문 상호작용은 오유석 담당 영역이고 대응 GameplayTag 가 아직 없다.

@@ -434,6 +434,34 @@ void ABaseCharacter::ApplyCarryState(AActor* Target, bool bCarried)
         return;
     }
 
+    // ICarryable(= 노획물)은 물리·콜리전·부착을 스스로 관리한다. 여기서 또 손대면 두 벌이 돈다.
+    //
+    // 특히 콜리전이 정반대였다. 아래 폴백 경로는 NoCollision 으로 통째로 끄는데,
+    // ALootBase 는 CarriedLoot 프로파일(QueryOnly, 다른 캐릭터만 Block)로 바꿔 켜 둔다.
+    // 그 프로파일이 '들고 있는 물건이 남을 막는다' 는 협동 방해의 근거라 꺼지면 안 되고,
+    // 놓을 때의 SetCollisionEnabled(QueryAndPhysics)도 QueryOnly 프로파일을 어긋나게 남긴다.
+    //
+    // OnGrabbed/OnReleased 는 서버 전용이다. 클라이언트는 ALootBase 의
+    // OnRep_PrimaryCarrier 가 똑같은 일을 하므로 여기서는 아무것도 하지 않는다.
+    if (ICarryable* Carryable = Cast<ICarryable>(Target))
+    {
+        if (HasAuthority())
+        {
+            if (bCarried)
+            {
+                Carryable->OnGrabbed(this);
+            }
+            else
+            {
+                Carryable->OnReleased(this);
+            }
+        }
+
+        return;
+    }
+
+    // 이하는 ICarryable 을 구현하지 않은 액터용 폴백이다.
+    // (테스트 맵의 "Item" 태그 액터 등. 노획물이 전부 ALootBase 가 되면 지운다)
     UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Target->GetRootComponent());
 
     if (bCarried)
@@ -509,6 +537,20 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     }
 
     ApplyCarryState(NewHeldActor, true);
+
+    // 노획물은 자기가 요청을 거부할 수 있다 (이미 남이 들고 있음, 중량형 인원 부족 등).
+    // 거부하면 부착 자체가 일어나지 않아 아래 검증에 걸리는데, 그쪽 경고는
+    // "AttachTo 경고를 확인하라" 고 안내해서 원인을 엉뚱한 데서 찾게 만든다.
+    // 거부는 정상 흐름이므로 여기서 따로 구분한다.
+    if (const ICarryable* Carryable = Cast<const ICarryable>(NewHeldActor))
+    {
+        if (Carryable->GetPrimaryCarrier() != this)
+        {
+            UE_LOG(LogCarry, Log, TEXT("[서버] %s 가 운반 요청을 거부했다. (CanBeCarriedBy)"),
+                *GetNameSafe(NewHeldActor));
+            return false;
+        }
+    }
 
     // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
     // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
