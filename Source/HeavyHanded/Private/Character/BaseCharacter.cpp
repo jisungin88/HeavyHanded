@@ -545,7 +545,7 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot)
 			EventData.Target = PreviousHeldActor;
 			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 				HeavyCarryAssistant,
-				FGameplayTag::RequestGameplayTag(FName("Event.Loot.Dropped")),
+				HHTags::Event_Loot_Dropped,
 				EventData);
 		}
     }

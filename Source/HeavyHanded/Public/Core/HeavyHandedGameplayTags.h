@@ -125,6 +125,25 @@ namespace HHTags
 	/** 체포 — 도주 시간이 끝날 때까지 밴에 못 탔거나, 그 시점에 다운 상태였다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Arrested);
 
+	// ── 어빌리티 (전영배 / Config/Tags/Ability.ini) ──
+
+	/**
+	 * 협력 캐리 보조 — 중량형의 반대편을 잡는다. 기획서 4장 조작 표의 '협력 캐리(E)'.
+	 *
+	 * 한 태그가 두 가지로 쓰인다 — UGA_HeavyCarryAssist 의 GameplayEvent 트리거이자
+	 * 그 어빌리티의 식별 태그다. GAB_Interact 가 이 태그로 이벤트를 보내고,
+	 * 보조자가 자발적으로 놓을 때는 같은 태그로 CancelAbilities 를 건다.
+	 *
+	 * [왜 네이티브 선언이 필요했나] 예전에는 생성자에서 RequestGameplayTag 로 문자열
+	 *   조회를 했는데, .ini 에 태그가 없어서 CDO 생성 중에 check() 가 터졌다.
+	 *   그 시점이 모듈 로드라 **에디터가 아예 뜨지 않았다.** 네이티브 태그는 정적 초기화
+	 *   때 등록되므로 .ini 가 비어 있어도 살아남고, 오타는 컴파일러가 잡는다.
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_HeavyCarryAssist);
+
+	/** 공통 소모품 슬롯. GAB_Throw 가 클라이언트에서 서버로 올리는 이벤트 태그로 쓴다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Slot_Consumable);
+
 	// ── 게임플레이 이벤트 (공용 / Config/Tags/Event.ini) ──
 
 	/** 경비견이 플레이어에 접촉했다는 사실. 3회 누적 판정은 플레이어 파트가 한다 */
@@ -156,6 +175,14 @@ namespace HHTags
 	 *   EventMagnitude  이번에 더해진 금액($). 파손·유출이 반영된 GetCurrentValue() 다
 	 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Loot_Loaded);
+
+	/**
+	 * 주 운반자가 중량형을 놓았다. ABaseCharacter::SetHeldActor 가 보조자의 ASC 로 보낸다.
+	 *
+	 * UGA_HeavyCarryAssist 의 감시 태스크가 다음 틱 폴링으로도 알아채지만, 그때까지
+	 * 보조자가 허공을 잡고 있는 한 프레임이 남는다. 즉시 통지해 그 틈을 없앤다.
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Loot_Dropped);
 
 	// Guard.Type.* 은 선언하지 않는다 — EGuardType 열거형과 두 벌이 된다 (AI/GuardTypes.h).
 }
