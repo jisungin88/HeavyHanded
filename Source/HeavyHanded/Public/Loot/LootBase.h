@@ -13,6 +13,7 @@
 class UStaticMeshComponent;
 class UPrimitiveComponent;
 class UNoiseEmitterComponent;
+class AHandCart;
 class APawn;
 struct FPredictProjectilePathResult;
 
@@ -199,6 +200,32 @@ public:
 	 * 빠뜨리면 경고 없이 기본값으로 돌기 때문이다. 여기서 한 번만 정한다.
 	 */
 	FName GetLootRowName() const { return LootDefinition.RowName; }
+
+	// ── 카트 적재 ─────────────────────────────────────────────────────────
+
+	/** 지금 실려 있는 카트. 없으면 nullptr */
+	UFUNCTION(BlueprintPure, Category = "Loot|Cart")
+	AHandCart* GetContainingCart() const { return ContainingCart; }
+
+	UFUNCTION(BlueprintPure, Category = "Loot|Cart")
+	bool IsContainedInCart() const { return ContainingCart != nullptr; }
+
+	/**
+	 * 카트에 실리거나 빠져나올 때 AHandCart 가 부른다. (서버 전용)
+	 *
+	 * 여기서 두 가지를 끄고 켠다.
+	 *   1. 소음  — NoiseEmitter 에 배율 0 감쇄를 등록한다. 안 막으면 소음을 줄이려고
+	 *              산 장비가 소음 발생기가 된다
+	 *   2. 파손  — 충격 보고 자체를 건너뛴다. 안 막으면 파손형이 타고 가는 것만으로 깨진다
+	 *
+	 * [유출은 일부러 안 막는다] 불안정형은 기울기로 판정하지 충격으로 판정하지 않아서
+	 *   여기서 아무것도 안 해도 살아 있다. 파손형은 카트에서 안전하고 불안정형은 그렇지 않은
+	 *   것이 의도한 차이다 — 물건마다 카트와의 관계가 달라야 "이건 실어도 되나" 를 판단하게 된다.
+	 *   (2026-08-20 결정)
+	 *
+	 * 카트 밖에서 직접 부르지 말 것. 목록을 들고 있는 것은 카트라서 한쪽만 바뀌면 어긋난다.
+	 */
+	void SetContainingCart(AHandCart* Cart);
 
 	/**
 	 * 마지막으로 이 노획물을 든 사람. 놓거나 던진 뒤에도 남는다. 아무도 든 적 없으면 nullptr.
@@ -506,6 +533,21 @@ protected:
 	TObjectPtr<APawn> SecondaryCarrier;
 
 	/**
+	 * 지금 실려 있는 카트. 없으면 nullptr. 채우는 것은 AHandCart 뿐이다.
+	 *
+	 * [운반자와 다른 상태다]
+	 *   사람이 들면 물리를 끄고 붙이지만, 카트에 실리면 물리를 그대로 둔다.
+	 *   물건이 카트 안에서 흔들리고 험하게 몰면 쏟아지는 것이 카트의 유일한 위험 요소라서,
+	 *   물리를 끄면 그게 사라진다. 그래서 ApplyCarryState 를 타지 않는다.
+	 *
+	 * [복제하는 이유] 억제 판정 자체는 서버에서만 하지만, 이 값이 클라이언트에도 있으면
+	 *   "왜 아직 시끄럽지" 를 디버깅할 때 어느 쪽이 어긋났는지 바로 보인다.
+	 *   상태가 하나뿐이고 반영할 부수효과가 없어서 도착 순서 문제도 없다.
+	 */
+	UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Loot|Cart")
+	TObjectPtr<AHandCart> ContainingCart;
+
+	/**
 	 * 특성 태그(Loot.Type.*). BeginPlay 에서 채워지고 그 뒤로 바뀌지 않는다.
 	 *
 	 * 클라이언트도 상호작용 프롬프트("E — 들기")를 띄우려면 종류를 알아야 하므로 복제한다.
@@ -658,6 +700,14 @@ private:
 
 	/** [임시] 지금 이 플레이어가 들고 있는 노획물. 없으면 nullptr. T 키가 쓴다 */
 	ALootBase* Debug_FindCarriedLoot(const APawn* LocalPawn) const;
+
+	/**
+	 * 카트에 실려 있는 동안 NoiseEmitter 에 걸어 둔 감쇄 규칙의 핸들.
+	 *
+	 * UNoiseEmitterComponent::AddModifier 가 "반환 핸들을 보관했다가 반드시 Remove 할 것"
+	 * 이라고 요구한다. 안 지우면 카트에서 내린 물건이 남은 판 내내 조용하다.
+	 */
+	FGuid CartNoiseMuteHandle;
 
 	/** OnHit 콜백이 온 총 횟수. 확정 횟수와 비교해 게이팅 효과를 본다 */
 	int32 DebugRawHitCount = 0;
