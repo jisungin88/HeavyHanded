@@ -13,6 +13,9 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "Interfaces/Carryable.h"   // 운반 상태를 노획물에게 알린다 (SetHeldActor)
+#include "GameplayTagContainer.h"
+#include "GameplayTagAssetInterface.h"   // 노획물의 Loot.Type.* 태그를 읽는다 (IsCarryingHeavyItem)
+#include "Core/HeavyHandedGameplayTags.h"
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -41,19 +44,13 @@ void ABaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-    if (GetController() == nullptr)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Controller is nullptr!"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Controller"));
-    }
+	// [컨트롤러가 없는 것은 정상이다] 시뮬레이티드 프록시(남의 캐릭터)에는 컨트롤러가 없고,
+	// 서버의 원격 폰도 빙의 순서에 따라 이 시점에 비어 있을 수 있다.
+	// 예전에는 여기서 Error 를 찍어 접속할 때마다 에러가 쌓였다.
 
-	// ★ 클라이언트든 서버든 '로컬 플레이어'인 경우에만 입력 매핑을 추가해야 합니다.
+	// 클라이언트든 서버든 '로컬 플레이어'인 경우에만 입력 매핑을 추가한다.
     if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
     {
-        UE_LOG(LogTemp, Log, TEXT("True"));
         // 이 캐릭터를 조종하는 로컬 플레이어인지 확인 (AI나 다른 플레이어 소유일 때 오류 방지)
         if (PlayerController->IsLocalController())
         {
@@ -287,6 +284,12 @@ void ABaseCharacter::RemoveGameplayEffectFromSelf(TSubclassOf<UGameplayEffect> E
 
 void ABaseCharacter::StartCrouch(const FInputActionValue& Value)
 {
+	if (IsCarryingHeavyItem())
+	{
+		UE_LOG(LogCarry, Log, TEXT("%s 는 중량형 노획물을 들고 있어 크라우치할 수 없다."), *GetName());
+		return;
+	}
+
 	Crouch();
     Server_ApplyGameplayEffect(CrouchGameplayEffectClass, true);
 }
@@ -350,6 +353,13 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(ABaseCharacter, HeldActor);
+	// 08.18 start
+	DOREPLIFETIME(ABaseCharacter, HeavyCarryAssistant);
+	DOREPLIFETIME(ABaseCharacter, AssistingPrimaryCarrier);
+	DOREPLIFETIME(ABaseCharacter, AssistedHeavyItem);
+	DOREPLIFETIME(ABaseCharacter, HeavyCarryState);
+	// 08.18 end
+	DOREPLIFETIME(ABaseCharacter, ReviveProgress);
 }
 
 bool ABaseCharacter::CanCarryActor(const AActor* Target) const
@@ -494,7 +504,7 @@ void ABaseCharacter::ApplyCarryState(AActor* Target, bool bCarried)
     }
 }
 
-bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
+bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot)
 {
     // 운반 상태의 소유권은 서버에 있다. 클라이언트가 직접 바꾸면
     // 다음 복제 때 덮어써지면서 물리 상태만 어긋난다.
@@ -511,20 +521,37 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
     // 들고 있던 것을 먼저 놓는다.
     if (AActor* PreviousHeldActor = HeldActor)
     {
+        // 노획물에게 알리는 것까지 여기서 끝난다 — ApplyCarryState 가 ICarryable 이면
+        // OnReleased 를 부르고 바로 반환한다. 그쪽이 PrimaryCarrier 를 비우고
+        // Loot.State.Dropped 를 붙이며, 그게 없으면 밴 적재존이 "아무도 안 들고 있다" 를
+        // 영영 참으로 보고 압력판 같은 상태 기반 판정도 물건이 놓였다는 것을 모른다.
+        //
+        // 예전에는 여기서 OnReleased 를 한 번 더 불렀다. 코어 루프가 명시 호출을 넣은 것과
+        // 노획물 파트가 ApplyCarryState 안으로 같은 호출을 옮긴 것이 각자 브랜치에서 진행돼
+        // 병합 뒤 두 번 불리게 된 것이다. ALootBase::ApplyCarryState 의 멱등 가드가 막아 주고
+        // 있었을 뿐, 그 가드가 없으면 ApplyDropImpulse 가 두 번 들어가 놓은 물건이 튀어 나간다.
         ApplyCarryState(PreviousHeldActor, false);
 
-        // 노획물에게도 알린다. 이쪽이 PrimaryCarrier 를 비우고 Loot.State.Dropped 를 붙인다 —
-        // 그게 없으면 밴 적재존은 "아무도 안 들고 있다" 를 영영 참으로 보고,
-        // 압력판 같은 상태 기반 판정도 물건이 놓였다는 것을 모른다.
-        if (ICarryable* Carryable = Cast<ICarryable>(PreviousHeldActor))
-        {
-            Carryable->OnReleased(this);
-        }
-
         UE_LOG(LogCarry, Log, TEXT("[서버] 운반 해제: %s"), *GetNameSafe(PreviousHeldActor));
+
+		//08.18 Add
+		RemoveHeavySoloPenalty();
+
+		// 보조자가 있으면 AT_MonitorHeavyCarry 의 다음 틱 폴링을 기다리지 않고
+		// Event.Loot.Dropped 로 즉시 통지해 보조 상태를 바로 정리시킨다.
+		if (HeavyCarryAssistant)
+		{
+			FGameplayEventData EventData;
+			EventData.Target = PreviousHeldActor;
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+				HeavyCarryAssistant,
+				FGameplayTag::RequestGameplayTag(FName("Event.Loot.Dropped")),
+				EventData);
+		}
     }
 
     HeldActor = nullptr;
+    HeavyCarryState = EHeavyCarryState::None;
 
     if (!NewHeldActor)
     {
@@ -536,6 +563,11 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
         return false;
     }
 
+    // 노획물에게 알리는 것까지 여기서 끝난다 — ApplyCarryState 가 ICarryable 이면
+    // OnGrabbed 를 부르고 바로 반환한다. 그쪽이 PrimaryCarrier / LastCarrier 를 채우고
+    // 소켓에 붙이며, 소지 중 콜리전 프로파일과 운반자 상호 무시까지 건다.
+    //
+    // **아래 두 검증이 이 호출의 결과를 본다.** 그래서 이 줄이 먼저여야 한다.
     ApplyCarryState(NewHeldActor, true);
 
     // 노획물은 자기가 요청을 거부할 수 있다 (이미 남이 들고 있음, 중량형 인원 부족 등).
@@ -567,18 +599,26 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor)
         return false;
     }
 
+    // 여기까지 왔으면 노획물 쪽은 이미 운반 상태다. 위 ApplyCarryState 가 다 했고,
+    // 두 검증은 그 결과가 실제로 반영됐는지만 확인한 것이다.
     HeldActor = NewHeldActor;
 
-    // 부착 성공을 확인한 뒤에 알린다. 위 검증에서 되돌아가는 경로가 있어서,
-    // 먼저 알리면 붙지도 않은 물건을 노획물 쪽이 "들렸다" 고 믿는다.
-    //
-    // 이쪽이 PrimaryCarrier / LastCarrier 를 채우고 소켓에 다시 붙인다.
-    // 위 ApplyCarryState 와 하는 일이 겹치지만 대상 메시가 같아 결과는 노획물 설계대로 남는다 —
-    // 소지 중 콜리전 프로파일(CarriedLoot)과 운반자 상호 무시는 이쪽에만 있다.
-    if (ICarryable* Carryable = Cast<ICarryable>(NewHeldActor))
-    {
-        Carryable->OnGrabbed(this);
-    }
+	// StartCrouch 입력 차단만으로는 "이미 웅크린 채로 줍는" 경우를 못 막는다.
+	if (bIsCrouched && IsCarryingHeavyItem())
+	{
+		UnCrouch();
+		RemoveGameplayEffectFromSelf(CrouchGameplayEffectClass);
+		UE_LOG(LogCarry, Log, TEXT("[서버] %s 중량형 노획물을 집어 크라우치 강제 해제"), *GetName());
+	}
+
+	//08.18 수정 start
+	if (IsCarryingHeavyItem())
+	{
+		ApplyHeavySoloPenalty();
+		HeavyCarryState = EHeavyCarryState::Solo;
+		UE_LOG(LogCarry, Log, TEXT("[서버] %s 는 무거운 물건 - 혼자 들어서 이동속도 패널티 적용"), *GetNameSafe(NewHeldActor));
+	}
+	//08.18 수정 end
 
     UE_LOG(LogCarry, Log, TEXT("[서버] 운반 시작: %s | Replicates=%s, ReplicateMovement=%s"),
         *GetNameSafe(NewHeldActor),
@@ -612,4 +652,49 @@ void ABaseCharacter::OnRep_HeldActor(AActor* PreviousHeldActor)
         *GetNameSafe(PreviousHeldActor),
         *GetNameSafe(HeldActor),
         HeldRoot ? *GetNameSafe(HeldRoot->GetAttachParent()) : TEXT("(루트 없음/참조 안 풀림)"));
+}
+
+//08.18 추가
+void ABaseCharacter::OnRep_HeavyCarryAssistant()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_HeavyCarryAssistant: %s"), *GetNameSafe(HeavyCarryAssistant));
+}
+
+void ABaseCharacter::OnRep_AssistingPrimaryCarrier()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_AssistingPrimaryCarrier: %s"), *GetNameSafe(AssistingPrimaryCarrier));
+}
+
+bool ABaseCharacter::IsCarryingHeavyItem() const
+{
+	// "중량형인가" 는 Loot.Type.Heavy 태그로 판정한다.
+	//
+	// 예전에는 ICarryable::GetWeightClass() 를 봤는데, 노획물 파트가 무게 등급(EWeightClass)을
+	// 없애면서 그 함수도 같이 사라졌다. 지금은 ULootHeavyComponent 가 붙어 있으면
+	// ALootBase 가 이 태그를 단다 — 등급과 배율을 두 번 말하지 않으려는 정리다.
+	//
+	// 태그는 IGameplayTagAssetInterface 로 나온다. ICarryable 이 아니라 이쪽인 이유는
+	// "무엇인가" 와 "어떻게 운반되는가" 를 가른 노획물 쪽 설계를 그대로 따르기 때문이다.
+	if (const IGameplayTagAssetInterface* TagOwner = Cast<const IGameplayTagAssetInterface>(HeldActor))
+	{
+		return TagOwner->HasMatchingGameplayTag(HHTags::Loot_Type_Heavy);
+	}
+
+	return false;
+}
+
+bool ABaseCharacter::IsDowned() const
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	return ASC && ASC->HasMatchingGameplayTag(HHTags::State_Downed);
+}
+
+void ABaseCharacter::SetReviveProgress(float NewProgress)
+{
+	ReviveProgress = FMath::Clamp(NewProgress, 0.f, 1.f);
+}
+
+void ABaseCharacter::OnRep_ReviveProgress()
+{
+	// 지금은 빈 훅 — UI는 나중에 연결한다.
 }
