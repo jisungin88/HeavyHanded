@@ -132,7 +132,33 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** 적재 판정 볼륨이자 루트. 프로파일은 VanLoadZone (Config/DefaultEngine.ini) */
+	/**
+	 * 액터의 기준점. **밴 바닥 중앙이고, 로컬 +X 가 뒷문 방향이다.**
+	 *
+	 * [왜 판정 볼륨이 아니라 빈 컴포넌트가 루트인가]
+	 *   볼륨을 루트로 두면 액터 원점이 화물칸 한가운데 공중에 뜬다. 그러면 바닥에 놓이는
+	 *   것들(좌석 · 하차 지점)의 Z 가 전부 화물칸 크기에 묶여서, 볼륨을 늘리는 순간
+	 *   좌석이 공중에 뜨고 문짝이 볼륨 안에 파묻힌다.
+	 *
+	 *   바닥 기준점을 따로 두면 그것들이 전부 Z=0 이라 볼륨 크기와 무관해진다.
+	 *   레벨에 배치할 때도 이 편이 맞다 — 밴을 놓는 사람은 바닥에 스냅하지,
+	 *   화물칸 중심 높이를 계산하지 않는다.
+	 *
+	 *   **배치를 손보는 일이 줄어드는 것이지 코드가 대신 놓아 주는 것은 아니다.**
+	 *   아래 컴포넌트들의 위치 · 크기 · 회전은 전부 뷰포트에서 정하고, 코드는 덮어쓰지 않는다.
+	 *
+	 * [진입점과의 관계] AHeistEntryPoint 의 VanAnchor 화살표가 이 지점으로 온다
+	 *   (AHeistGameMode::PlaceVan). 화살표를 바닥에, 화살표 방향을 뒷문 쪽으로 놓으면 된다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van")
+	TObjectPtr<USceneComponent> VanRoot;
+
+	/**
+	 * 적재 판정 볼륨. 프로파일은 VanLoadZone (Config/DefaultEngine.ini)
+	 *
+	 * 기본값은 바닥이 VanRoot 평면에 닿는 높이다. **크기와 위치는 뷰포트에서 정한다** —
+	 * 크기를 바꿨으면 문짝과 하차 지점도 같이 봐 줘야 한다. 코드는 덮어쓰지 않는다.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van")
 	TObjectPtr<UBoxComponent> LoadVolume;
 
@@ -182,6 +208,8 @@ protected:
 	 *
 	 * 앵커 위치는 '발이 닿는 지점' 이다. 캡슐 절반 높이는 코드가 더한다 —
 	 * 배치자가 캐릭터 캡슐 크기를 알아야 자리를 놓을 수 있으면 안 된다.
+	 *
+	 * VanRoot 가 바닥 기준이므로 좌석의 기본 Z 는 0 이다. 볼륨 크기를 바꿔도 움직이지 않는다.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van|Seats")
 	TArray<TObjectPtr<USceneComponent>> Seats;
