@@ -58,6 +58,14 @@ void ATitlePlayerController::TitleCreateSession
 
 	SessionDebug(TEXT("Existing GameSession"),ExistingSession == nullptr);
 
+	// 삭제 후 재시도로 이 함수가 다시 불릴 수 있다.
+	// 남은 핸들 위에 덧붙이면 완료 콜백이 두 번 불린다
+	if (CreateHandle.IsValid())
+	{
+		SessionInterface->ClearOnCreateSessionCompleteDelegate_Handle(CreateHandle);
+		CreateHandle.Reset();
+	}
+
     CreateHandle =
         SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(
             FOnCreateSessionCompleteDelegate::CreateUObject(
@@ -110,6 +118,12 @@ void ATitlePlayerController::TitleCreateSession
     
 
 
+	if (StartHandle.IsValid())
+	{
+		SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(StartHandle);
+		StartHandle.Reset();
+	}
+
     StartHandle =
         SessionInterface->AddOnStartSessionCompleteDelegate_Handle(
             FOnStartSessionCompleteDelegate::CreateUObject(
@@ -122,27 +136,17 @@ void ATitlePlayerController::TitleCreateSession
 
 
 
-	// 기존 세션이 있으면 삭제 후 다시 생성
+	// 기존 세션이 있으면 삭제 후 다시 생성한다.
+	// 삭제는 비동기라 여기서 끝내고, 이어서 하는 것은 TitleOnDestroySessionComplete 가 맡는다
 	if (ExistingSession)
 	{
-		DestroyHandle =
-			SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(
-				FOnDestroySessionCompleteDelegate::CreateUObject(
-					this,
-					&ATitlePlayerController::TitleOnDestroySessionComplete));
+		PendingAction = EPendingSessionAction::Create;
+		PendingRoomName = RoomName;
+		PendingMaxPlayer = maxPlayer;
+		bPendingIsPublic = isPublic;
 
-		SessionDebug(TEXT("Destroy Delegate Added"), DestroyHandle.IsValid());
-
-		if (!DestroyHandle.IsValid())
-		{
-			bPendingCreateSession = false;
-			return;
-		}
-
-		bool bDestroyStarted =
-			SessionInterface->DestroySession(NAME_GameSession);
-
-		SessionDebug(TEXT("DestroySession"), DestroyHandle.IsValid());
+		// 실패하면 안에서 예약을 되돌리고 로그를 남긴다. 어느 쪽이든 여기서 끝난다
+		BeginDestroyForPendingAction();
 		return;
 	}
 
@@ -405,6 +409,43 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
 
 	JoinDebug(SearchIndex);
 
+	if (!SessionInterface.IsValid())
+	{
+		SessionDebug(TEXT("Join: SessionInterface 없음"), false);
+		return;
+	}
+
+	// 인덱스는 UI 가 넘겨준다. 목록이 갱신된 뒤 낡은 인덱스가 들어오면 그대로 크래시라
+	// 배열 접근 전에 막는다 (아래에서 PublicSessionResults[SearchIndex] 를 그대로 쓴다)
+	if (!PublicSessionResults.IsValidIndex(SearchIndex))
+	{
+		SessionDebug(FString::Printf(TEXT("Join: 잘못된 인덱스 %d / 목록 %d개"),
+			SearchIndex, PublicSessionResults.Num()), false);
+		return;
+	}
+
+	// 기존 GameSession 이 남아 있으면 JoinSession 이 시작조차 되지 않는다 —
+	// "already exists, can't join twice" 로 거절당하고 Result 5(UnknownError)만 돌아온다.
+	// 방을 한 번 만들었거나 한 번 참가했던 인스턴스는 그 뒤로 아무 방에도 못 들어가게 된다.
+	//
+	// 생성 경로와 같은 처리다 — 먼저 지우고, 완료 콜백에서 이어서 참가한다
+	if (SessionInterface->GetNamedSession(NAME_GameSession))
+	{
+		SessionDebug(TEXT("Join: 기존 세션을 지우고 이어서 참가한다"), true);
+
+		PendingAction = EPendingSessionAction::Join;
+		PendingJoinIndex = SearchIndex;
+
+		BeginDestroyForPendingAction();
+		return;
+	}
+
+	// 삭제 후 재시도로 이 함수가 다시 불릴 수 있다 (위 pending 경로)
+	if (JoinHandle.IsValid())
+	{
+		SessionInterface->ClearOnJoinSessionCompleteDelegate_Handle(JoinHandle);
+		JoinHandle.Reset();
+	}
 
     // Join 완료 델리게이트 등록
     JoinHandle =
@@ -615,6 +656,51 @@ void ATitlePlayerController::JoinDebug(int32 SearchIndex)
 
 }
 
+bool ATitlePlayerController::BeginDestroyForPendingAction()
+{
+	if (!SessionInterface.IsValid())
+	{
+		PendingAction = EPendingSessionAction::None;
+		return false;
+	}
+
+	// 이전 시도의 델리게이트가 남아 있으면 콜백이 두 번 불린다
+	if (DestroyHandle.IsValid())
+	{
+		SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(DestroyHandle);
+		DestroyHandle.Reset();
+	}
+
+	DestroyHandle =
+		SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(
+				this,
+				&ATitlePlayerController::TitleOnDestroySessionComplete));
+
+	SessionDebug(TEXT("Destroy Delegate Added"), DestroyHandle.IsValid());
+
+	if (!DestroyHandle.IsValid())
+	{
+		PendingAction = EPendingSessionAction::None;
+		return false;
+	}
+
+	const bool bDestroyStarted = SessionInterface->DestroySession(NAME_GameSession);
+
+	SessionDebug(TEXT("DestroySession"), bDestroyStarted);
+
+	// 시작조차 못 했으면 완료 콜백이 오지 않는다. 예약을 남겨 두면 다음 삭제 때
+	// 엉뚱하게 되살아나므로 여기서 되돌린다
+	if (!bDestroyStarted)
+	{
+		SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(DestroyHandle);
+		DestroyHandle.Reset();
+		PendingAction = EPendingSessionAction::None;
+	}
+
+	return bDestroyStarted;
+}
+
 void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
 {
 	if (SessionInterface.IsValid() && DestroyHandle.IsValid())
@@ -627,17 +713,33 @@ void ATitlePlayerController::TitleOnDestroySessionComplete(FName SessionName, bo
 
 	SessionDebug(TEXT("DestroySession Complete?"),bWasSuccessful);
 
+	// 예약을 **먼저 비운다.** 아래에서 다시 부르는 함수들이 기존 세션을 또 발견하면
+	// 무한히 삭제를 반복하게 되는데, 예약이 비어 있으면 그 고리가 끊긴다
+	const EPendingSessionAction Resumed = PendingAction;
+	PendingAction = EPendingSessionAction::None;
+
 	if (!bWasSuccessful)
 	{
-		bPendingCreateSession = false;
+		SessionDebug(TEXT("삭제 실패 — 예약된 작업을 취소한다"), false);
 		return;
 	}
 
-	if (bPendingCreateSession)
+	switch (Resumed)
 	{
-		bPendingCreateSession = false;
-
+	case EPendingSessionAction::Create:
 		SessionDebug(TEXT("Creating New Session"), true);
-	}
+		TitleCreateSession(PendingRoomName, PendingMaxPlayer, bPendingIsPublic);
+		break;
 
+	case EPendingSessionAction::Join:
+		SessionDebug(FString::Printf(TEXT("이어서 참가 — 인덱스 %d"), PendingJoinIndex), true);
+		TitleJoinSession(PendingJoinIndex);
+		PendingJoinIndex = INDEX_NONE;
+		break;
+
+	case EPendingSessionAction::None:
+	default:
+		// 우리가 예약하지 않은 삭제다(직접 호출 등). 이어서 할 일이 없다
+		break;
+	}
 }
