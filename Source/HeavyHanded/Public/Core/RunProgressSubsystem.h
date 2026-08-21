@@ -128,6 +128,38 @@ public:
 	/** 이 역할을 이미 누가 가져갔는가. UI 가 선택 목록을 흐리게 하는 데 쓴다 */
 	bool IsRoleTaken(const FGameplayTag& RoleTag) const;
 
+	// ── 진입점 선택 ──
+	//
+	// 기획서 2장 — 작업은 건물 외부에서 시작하고, 진입로는 장소마다 여럿이다.
+	// 은신처에서 목표를 고를 때 어디로 들어갈지 함께 정하고, 작업 레벨이 그 자리에서 시작한다.
+	// 밴도 같이 그리로 간다 (AHeistGameMode::PlaceVan).
+	//
+	// [런 단위다] BeginNewRun() 이 지운다. 다음 판은 장소가 달라서 진입점 태그도 달라진다 —
+	//   저택에서 고른 Entry.Mansion.Front 를 박물관까지 들고 가면 그 레벨에 없는 태그가 되고,
+	//   HeistEntryGate 가 폴백으로 떨어뜨린다. 틀리게 동작하지는 않지만 남겨 둘 이유가 없다.
+	//
+	// [역할과 달리 팀 단위다] 역할은 사람마다 고르지만 진입점은 팀 전체가 한 곳에서 시작한다.
+	//   그래서 키가 없는 값 하나다.
+
+	/**
+	 * 진입점을 정한다. 역할과 달리 **다시 고를 수 있다** — 출발 전까지는 바꿔도 된다. (서버 전용)
+	 *
+	 * @return 정해졌으면 true. 무효 태그면 false 이고 **아무것도 바꾸지 않는다**
+	 *
+	 * [왜 여기서 레벨의 진입점 목록과 대조하지 않는가]
+	 *   은신처에는 저택 레벨이 로드돼 있지 않다. 그 레벨에 그 진입점이 실제로 있는지는
+	 *   도착한 뒤에야 알 수 있고, 그 판정은 HeistEntryGate 가 한다.
+	 *   여기서 억지로 검사하려면 은신처가 다른 레벨의 배치를 알아야 한다.
+	 */
+	bool TrySelectEntry(const FGameplayTag& EntryTag);
+
+	/** 팀이 고른 진입점(Entry.*). 아직 안 골랐으면 무효 태그 */
+	UFUNCTION(BlueprintPure, Category = "Run|Entry")
+	FGameplayTag GetSelectedEntry() const { return SelectedEntry; }
+
+	/** 선택을 되돌린다. (서버 전용) 레벨의 기본 진입점에서 시작하게 된다 */
+	void ClearSelectedEntry();
+
 	// ── 구매 장비 ──
 	//
 	// 은신처에서 팀 공용 골드로 산다. 목록만 작업 레벨까지 건너가고, 스폰 구역에
@@ -197,6 +229,40 @@ public:
 	 */
 	bool TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Cost);
 
+	// ── 통과한 장소 ──
+	//
+	// 기획서 2장 — 저택 → 박물관 → 은행 세 곳을 모두 통과하면 최종 성공이고, 실패한 장소는
+	// 처음부터 재시작한다. 그 판정의 근거가 이 목록이다.
+	//
+	// [수명이 캠페인 단위다] BeginNewRun() 이 지우지 않는다. 판 하나짜리 기록이 아니라
+	//   "이 방에서 어디까지 왔는가" 이기 때문이다. ResetCampaign() 만 비운다.
+	//   체포자 명단과 같은 이유다.
+	//
+	// [여기서 정하지 않는 것] 통과한 뒤에 어디로 가는가 — 은신처인지 최종 성공 연출인지는
+	//   이 클래스가 답하지 않는다. 사실만 들고 있고, 이동은 그것을 읽는 쪽(세션 파트의
+	//   ServerTravel)이 정한다. 최종 성공 처리가 아직 기획 미확정이라 더더욱 떠안지 않는다.
+
+	/**
+	 * 이 장소를 통과했다고 기록한다. (서버 전용 — 작업 레벨의 결과 확정 시)
+	 *
+	 * 같은 장소를 두 번 넣지 않는다. 재도전해서 통과해도 목록에는 한 번만 남는다.
+	 *
+	 * 무효 태그는 거부하고 경고를 남긴다. 사이트 태그를 지정하지 않은 GameMode 가
+	 * 빈 태그를 밀어 넣으면 "몇 곳을 통과했는가" 가 조용히 틀리고, 그 값이 최종 성공을 가른다.
+	 */
+	void RecordSiteCleared(const FGameplayTag& SiteTag);
+
+	/** 이 장소를 통과했는가. 목표 선택 UI 가 이미 지난 곳을 가리는 데 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	bool IsSiteCleared(FGameplayTag SiteTag) const;
+
+	/** 통과한 장소 수. 기획서의 최종 성공은 이 값이 3이 되는 것이다 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	int32 GetClearedSiteNum() const { return ClearedSites.Num(); }
+
+	/** 통과한 장소들. 통과한 순서대로 쌓인다 */
+	const TArray<FGameplayTag>& GetClearedSites() const { return ClearedSites; }
+
 	// ── 수명 경계 ──
 
 	/**
@@ -232,10 +298,26 @@ private:
 	TMap<FGameplayTag, int32> PurchasedEquipment;
 
 	/**
+	 * 팀이 고른 진입점(Entry.*). 런 단위 — BeginNewRun 이 지운다.
+	 *
+	 * 무효 태그면 안 골랐다는 뜻이고, 작업 레벨이 기본 진입점으로 폴백한다.
+	 */
+	UPROPERTY()
+	FGameplayTag SelectedEntry;
+
+	/**
 	 * 잡혀 있는 팀원. 캠페인 단위 — 구출하기 전까지 남는다.
 	 *
 	 * UPROPERTY 가 아닌 이유는 SelectedRoles 와 같다. FUniqueNetIdRepl 은 UObject 를
 	 * 참조하지 않아 GC 가 볼 것이 없다.
 	 */
 	TArray<FUniqueNetIdRepl> ArrestedPlayers;
+
+	/**
+	 * 통과한 장소(Site.*). 캠페인 단위 — BeginNewRun 이 지우지 않는다.
+	 *
+	 * 배열인 이유는 통과 순서가 그대로 진행 경로이고, 최대 3개라 TSet 의 이점이 없기 때문이다.
+	 */
+	UPROPERTY()
+	TArray<FGameplayTag> ClearedSites;
 };

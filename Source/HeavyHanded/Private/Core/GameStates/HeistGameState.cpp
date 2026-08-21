@@ -24,6 +24,7 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AHeistGameState, CurrentPhase);
+	DOREPLIFETIME(AHeistGameState, EntryTag);
 	DOREPLIFETIME(AHeistGameState, PhaseEndServerTime);
 	DOREPLIFETIME(AHeistGameState, PhaseReason);
 	DOREPLIFETIME(AHeistGameState, LoadedValue);
@@ -168,6 +169,16 @@ void AHeistGameState::SetTargetValue(int32 NewTargetValue)
 	OnRep_LoadedValue();
 }
 
+void AHeistGameState::SetEntryTag(const FGameplayTag& NewEntryTag)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	EntryTag = NewEntryTag;
+}
+
 void AHeistGameState::OnRep_LoadedValue()
 {
 	OnLoadedValueChanged.Broadcast(LoadedValue, TargetValue);
@@ -184,7 +195,7 @@ void AHeistGameState::FinalizeOutcome()
 		return;
 	}
 
-	// 전원 탈출은 '체포자가 없다' 로 본다. 체포는 미승차와 다운을 모두 흡수한 결과라
+	// 탈출은 '체포되지 않았다' 로 본다. 체포는 미승차와 다운을 모두 흡수한 결과라
 	// 여기서 그 조건을 다시 세면 두 곳이 어긋날 수 있다.
 	int32 CountedNum = 0;
 	int32 EscapedNum = 0;
@@ -204,11 +215,14 @@ void AHeistGameState::FinalizeOutcome()
 		}
 	}
 
-	// 아무도 남지 않은 판(전원 이탈)에서 "체포자가 0명" 을 전원 탈출로 읽으면 안 된다.
-	// HeistEscapeGate 의 전원 다운 경계와 같은 종류의 함정이다.
-	const bool bEveryoneEscaped = CountedNum > 0 && EscapedNum == CountedNum;
+	// 최소 1인이 빠져나오면 작업은 성립한다 (기획서 2장 승패 조건).
+	//
+	// 아무도 남지 않은 판(전원 이탈)을 성공으로 읽는 함정은 이 조건 자체가 막는다 —
+	// 셀 사람이 없으면 EscapedNum 이 0 이라 그대로 실패로 떨어진다. '전원 탈출' 로 세던
+	// 시절에는 0명 중 0명이 참이라 CountedNum > 0 가드를 따로 세워야 했다.
+	const bool bAnyoneEscaped = EscapedNum > 0;
 
-	Outcome = HeistOutcome::Evaluate(IsTargetReached(), bEveryoneEscaped);
+	Outcome = HeistOutcome::Evaluate(IsTargetReached(), bAnyoneEscaped);
 
 	UE_LOG(LogHeist, Log, TEXT("결과 등급 %s — 적재 $%d / $%d, 탈출 %d of %d명, 소요 %.1f초"),
 		HeistOutcome::ToString(Outcome),
@@ -239,6 +253,19 @@ void AHeistGameState::SetResultConfirmed(APlayerState* Player, bool bConfirmed)
 {
 	if (!HasAuthority() || !IsValid(Player))
 	{
+		return;
+	}
+
+	// Result 에서만 받는다. 승차 명단이 Result 에서만 잠기는 것과 짝이다.
+	//
+	// 그전에 들어온 확인이 명단에 쌓이면 Result 진입 순간에는 값이 안 바뀌어
+	// OnResultConfirmChanged 가 울리지 않는다. 전원이 이미 확인한 상태인데 아무도
+	// 그 사실을 모르고, 체류 시간이 다 될 때까지 결과 화면에 갇힌다.
+	// 지금은 확인을 넣을 UI 경로가 없지만 세션·UI 파트의 Server RPC 가 붙는 순간 열린다.
+	if (!IsPhase(HHTags::Phase_Result))
+	{
+		UE_LOG(LogHeist, Verbose, TEXT("결과 확인 무시 — 아직 결과 화면이 아니다 (%s)"),
+			*Player->GetPlayerName());
 		return;
 	}
 
@@ -421,6 +448,21 @@ void AHeistGameState::SetBoarded(APlayerState* Player, bool bBoarded)
 {
 	if (!HasAuthority() || !IsValid(Player))
 	{
+		return;
+	}
+
+	// Result 에 들어간 뒤로는 명단이 얼어야 한다.
+	//
+	// 체포는 ResolveArrests 가 이미 확정했고 등급도 그 위에서 나왔다. 여기서 승차만 더
+	// 바뀌면 탈출 명단에도 체포 명단에도 없는 사람이 생겨, 결과 화면이 자기가 표시하는
+	// 등급과 어긋난 명단을 그린다.
+	//
+	// 계기가 둘이라 이 자리에서 막는다 — 결과 화면에서의 하차 상호작용(AVanZone)과
+	// 접속 종료(AHeistGameMode::Logout). 부르는 쪽에서 각각 막으면 반드시 한쪽이 빠진다.
+	if (IsPhase(HHTags::Phase_Result))
+	{
+		UE_LOG(LogHeist, Verbose, TEXT("승차 명단 변경 무시 — 이미 결과가 확정된 판이다 (%s)"),
+			*Player->GetPlayerName());
 		return;
 	}
 

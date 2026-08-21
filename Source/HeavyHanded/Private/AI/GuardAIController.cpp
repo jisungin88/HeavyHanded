@@ -5,7 +5,10 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Character/GuardCharacter.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Noise/PerceptionMeterComponent.h"
+#include "AI/GuardSettings.h"
+#include "Engine/DataTable.h"
 // TODO: 실제 GameState 클래스명 및 소속 폴더로 교체
 // (예: Core 폴더에 있다면 "Core/HeistGameState.h")
 // #include "Core/HeistGameState.h"
@@ -16,6 +19,7 @@
 #include "Components/WidgetComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/DetectionGaugeWidget.h"
+#include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -24,21 +28,27 @@ AGuardAIController::AGuardAIController()
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
 
-	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡고,
-	// 시야각·거리 등 세부 파라미터는 BP_GuardAIController 및 그 파생 BP 에서
-	// GuardType 별로 override 한다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에 뜬다.
+	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
+	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
+	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
 
-	// 팀 시스템(IGenericTeamAgentInterface)을 별도로 구현하지 않았기 때문에,
-	// 기본 설정(bDetectEnemies만 true)으로는 플레이어가 "중립"으로 판정되어 전혀 감지되지 않는다.
-	// 소속과 무관하게 전부 감지하도록 명시적으로 켠다.
+	// AAIController가 IGenericTeamAgentInterface를 이미 구현하고 있어(TeamID 멤버) 여기서는
+	// 그 값만 채운다. 모든 경비를 같은 팀으로 묶어 서로 "우호"로 판정되게 한다.
+	SetGenericTeamId(FGenericTeamId(1));
+
+	// 플레이어는 IGenericTeamAgentInterface를 구현하지 않아 FGenericTeamId::NoTeam(255)로
+	// 남는다. 경비 입장에서 그런 상대는 "중립"으로 판정되므로 bDetectNeutrals를 켜야
+	// 플레이어를 감지한다. 경비끼리는 위에서 같은 팀으로 묶어 "우호"로 판정되는데,
+	// bDetectFriendlies는 꺼서 서로를 감지 대상에서 제외한다 — 켜두면 경비 2명을 배치했을 때
+	// 서로를 시야로 잡고 쫓아다니며 교착 상태에 빠진다.
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
 	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
 	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
 
 	PerceptionComp->ConfigureSense(*SightConfig);
 	PerceptionComp->ConfigureSense(*HearingConfig);
@@ -47,6 +57,10 @@ AGuardAIController::AGuardAIController()
 void AGuardAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
+
+	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
+	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
+	ApplyGuardStats(InPawn);
 
 	if (!IsValid(BehaviorTreeAsset))
 	{
@@ -207,6 +221,13 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 	}
 
+	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
+	// ReportPursuitStarted() 와는 별개 카운터라 추격 횟수와 섞이지 않는다.
+	if (UAlertComponent* Alert = UAlertComponent::Get(this))
+	{
+		Alert->ReportNoiseDetected();
+	}
+
 	// 리셋하지 않으면 래치가 풀리지 않아 경비가 영원히 100%에 박힌다 (PerceptionMeterComponent.h 참고)
 	if (PerceptionMeter)
 	{
@@ -353,6 +374,118 @@ void AGuardAIController::UpdateHeadGaugeWidget()
 	GaugeWidget->SetGaugePercent(GaugePercent);
 }
 
+void AGuardAIController::ApplyGuardStats(APawn* InPawn)
+{
+	const UGuardSettings* Settings = UGuardSettings::Get();
+	const UDataTable* StatsTable = Settings->GuardStats.LoadSynchronous();
+	if (!IsValid(StatsTable))
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] Project Settings > Guard > Guard Stats 가 비어 있다. 폴백값을 그대로 쓴다."),
+			*GetNameSafe(InPawn));
+		return;
+	}
+
+	// RowName == EGuardType 의 짧은 이름 문자열. UEnum::GetNameStringByValue 는
+	// "EGuardType::Standard" 처럼 열거형 이름까지 붙어 나와 DataTable RowName 관례와
+	// 어긋나므로, 여기서는 명시적으로 매핑한다.
+	FName RowName;
+	switch (GuardType)
+	{
+	case EGuardType::Standard: RowName = TEXT("Standard"); break;
+	case EGuardType::Dog:      RowName = TEXT("Dog");      break;
+	case EGuardType::Armed:    RowName = TEXT("Armed");    break;
+	default:                   RowName = TEXT("Standard"); break;
+	}
+
+	const FGuardStatsRow* Row = StatsTable->FindRow<FGuardStatsRow>(RowName, TEXT("AGuardAIController::ApplyGuardStats"));
+	if (!Row)
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] DT_GuardStats 에 행 '%s' 가 없다. 폴백값을 그대로 쓴다."),
+			*GetNameSafe(InPawn), *RowName.ToString());
+		return;
+	}
+
+	PatrolArrivalRadius = Row->PatrolArrivalRadius;
+	SearchSweepCount = Row->SearchSweepCount;
+	SearchSweepRadius = Row->SearchSweepRadius;
+	HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
+
+	SightConfig->SightRadius = Row->SightRadius;
+	SightConfig->LoseSightRadius = Row->LoseSightRadius;
+	SightConfig->PeripheralVisionAngleDegrees = Row->PeripheralVisionAngleDegrees;
+	HearingConfig->HearingRange = Row->HearingRange;
+	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
+	PerceptionComp->RequestStimuliListenerUpdate();
+
+	if (ACharacter* GuardCharacterPawn = Cast<ACharacter>(InPawn))
+	{
+		if (UCharacterMovementComponent* MovementComp = GuardCharacterPawn->GetCharacterMovement())
+		{
+			MovementComp->MaxWalkSpeed = Row->MoveSpeed;
+		}
+	}
+}
+
+int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
+{
+	const int32 PointCount = GuardPawn->GetPatrolPointCount();
+	if (PointCount <= 1)
+	{
+		return 0;
+	}
+
+	// 반경 안의 이웃 경비를 자신을 포함해 모은다. 레벨에 배치된 경비 수가 적어
+	// 매 OnPossess(경비당 한 번)마다 전체 순회해도 부담이 없다.
+	TArray<const AGuardCharacter*> Cluster;
+	Cluster.Add(GuardPawn);
+
+	const float RadiusSq = FMath::Square(InitialPatrolSeparationRadius);
+	for (TActorIterator<AGuardCharacter> It(GetWorld()); It; ++It)
+	{
+		AGuardCharacter* Other = *It;
+		if (!IsValid(Other) || Other == GuardPawn)
+		{
+			continue;
+		}
+
+		if (FVector::DistSquared(GuardPawn->GetActorLocation(), Other->GetActorLocation()) <= RadiusSq)
+		{
+			Cluster.Add(Other);
+		}
+	}
+
+	if (Cluster.Num() <= 1)
+	{
+		return 0;
+	}
+
+	// 두 경비가 서로를 이웃으로 보면 똑같은 반경 조건을 검사하므로 정렬 결과도 똑같이 나온다 -
+	// 그래야 "내 순번"이 양쪽에서 일관되게 계산된다. GetUniqueID는 인스턴스마다 고정이라
+	// 정렬 기준으로 안전하다.
+	Cluster.Sort([](const AGuardCharacter& A, const AGuardCharacter& B)
+	{
+		return A.GetUniqueID() < B.GetUniqueID();
+	});
+
+	const int32 MyRank = Cluster.IndexOfByKey(GuardPawn);
+	const int32 StartIndex = FMath::RoundToInt(static_cast<float>(MyRank) * PointCount / Cluster.Num()) % PointCount;
+
+	// PingPong 은 bPatrolMovingForward 기본값이 true(정방향)라, 시작 지점을 마지막 인덱스로
+	// 고르면 도착 직후 곧장 같은 지점을 다시 고르고서야 역방향으로 꺾인다. 미리 뒤집어 둔다.
+	if (GuardPawn->PatrolPattern == EPatrolPattern::PingPong && StartIndex == PointCount - 1)
+	{
+		bPatrolMovingForward = false;
+	}
+
+	UE_LOG(LogGuardAI, Log,
+		TEXT("[%s] %.0fcm 안에 이웃 경비 %d명이 있어(내 순번 %d/%d) %d번 지점에서 순찰을 시작한다 (기본 0번 대신)."),
+		*GetNameSafe(GuardPawn), InitialPatrolSeparationRadius, Cluster.Num() - 1, MyRank, Cluster.Num(), StartIndex);
+
+	return StartIndex;
+}
+
 void AGuardAIController::SelectNextPatrolPoint()
 {
 	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
@@ -404,10 +537,10 @@ void AGuardAIController::SelectNextPatrolPoint()
 		}
 	}
 
-	// 첫 호출(-1)은 항상 0번 지점에서 시작.
+	// 첫 호출(-1). 근처에 다른 경비가 있으면 그 경비에게서 가장 먼 지점에서, 없으면 0번에서 시작.
 	if (CurrentPatrolIndex < 0)
 	{
-		CurrentPatrolIndex = 0;
+		CurrentPatrolIndex = SelectInitialPatrolIndex(GuardPawn);
 	}
 	else if (PointCount == 1)
 	{

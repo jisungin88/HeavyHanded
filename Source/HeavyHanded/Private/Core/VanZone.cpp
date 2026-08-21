@@ -4,17 +4,14 @@
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
-#include "UObject/ConstructorHelpers.h"
 #include "GameplayEffectTypes.h"
 #include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
@@ -37,6 +34,12 @@ namespace
 
 	/** 기본 화물칸 크기(cm, 반지름). 밴 메시가 정해지면 인스턴스에서 조정한다 */
 	constexpr float DefaultZoneExtent = 150.f;
+
+	/** 뒷문 개구부 높이(cm). 조준 판의 크기와 하차 지점 기준이 된다 */
+	constexpr float DoorHeight = 200.f;
+
+	/** 하차 지점을 문짝에서 얼마나 더 바깥에 둘 것인가(cm) */
+	constexpr float ExitOffsetBeyondDoor = 80.f;
 
 	/**
 	 * 좌석 수. 기획서 2~4인이라 넷이면 충분하다.
@@ -64,13 +67,36 @@ AVanZone::AVanZone()
 	// 복제하지 않는 액터는 RPC 를 보낼 수 없다.
 	bReplicates = true;
 
-	// 밴 자체가 움직이게 되면(도주 연출) 그때 이 값을 켠다. 지금은 정지해 있어 낭비다.
-	SetReplicateMovement(false);
+	// 밴은 매치 시작마다 진입점으로 옮겨진다 (AHeistGameMode::PlaceVan).
+	//
+	// [레벨 배치 액터라 반드시 켜야 한다] 클라이언트는 이 액터를 레벨 파일에서 이미 갖고 있고,
+	//   그 안에 저장된 위치를 쓴다. 스폰되는 액터와 달리 트랜스폼이 따로 오지 않는다.
+	//   꺼 두면 서버만 밴을 옮기고 클라이언트는 원래 배치 자리에 남아서,
+	//   **호스트에서는 멀쩡한데 클라이언트에서만 밴이 없는** 상태가 된다. 실제로 그랬다.
+	//
+	// [비용] 정지한 액터는 트랜스폼이 dirty 되지 않아 아무것도 보내지 않는다.
+	//   실제로 나가는 것은 진입점으로 옮기는 순간과, 나중에 도주 연출로 움직일 때뿐이다.
+	SetReplicateMovement(true);
+
+	// 루트는 판정 볼륨이 아니라 빈 기준점이다 — 밴 바닥 중앙, 로컬 +X 가 뒷문 방향.
+	//
+	// 볼륨을 루트로 두면 액터 원점이 화물칸 한가운데 공중에 뜬다. 그러면 바닥에 놓이는 것들
+	// (좌석 · 하차 지점)의 Z 가 전부 화물칸 크기에 묶여서, 볼륨을 늘리는 순간 좌석이 공중에 뜬다.
+	// 레벨에 배치할 때도 바닥 기준이 맞다 — 밴을 놓는 사람은 바닥에 스냅하지 화물칸 중심
+	// 높이를 계산하지 않는다.
+	//
+	// 아래 컴포넌트들의 위치 · 크기 · 회전은 전부 **기본값일 뿐이고 뷰포트에서 정한다.**
+	// 코드가 다시 덮어쓰지 않는다.
+	VanRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VanRoot"));
+	SetRootComponent(VanRoot);
 
 	LoadVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("LoadVolume"));
-	SetRootComponent(LoadVolume);
+	LoadVolume->SetupAttachment(VanRoot);
 
 	LoadVolume->SetBoxExtent(FVector(DefaultZoneExtent));
+
+	// 기본 크기 기준으로 바닥이 VanRoot 평면에 닿는 높이
+	LoadVolume->SetRelativeLocation(FVector(0.f, 0.f, DefaultZoneExtent));
 	LoadVolume->SetCollisionProfileName(VanLoadZoneProfile);
 	LoadVolume->SetGenerateOverlapEvents(true);
 
@@ -78,42 +104,41 @@ AVanZone::AVanZone()
 	LoadVolume->SetHiddenInGame(true);
 
 	BoardVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardVolume"));
-	BoardVolume->SetupAttachment(LoadVolume);
+	BoardVolume->SetupAttachment(VanRoot);
 
 	BoardVolume->SetBoxExtent(FVector(DefaultZoneExtent));
+	BoardVolume->SetRelativeLocation(FVector(0.f, 0.f, DefaultZoneExtent));
 	BoardVolume->SetCollisionProfileName(VanBoardZoneProfile);
 	BoardVolume->SetHiddenInGame(true);
 
 	// 콜백은 걸지 않지만 겹침 추적은 켜야 한다. IsOverlappingActor 가 이 목록을 읽는다
 	BoardVolume->SetGenerateOverlapEvents(true);
 
-	VanDoor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VanDoor"));
-	VanDoor->SetupAttachment(LoadVolume);
+	BoardAimTarget = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardAimTarget"));
+	BoardAimTarget->SetupAttachment(VanRoot);
 
-	// 그레이박스용 기본값. 큐브를 얇게 눌러 문짝 모양으로 쓴다.
-	// 비워 두면 조준할 것이 없어 승차가 아예 불가능해지므로 기본값이 있어야 한다
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDoorMesh(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (DefaultDoorMesh.Succeeded())
-	{
-		VanDoor->SetStaticMesh(DefaultDoorMesh.Object);
-	}
-
-	// 볼륨 뒤쪽 면에 세워 둔다. 두께 10cm · 폭 140cm · 높이 200cm 짜리 문짝이다
-	VanDoor->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, 0.f));
-	VanDoor->SetRelativeScale3D(FVector(0.1f, 1.4f, 2.f));
+	// 뒷문 개구부를 덮는 판. 두께 10cm · 폭 140cm · 높이 200cm 로 시작하고,
+	// 실제 밴 메시가 들어오면 그 개구부에 맞춰 뷰포트에서 조정한다.
+	// 박스는 중심 기준이라 높이의 절반만큼 올려야 바닥에 선다
+	BoardAimTarget->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, DoorHeight * 0.5f));
+	BoardAimTarget->SetBoxExtent(FVector(5.f, 70.f, DoorHeight * 0.5f));
 
 	// 조준되는 것 하나가 이 컴포넌트의 전부다. 헤더 주석 참고 —
-	// 몸체가 아니라 문이므로 막을 것도 가릴 것도 없다
-	VanDoor->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	VanDoor->SetCollisionResponseToAllChannels(ECR_Ignore);
-	VanDoor->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	// 시야만 막고 나머지는 전부 통과시킨다
+	BoardAimTarget->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	BoardAimTarget->SetCollisionResponseToAllChannels(ECR_Ignore);
+	BoardAimTarget->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	// 게임 화면에는 보이지 않는다. 보이는 문짝은 BP 가 실제 메시로 따로 갖고,
+	// 그것들은 열리고 닫히며 움직인다 — 이 판은 그 자리에 고정돼 조준만 받는다
+	BoardAimTarget->SetHiddenInGame(true);
 
 	// 좌석. 화물칸 바닥에 둘씩 마주 보게 흩어 두고, 실제 배치는 뷰포트에서 한다.
-	// Z 가 볼륨 아래 면인 이유는 앵커가 '발이 닿는 지점' 이기 때문이다
+	// Z 가 0 인 이유는 앵커가 '발이 닿는 지점' 이고 VanRoot 가 바닥이기 때문이다 —
+	// 볼륨 크기를 바꿔도 좌석은 그대로 바닥에 남는다
 	static const FVector DefaultSeatOffsets[] = {
-		FVector(-60.f, -60.f, -DefaultZoneExtent), FVector(-60.f,  60.f, -DefaultZoneExtent),
-		FVector( 30.f, -60.f, -DefaultZoneExtent), FVector( 30.f,  60.f, -DefaultZoneExtent)
+		FVector(-60.f, -60.f, 0.f), FVector(-60.f,  60.f, 0.f),
+		FVector( 30.f, -60.f, 0.f), FVector( 30.f,  60.f, 0.f)
 	};
 
 	Seats.Reserve(MaxSeats);
@@ -121,7 +146,7 @@ AVanZone::AVanZone()
 	{
 		USceneComponent* Seat = CreateDefaultSubobject<USceneComponent>(
 			*FString::Printf(TEXT("Seat%d"), Index));
-		Seat->SetupAttachment(LoadVolume);
+		Seat->SetupAttachment(VanRoot);
 		Seat->SetRelativeLocation(DefaultSeatOffsets[Index]);
 
 		Seats.Add(Seat);
@@ -129,9 +154,13 @@ AVanZone::AVanZone()
 
 	// 하차 지점. 기본값은 문짝 바깥쪽 바닥이다 — 문을 열고 뒤로 내리는 그림
 	ExitAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("ExitAnchor"));
-	ExitAnchor->SetupAttachment(LoadVolume);
-	ExitAnchor->SetRelativeLocation(FVector(DefaultZoneExtent + 80.f, 0.f, -DefaultZoneExtent));
+	ExitAnchor->SetupAttachment(VanRoot);
+	ExitAnchor->SetRelativeLocation(
+		FVector(DefaultZoneExtent + ExitOffsetBeyondDoor, 0.f, 0.f));
 
+	// 데칼만 VanRoot 가 아니라 볼륨에 붙는다. SyncBorderDecal 이 크기를 '스케일 전' 값으로
+	// 맞추고 나머지는 부모 스케일에 맡기는 구조라, 부모가 볼륨이어야 스케일이 맞아떨어진다.
+	// VanRoot 에 붙이면 볼륨 컴포넌트를 스케일했을 때 테두리만 옛 크기로 남는다
 	BorderDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("BorderDecal"));
 	BorderDecal->SetupAttachment(LoadVolume);
 
@@ -342,9 +371,21 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 		return false;
 	}
 
+	// 결과 화면이 뜬 뒤에는 타지도 내리지도 못한다.
+	//
+	// 명단은 이미 얼어 있으므로(AHeistGameState::SetBoarded) 여기를 안 막아도 집계는
+	// 안전하다. 그런데도 막는 것은 몸 때문이다 — 명단에는 탈출로 남은 사람이 밴에서
+	// 걸어 나오면 결과 화면과 눈앞의 장면이 어긋난다.
+	if (HeistState->IsPhase(HHTags::Phase_Result))
+	{
+		ShowLoadDebug(TEXT("거부 — 결과 화면에서는 타고 내릴 수 없다"),
+			FColor::Red, Player->GetActorLocation());
+		return false;
+	}
+
 	const bool bWasBoarded = HeistState->IsBoarded(PlayerState);
 
-	// 내리는 것은 언제나 된다. 탈 때만 조건을 본다 —
+	// 내리는 것은 (결과 화면을 빼면) 언제나 된다. 탈 때만 조건을 본다 —
 	// 페이즈가 넘어갔다고 탄 사람을 밴에 가둬 둘 이유가 없다
 	if (!bWasBoarded && !CanBoardNow(Player))
 	{
@@ -426,8 +467,12 @@ void AVanZone::ApplyBoardedPawnState(APawn* Player, bool bBoarded)
 		else
 		{
 			// 좌석이 하나도 없다. 서 있던 자리에 고정한다 — 자리가 없다고 못 타게 하면
-			// 그 사람은 영영 탈출하지 못한다
-			Character->AttachToComponent(GetRootComponent(),
+			// 그 사람은 영영 탈출하지 못한다.
+			//
+			// 루트가 아니라 볼륨에 붙인다. 루트는 밴 바닥 기준점일 뿐이라 "화물칸에 실려 간다"
+			// 는 뜻이 되지 않는다 — KeepWorldTransform 이라 지금 위치는 같지만, 붙는 대상이
+			// 무엇인지가 밴이 움직이게 될 때 갈린다
+			Character->AttachToComponent(LoadVolume,
 				FAttachmentTransformRules::KeepWorldTransform);
 		}
 
@@ -857,7 +902,11 @@ void AVanZone::DrawBorderFallback() const
 	if (const UWorld* World = GetWorld())
 	{
 		// 영구 선으로 한 번만 그린다. 존은 움직이지 않으므로 매 프레임 다시 그릴 이유가 없다.
-		DrawDebugBox(World, GetActorLocation(), LoadVolume->GetScaledBoxExtent(), GetActorQuat(),
+		//
+		// 중심을 액터가 아니라 볼륨에서 읽는다 — 루트는 밴 바닥이고 볼륨은 그 위에 떠 있어서,
+		// 액터 위치로 그리면 상자가 실제 판정 범위보다 한 칸 아래에 그려진다
+		DrawDebugBox(World, LoadVolume->GetComponentLocation(), LoadVolume->GetScaledBoxExtent(),
+			LoadVolume->GetComponentQuat(),
 			FColor::Yellow, /*bPersistentLines=*/true, /*LifeTime=*/-1.f, /*DepthPriority=*/0,
 			/*Thickness=*/3.f);
 	}

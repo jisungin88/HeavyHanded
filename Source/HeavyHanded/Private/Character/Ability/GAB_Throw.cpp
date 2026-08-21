@@ -3,6 +3,8 @@
 
 #include "Character/Ability/GAB_Throw.h"
 #include "Character/BaseCharacter.h"
+#include "Interfaces/Carryable.h"
+#include "Core/HeavyHandedGameplayTags.h"   // Ability.Slot.Consumable 네이티브 태그
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
@@ -73,8 +75,7 @@ void UGAB_Throw::InputReleased(
 	if (!ActorInfo->IsNetAuthority())
 	{
 		FGameplayEventData Payload;
-		FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName("Ability.Slot.Consumable"));
-		SendGameplayEventToASCOnServer(EventTag, Payload);
+		SendGameplayEventToASCOnServer(HHTags::Ability_Slot_Consumable, Payload);
 
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 		return;
@@ -83,16 +84,40 @@ void UGAB_Throw::InputReleased(
 	// 2. 서버 권한에서의 실제 던지기 (물리 부여)
 	if (AActor* HeldActor = Character->GetHeldActor())
 	{
-		// 들고 있는 상태 해제. 분리와 물리/콜리전 복구까지 여기서 처리된다.
-		Character->SetHeldActor(nullptr);
-
-		// 물리가 켜진 뒤에야 임펄스가 먹는다 — 순서를 바꾸지 말 것
-		if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
+		// ICarryable(= 노획물)은 던지기를 자기가 처리한다.
+		//
+		// 세기·포물선·회전·클리어런스가 전부 아이템 데이터(FLootPhysicsData)에서 나오고,
+		// 임펄스에 질량을 곱하기 때문에 무게가 달라도 ThrowSpeed 그대로 날아간다.
+		// 중량형처럼 던질 수 없는 물건을 제자리에 놓는 판정도 아이템 몫이다.
+		// (플레이어는 요청하고, 아이템이 허용/거부한다 — ICarryable 주석)
+		//
+		// 여기서 임펄스를 직접 주면 놓기 임펄스와 겹쳐 두 번 들어가고,
+		// 착지 충격도 Throw 가 아니라 Drop 으로 기록된다.
+		if (ICarryable* Carryable = Cast<ICarryable>(HeldActor))
 		{
-			const FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
-			if (!LaunchVelocity.IsNearlyZero())
+			// 조준 방향은 아직 들려 있을 때만 구할 수 있다. 놓은 뒤에는 영벡터가 나온다.
+			const FVector AimDirection = Carryable->ComputeThrowAimDirection();
+
+			// 디태치 · 물리 ON · 임펄스 · 회전까지 전부 여기서 끝난다.
+			Carryable->OnThrown(Character, AimDirection);
+
+			// 위에서 이미 손을 떠났으므로 이 호출은 참조 정리만 한다.
+			// (OnReleased 는 PrimaryCarrier 가 비어 있어 조용히 무시된다)
+			Character->SetHeldActor(nullptr);
+		}
+		else
+		{
+			// ICarryable 을 구현하지 않은 액터용 폴백. 테스트 맵의 "Item" 태그 액터 등.
+			Character->SetHeldActor(nullptr);
+
+			// 물리가 켜진 뒤에야 임펄스가 먹는다 — 순서를 바꾸지 말 것
+			if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent()))
 			{
-				PrimComp->AddImpulse(LaunchVelocity, NAME_None, true);
+				const FVector LaunchVelocity = Character->GetActorForwardVector() * ThrowSpeed;
+				if (!LaunchVelocity.IsNearlyZero())
+				{
+					PrimComp->AddImpulse(LaunchVelocity, NAME_None, true);
+				}
 			}
 		}
 

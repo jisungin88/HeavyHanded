@@ -28,8 +28,12 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(State_InVan,        "State.InVan");
 	UE_DEFINE_GAMEPLAY_TAG(State_Arrested,     "State.Arrested");
 
+	UE_DEFINE_GAMEPLAY_TAG(Ability_HeavyCarryAssist, "Ability.HeavyCarryAssist");
+	UE_DEFINE_GAMEPLAY_TAG(Ability_Slot_Consumable,  "Ability.Slot.Consumable");
+
 	UE_DEFINE_GAMEPLAY_TAG(Event_Guard_Contacted,   "Event.Guard.Contacted");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Player_Downed,     "Event.Player.Downed");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Player_BoardedVan, "Event.Player.BoardedVan");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Loaded,       "Event.Loot.Loaded");
+	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Dropped,      "Event.Loot.Dropped");
 }

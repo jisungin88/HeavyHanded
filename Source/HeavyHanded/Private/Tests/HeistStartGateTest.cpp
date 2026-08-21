@@ -264,14 +264,16 @@ bool FHeistOutcomeTest::RunTest(const FString& Parameters)
 {
 	using namespace HeistOutcome;
 
-	TestEqual(TEXT("목표 달성 + 전원 탈출은 성공"),
-		Evaluate(/*bTargetReached=*/true, /*bEveryoneEscaped=*/true), EHeistOutcome::Success);
+	TestEqual(TEXT("목표 달성 + 최소 1인 탈출은 성공"),
+		Evaluate(/*bTargetReached=*/true, /*bAnyoneEscaped=*/true), EHeistOutcome::Success);
 
-	TestEqual(TEXT("돈은 챙겼지만 사람을 두고 왔으면 부분 성공"),
-		Evaluate(true, false), EHeistOutcome::Partial);
-
-	TestEqual(TEXT("무사히 나왔지만 목표를 못 채웠으면 부분 성공"),
+	TestEqual(TEXT("빠져나오긴 했지만 목표를 못 채웠으면 부분 성공"),
 		Evaluate(false, true), EHeistOutcome::Partial);
+
+	// 두 조건이 대칭이 아닌 지점이다. 여기가 Partial 로 돌아오면 전멸한 판에
+	// 돈이 들어간다 — 지급 기준선이 Partial 이라 등급 한 칸이 곧 정산 여부다
+	TestEqual(TEXT("목표를 채웠어도 아무도 못 빠져나왔으면 실패 (전멸)"),
+		Evaluate(true, false), EHeistOutcome::Failure);
 
 	TestEqual(TEXT("둘 다 아니면 실패"),
 		Evaluate(false, false), EHeistOutcome::Failure);

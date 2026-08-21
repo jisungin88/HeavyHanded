@@ -23,6 +23,17 @@ public:
 	TSubclassOf<class UGameplayAbility> AbilityClass;
 };
 
+// 지금 중량형 노획물을 어떤 방식으로 운반 중인가. AnimBP 가 Idle/Walk 블렌드스페이스를
+// 고를 때 폴링하는 용도 — crouch 가 ACharacter::bIsCrouched 를 폴링하는 것과 같은 패턴이다.
+// 주 운반자 쪽 None<->Solo 전환은 SetHeldActor 가, Coop 전환은 GA_HeavyCarryAssist 가 맡는다.
+UENUM(BlueprintType)
+enum class EHeavyCarryState : uint8
+{
+	None, // 중량형을 들고 있지 않음
+	Solo, // 혼자 운반 중
+	Coop  // 2인 협력 운반 중
+};
+
 class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
@@ -77,6 +88,54 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input") 
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
+	/** 추가 부분 08.18 start **/
+	// --- 2인 운반 (Heavy Loot) — 상태만 들고 있고, 판정 로직은 GA_HeavyCarryAssist 가 담당 ---
+	UPROPERTY(ReplicatedUsing = OnRep_HeavyCarryAssistant)
+	TObjectPtr<ABaseCharacter> HeavyCarryAssistant;
+
+	UPROPERTY(ReplicatedUsing = OnRep_AssistingPrimaryCarrier)
+	TObjectPtr<ABaseCharacter> AssistingPrimaryCarrier;
+
+	UPROPERTY(Replicated)
+	TObjectPtr<AActor> AssistedHeavyItem;
+
+	// AnimBP 폴링용 — crouch 의 bIsCrouched 와 같은 성격이라 OnRep 콜백은 필요 없다.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Interaction")
+	EHeavyCarryState HeavyCarryState = EHeavyCarryState::None;
+
+	UFUNCTION()
+	void OnRep_HeavyCarryAssistant();
+
+	UFUNCTION()
+	void OnRep_AssistingPrimaryCarrier();
+
+	UPROPERTY(EditDefaultsOnly, Category = "Carry|Heavy")
+	TSubclassOf<UGameplayEffect> SoloHeavyCarryPenaltyEffectClass;
+
+	// GAB_Interact 로는 못 누르고, 이벤트로만 발동되는 어빌리티들 (예: GA_HeavyCarryAssist)
+	UPROPERTY(EditDefaultsOnly, Category = "Abilities")
+	TArray<TSubclassOf<UGameplayAbility>> EventTriggeredAbilities;
+
+public:
+
+
+	ABaseCharacter* GetHeavyCarryAssistant() const { return HeavyCarryAssistant; }
+	void SetHeavyCarryAssistant(ABaseCharacter* InAssistant) { HeavyCarryAssistant = InAssistant; }
+	void ClearHeavyCarryAssistant() { HeavyCarryAssistant = nullptr; }
+
+	void SetAssistingPrimaryCarrier(ABaseCharacter* InPrimary, AActor* InItem) { AssistingPrimaryCarrier = InPrimary; AssistedHeavyItem = InItem; }
+	void ClearAssistingPrimaryCarrier() { AssistingPrimaryCarrier = nullptr; AssistedHeavyItem = nullptr; }
+	AActor* GetAssistedHeavyItem() const { return AssistedHeavyItem; }
+
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	EHeavyCarryState GetHeavyCarryState() const { return HeavyCarryState; }
+	void SetHeavyCarryState(EHeavyCarryState NewState) { HeavyCarryState = NewState; }
+
+	void ApplyHeavySoloPenalty() { ApplyGameplayEffectToSelf(SoloHeavyCarryPenaltyEffectClass); }
+	void RemoveHeavySoloPenalty() { RemoveGameplayEffectFromSelf(SoloHeavyCarryPenaltyEffectClass); }
+
+	/** 추가 부분 08.18 end **/
+
 	// --- 입력 처리 함수 (Enhanced Input 방식) ---
 	// 2차원 축 입력 (WASD 이동 등)
 	void MoveForward(const FInputActionValue& Value);
@@ -115,7 +174,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
 	TSubclassOf<class UGameplayEffect> CrouchGameplayEffectClass;
 
-protected:
+public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 
@@ -138,6 +197,13 @@ protected:
 
 	UFUNCTION()
 	virtual void OnRep_HeldActor(AActor* PreviousHeldActor);
+
+	// GAB_Interact 의 부활 채널링 진행률(0~1). 지금은 빈 훅 — UI는 나중에 연결한다.
+	UPROPERTY(ReplicatedUsing = OnRep_ReviveProgress, BlueprintReadOnly, Category = "State")
+	float ReviveProgress = 0.f;
+
+	UFUNCTION()
+	void OnRep_ReviveProgress();
 
 	// 물건을 붙일 손 소켓 이름.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction")
@@ -171,7 +237,8 @@ public:
 	// 따로 AttachToComponent / DetachFromActor 를 부르지 않는다.
 	// 실패하면(부착 거부, Mobility 부적합 등) false 를 돌려주고 상태를 되돌린다.
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
-	bool SetHeldActor(AActor* NewHeldActor);
+	//bool SetHeldActor(AActor* NewHeldActor);
+	bool SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot = false);
 
 	// 방금 던진 물건을 RecatchBlockSeconds 동안 다시 잡지 못하게 한다.
 	// 던지기 어빌리티가 임펄스를 준 뒤 호출한다. 놓기(Drop)에는 걸지 않는다 —
@@ -186,6 +253,18 @@ private:
 
 	float RecentlyThrownTime = -1.f;
 
+public:
+	UFUNCTION(BlueprintPure, Category = "Carry")
+	bool IsCarryingHeavyItem() const;
+
+	// State.Downed 태그 보유 여부를 ASC에서 조회한다. 새 태그를 만들지 않고
+	// 이미 있는 State.Downed 를 조회만 하는 헬퍼 — AnimBP 폴링 지점으로도 쓴다.
+	UFUNCTION(BlueprintPure, Category = "State")
+	bool IsDowned() const;
+
+	// GAB_Interact 의 부활 채널링 진행률(0~1). UI는 나중에 연결 — 지금은 값만 존재한다.
+	UFUNCTION(BlueprintCallable, Category = "State")
+	void SetReviveProgress(float NewProgress);
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

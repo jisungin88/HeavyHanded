@@ -14,7 +14,6 @@ class UBoxComponent;
 class UDecalComponent;
 class UMaterialInterface;
 class UNiagaraSystem;
-class UStaticMeshComponent;
 
 /**
  * 밴. 코어 루프에서 "돈이 들어오는" 지점이자 "판이 끝나는" 지점이다.
@@ -39,11 +38,24 @@ class UStaticMeshComponent;
  *   타는 것과 내리는 것은 대칭이 아니다. 탈 때는 밴을 겨눠야 하지만 내릴 때는 그럴 필요가 없다 —
  *   탑승하면 몸이 고정되어 조준을 요구하는 것이 부당해진다. TryDisembarkIfBoarded 참고.
  *
- *   조준 대상은 볼륨이 아니라 VanDoor 다. 큰 볼륨을 시선에 걸리게 만들면 화물칸 안에 있는
+ *   조준 대상은 볼륨이 아니라 BoardAimTarget 이다. 큰 볼륨을 시선에 걸리게 만들면 화물칸 안에 있는
  *   노획물보다 볼륨이 먼저 맞아서, 밴 안의 물건을 영영 집을 수 없게 된다.
  *
- *   BoardVolume 은 VanDoor 앞에 서면 안에 들어오도록 잡는다. 문을 겨눌 수 있는 자리가
+ *   BoardVolume 은 BoardAimTarget 앞에 서면 안에 들어오도록 잡는다. 문을 겨눌 수 있는 자리가
  *   곧 탈 수 있는 자리여야 헷갈리지 않는다.
+ *
+ * [밴 몸체는 BP 가 갖는다 — 별도 액터로 두지 않는다]
+ *   C++ 은 판정에 필요한 것만 갖는다. 보이는 것(몸체 · 문짝 3개 · 바퀴)은 `BP_VanLoadZone`
+ *   에 StaticMeshComponent 로 붙인다.
+ *
+ *   **몸체를 별도 액터로 두면 안 된다.** AHeistGameMode::PlaceVan 이 이 액터만 진입점으로
+ *   옮기기 때문에, 몸체가 다른 액터면 밴이 갈 때 껍데기만 제자리에 남는다.
+ *   레벨 배치도 두 개가 되어 상대 위치를 매번 맞춰야 한다 (볼륨을 한 액터에 둔 것과 같은 이유).
+ *
+ *   **몸체 콜리전이 화물칸을 막지 않아야 한다.** 자동 생성된 박스 콜리전을 그대로 쓰면
+ *   던져 넣은 노획물이 튕겨 나온다. 개구부가 뚫린 커스텀 콜리전을 쓸 것.
+ *
+ *   움직이는 문짝(후면 좌·우, 측면 슬라이드)은 순수 비주얼이다. 조준은 BoardAimTarget 이 받는다.
  *
  * [레벨당 하나] 진입 지역에 따라 놓이는 자리는 달라지지만, 한 레벨에 이 액터는 하나뿐이다.
  *   BeginPlay 에서 개수를 세어 둘 이상이면 경고를 남긴다 — 계약이 말로만 남으면
@@ -132,7 +144,33 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** 적재 판정 볼륨이자 루트. 프로파일은 VanLoadZone (Config/DefaultEngine.ini) */
+	/**
+	 * 액터의 기준점. **밴 바닥 중앙이고, 로컬 +X 가 뒷문 방향이다.**
+	 *
+	 * [왜 판정 볼륨이 아니라 빈 컴포넌트가 루트인가]
+	 *   볼륨을 루트로 두면 액터 원점이 화물칸 한가운데 공중에 뜬다. 그러면 바닥에 놓이는
+	 *   것들(좌석 · 하차 지점)의 Z 가 전부 화물칸 크기에 묶여서, 볼륨을 늘리는 순간
+	 *   좌석이 공중에 뜨고 문짝이 볼륨 안에 파묻힌다.
+	 *
+	 *   바닥 기준점을 따로 두면 그것들이 전부 Z=0 이라 볼륨 크기와 무관해진다.
+	 *   레벨에 배치할 때도 이 편이 맞다 — 밴을 놓는 사람은 바닥에 스냅하지,
+	 *   화물칸 중심 높이를 계산하지 않는다.
+	 *
+	 *   **배치를 손보는 일이 줄어드는 것이지 코드가 대신 놓아 주는 것은 아니다.**
+	 *   아래 컴포넌트들의 위치 · 크기 · 회전은 전부 뷰포트에서 정하고, 코드는 덮어쓰지 않는다.
+	 *
+	 * [진입점과의 관계] AHeistEntryPoint 의 VanAnchor 화살표가 이 지점으로 온다
+	 *   (AHeistGameMode::PlaceVan). 화살표를 바닥에, 화살표 방향을 뒷문 쪽으로 놓으면 된다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van")
+	TObjectPtr<USceneComponent> VanRoot;
+
+	/**
+	 * 적재 판정 볼륨. 프로파일은 VanLoadZone (Config/DefaultEngine.ini)
+	 *
+	 * 기본값은 바닥이 VanRoot 평면에 닿는 높이다. **크기와 위치는 뷰포트에서 정한다** —
+	 * 크기를 바꿨으면 문짝과 하차 지점도 같이 봐 줘야 한다. 코드는 덮어쓰지 않는다.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van")
 	TObjectPtr<UBoxComponent> LoadVolume;
 
@@ -149,22 +187,28 @@ protected:
 	TObjectPtr<UBoxComponent> BoardVolume;
 
 	/**
-	 * 승차 상호작용의 조준 대상. 밴 뒷문에 해당한다.
+	 * 승차 상호작용의 조준 대상. 뒷문 **개구부**를 덮는 안 보이는 판이다.
 	 *
-	 * [몸체가 아니라 문인 이유] 이 액터는 판정만 갖고 밴 몸체는 갖지 않는다.
-	 *   몸체를 여기 두면 화물칸이 통짜로 막혀서 던져 넣기가 튕기고, 좌석을 안에 둘 수도 없다.
-	 *   시야 · 소음 차단과 물리 응답은 실제 밴 메시가 배치될 때 그 액터가 자기 콜리전으로 한다 —
-	 *   지금 없는 몸체를 문짝 하나로 흉내 내려 하면 어느 쪽도 제대로 안 된다.
+	 * [문짝이 아니라 개구부인 이유] 보이는 문짝은 BP 가 실제 메시로 따로 갖고, 그것들은
+	 *   열리고 닫히며 움직인다. 조준 대상을 그 메시에 걸면 **문이 열리는 순간 조준 대상이
+	 *   옆으로 돌아가 버려서, 정작 탈 수 있게 된 순간에 탈 수 없게 된다.**
+	 *   이 판은 개구부 자리에 고정돼 문이 어떤 상태든 조준을 받는다.
 	 *
-	 * [콜리전이 Visibility 뿐인 이유] 조준되는 것 하나가 이 컴포넌트의 전부다.
-	 *   UGAB_Interact 의 시선 스윕이 그 채널을 쓰므로 이걸 열면 승차가 아예 불가능해진다.
-	 *   반대로 Pawn 을 막으면 열린 뒷문이 벽이 되어 걸어 나올 수 없다.
+	 *   후면 문이 둘(좌·우)이라는 것도 이유다. 문짝 하나를 조준 대상으로 삼으면
+	 *   반대쪽을 겨눈 사람은 타지 못한다.
 	 *
-	 * 그레이박스에서는 얇게 눌린 엔진 큐브가 문짝 노릇을 한다.
-	 * 비워 두면 조준할 것이 없어지므로 기본값이 필요했다.
+	 * [왜 메시가 아니라 박스인가] 조준만 받으면 되는데 메시일 이유가 없다.
+	 *   예전에는 엔진 큐브를 얇게 눌러 썼는데, 그러면 콜리전이 메시의 BodySetup 에서 나와서
+	 *   **메시를 비우는 순간 조준이 통째로 죽는다.** 박스는 자기가 형상을 갖는다.
+	 *
+	 * [콜리전이 Visibility 뿐인 이유] UGAB_Interact 의 시선 스윕이 그 채널을 쓰므로
+	 *   이걸 열면 승차가 아예 불가능해진다. 반대로 Pawn 을 막으면 열린 뒷문이 벽이 되어
+	 *   걸어 나올 수 없다.
+	 *
+	 * 크기와 위치는 실제 밴 메시의 개구부에 맞춰 뷰포트에서 정한다.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van")
-	TObjectPtr<UStaticMeshComponent> VanDoor;
+	TObjectPtr<UBoxComponent> BoardAimTarget;
 
 	/**
 	 * 좌석 앵커. 탑승한 플레이어가 여기로 옮겨져 붙는다.
@@ -182,6 +226,8 @@ protected:
 	 *
 	 * 앵커 위치는 '발이 닿는 지점' 이다. 캡슐 절반 높이는 코드가 더한다 —
 	 * 배치자가 캐릭터 캡슐 크기를 알아야 자리를 놓을 수 있으면 안 된다.
+	 *
+	 * VanRoot 가 바닥 기준이므로 좌석의 기본 Z 는 0 이다. 볼륨 크기를 바꿔도 움직이지 않는다.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Van|Seats")
 	TArray<TObjectPtr<USceneComponent>> Seats;

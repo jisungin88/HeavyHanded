@@ -13,13 +13,13 @@
 UENUM(BlueprintType)
 enum class EHeistOutcome : uint8
 {
-	/** 목표도 못 채웠고 누군가 잡혔다 */
+	/** 아무도 빠져나오지 못했다. 목표를 채웠는지는 보지 않는다 (기획서 2장 — 전멸은 실패) */
 	Failure  UMETA(DisplayName = "Failure"),
 
-	/** 둘 중 하나만 됐다 — 돈은 모자라거나, 사람을 두고 왔거나 */
+	/** 최소 1인은 빠져나왔지만 목표 금액을 못 채웠다 */
 	Partial  UMETA(DisplayName = "Partial"),
 
-	/** 목표를 채웠고 전원이 무사히 빠져나왔다 */
+	/** 목표를 채웠고 최소 1인이 빠져나왔다 (기획서 2장 작업 성공) */
 	Success  UMETA(DisplayName = "Success")
 };
 
@@ -33,13 +33,17 @@ enum class EHeistOutcome : uint8
  *   HeistStartGate · HeistEscapeGate 와 같은 형태다. 월드를 모르는 순수 함수로 두고
  *   Private/Tests/HeistStartGateTest.cpp 가 직접 부른다.
  *
- * [여기서 보지 않는 것] "전원 탈출인가" 를 어떻게 세는지는 호출부가 정한다.
- *   체포 명단이 비었는지로 볼 수도 있고 승차 명단으로 볼 수도 있는데, 그건 이 규칙이
+ * [여기서 보지 않는 것] "한 명이라도 빠져나왔는가" 를 어떻게 세는지는 호출부가 정한다.
+ *   체포 명단으로 볼 수도 있고 승차 명단으로 볼 수도 있는데, 그건 이 규칙이
  *   알 바가 아니다 — 이 함수는 두 사실을 등급으로 옮기기만 한다.
+ *
+ * [분모가 '전원' 이 아니라 '최소 1인' 인 이유] 기획서 2장 승패 조건이 그렇다 —
+ *   작업 성공은 "목표 금액 달성 + 최소 1인 승차" 이고, 실패는 "목표 미달 또는 전멸" 이다.
+ *   미승차자에 대한 패널티는 등급이 아니라 체포(다음 작업 관전)로 이미 치른다.
  */
 namespace HeistOutcome
 {
-	HEAVYHANDED_API EHeistOutcome Evaluate(bool bTargetReached, bool bEveryoneEscaped);
+	HEAVYHANDED_API EHeistOutcome Evaluate(bool bTargetReached, bool bAnyoneEscaped);
 
 	/** 로그용. 열거형 값을 그대로 찍으면 숫자만 나와서 읽을 수 없다 */
 	HEAVYHANDED_API const TCHAR* ToString(EHeistOutcome Outcome);
