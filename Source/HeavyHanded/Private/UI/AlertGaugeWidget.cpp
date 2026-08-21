@@ -7,6 +7,8 @@
 #include "TimerManager.h"
 
 #include "Alert/AlertComponent.h"
+#include "Core/GameStates/HeistGameState.h"
+#include "Core/HeavyHandedGameplayTags.h"
 #include "UI/HeavyUILog.h"
 #include "UI/UISettings.h"
 
@@ -41,6 +43,7 @@ void UAlertGaugeWidget::NativeConstruct()
 	Super::NativeConstruct();
 
 	TryBind();
+	BindToHeistGameState();
 }
 
 void UAlertGaugeWidget::NativeDestruct()
@@ -58,6 +61,21 @@ void UAlertGaugeWidget::NativeDestruct()
 		Alert->OnAlertLevelChanged.RemoveDynamic(this, &UAlertGaugeWidget::HandleLevelChanged);
 	}
 	BoundAlert = nullptr;
+
+	if (AHeistGameState* GS = BoundState.Get())
+	{
+		GS->OnPhaseChanged.RemoveDynamic(this, &UAlertGaugeWidget::HandlePhaseChanged);
+	}
+	BoundState = nullptr;
+
+	if (GameStateSetHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+		}
+		GameStateSetHandle.Reset();
+	}
 
 	Super::NativeDestruct();
 }
@@ -97,6 +115,93 @@ void UAlertGaugeWidget::TryBind()
 
 	const EAlertLevel Level = Alert->GetAlertLevel();
 	HandleLevelChanged(Level, Level);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 페이즈 — 언제 게이지를 보여줄 것인가
+// ──────────────────────────────────────────────────────────────
+
+void UAlertGaugeWidget::BindToHeistGameState()
+{
+	if (BoundState.Get())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (AHeistGameState* GS = World->GetGameState<AHeistGameState>())
+	{
+		BoundState = GS;
+		GS->OnPhaseChanged.AddDynamic(this, &UAlertGaugeWidget::HandlePhaseChanged);
+
+		// 구독 시점의 페이즈로 한 번 맞춘다. 안 하면 다음 전환까지 어긋난 화면이 남는다
+		ApplyPhaseVisibility(GS->GetCurrentPhase());
+		return;
+	}
+
+	// 아직 안 왔다. 도착하는 순간을 엔진이 알려준다.
+	// 끝내 안 오면(작업 레벨이 아니면) 아무 일도 일어나지 않고 게이지는 계속 보인다
+	if (!GameStateSetHandle.IsValid())
+	{
+		GameStateSetHandle = World->GameStateSetEvent.AddUObject(this, &UAlertGaugeWidget::HandleGameStateSet);
+	}
+}
+
+void UAlertGaugeWidget::HandleGameStateSet(AGameStateBase* NewGameState)
+{
+	if (!Cast<AHeistGameState>(NewGameState))
+	{
+		return;   // 페이즈가 없는 맵이다. 게이지는 그대로 보이면 된다
+	}
+
+	BindToHeistGameState();
+}
+
+void UAlertGaugeWidget::HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag /*OldPhase*/, EHeistPhaseReason /*Reason*/)
+{
+	ApplyPhaseVisibility(NewPhase);
+}
+
+void UAlertGaugeWidget::ApplyPhaseVisibility(FGameplayTag Phase)
+{
+	// [화이트리스트인 이유] "숨길 페이즈" 를 나열하면 페이즈가 새로 생길 때마다
+	//   아무도 손대지 않아도 게이지가 저절로 그 화면에 나타난다. 컷신 페이즈가
+	//   추가되는 것이 예정돼 있어서 더 그렇다 — 기본값은 "안 보임" 이어야 한다.
+	//
+	// 준비  — 이때의 경계도는 본 작업 진입에서 ResetAlert() 로 지워진다.
+	//         지워질 값을 보여주면 플레이어가 없는 위험을 관리하게 된다
+	// 결과  — 판이 끝난 뒤의 경계도는 정보가 아니라 잔상이다.
+	//         "얼마나 시끄러웠는가" 는 결과 화면의 최다 소음 유발자가 더 정확히 말한다
+	// 대기  — 페이즈 태그가 비어 있다. 아직 아무 판도 시작되지 않았다
+	const bool bRelevant = Phase.MatchesTag(HHTags::Phase_Heist)
+						|| Phase.MatchesTag(HHTags::Phase_Escape);
+
+	SetGaugeRelevant(bRelevant,
+					 Phase.IsValid() ? *Phase.ToString() : TEXT("(접속 대기)"));
+}
+
+void UAlertGaugeWidget::SetGaugeRelevant(bool bRelevant, const TCHAR* Cause)
+{
+	if (bGaugeRelevant == bRelevant)
+	{
+		return;
+	}
+	bGaugeRelevant = bRelevant;
+
+	// 게이지는 "안 보이는 것이 정상" 인 구간이 있는 UI 라, 화면만 봐서는
+	// 숨긴 것과 고장난 것을 구별할 수 없다. 사유를 같이 남긴다
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 경계도 게이지 %s (페이즈 %s)"),
+		   *GetName(), bGaugeRelevant ? TEXT("표시") : TEXT("숨김"), Cause);
+
+	SetVisibility(bGaugeRelevant ? ESlateVisibility::SelfHitTestInvisible
+								 : ESlateVisibility::Collapsed);
+
+	OnGaugeVisibilityChanged(bGaugeRelevant);
 }
 
 // ──────────────────────────────────────────────────────────────

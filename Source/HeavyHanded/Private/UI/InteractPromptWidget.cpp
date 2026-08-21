@@ -8,9 +8,12 @@
 
 #include "Character/BaseCharacter.h"
 #include "Core/GameStates/HeistGameState.h"
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Core/VanZone.h"
 #include "Interfaces/Carryable.h"
 #include "Loot/LootBase.h"
+#include "UI/HeavyUILog.h"
+#include "UI/HeavyUIText.h"
 #include "UI/UISettings.h"
 
 #if ENABLE_DRAW_DEBUG
@@ -106,6 +109,8 @@ void UInteractPromptWidget::NativeConstruct()
 			RefreshHandle, this, &UInteractPromptWidget::RefreshFocus,
 			RefreshInterval, /*bLoop=*/true);
 	}
+
+	BindToHeistGameState();
 }
 
 void UInteractPromptWidget::NativeDestruct()
@@ -115,7 +120,108 @@ void UInteractPromptWidget::NativeDestruct()
 		World->GetTimerManager().ClearTimer(RefreshHandle);
 	}
 
+	// 구독을 안 풀면 위젯이 사라진 뒤에도 델리게이트에 남는다
+	if (AHeistGameState* GS = BoundState.Get())
+	{
+		GS->OnPhaseChanged.RemoveDynamic(this, &UInteractPromptWidget::HandlePhaseChanged);
+	}
+	BoundState = nullptr;
+
+	if (GameStateSetHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+		}
+		GameStateSetHandle.Reset();
+	}
+
 	Super::NativeDestruct();
+}
+
+// ──────────────────────────────────────────────────────────────
+// 페이즈 — 언제 프롬프트를 띄울 것인가
+// ──────────────────────────────────────────────────────────────
+
+void UInteractPromptWidget::BindToHeistGameState()
+{
+	if (BoundState.Get())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (AHeistGameState* GS = World->GetGameState<AHeistGameState>())
+	{
+		BoundState = GS;
+		GS->OnPhaseChanged.AddDynamic(this, &UInteractPromptWidget::HandlePhaseChanged);
+
+		ApplyPhaseGate(GS->GetCurrentPhase());
+		return;
+	}
+
+	// 아직 안 왔다. 도착하는 순간을 엔진이 알려준다.
+	// 끝내 안 오면(작업 레벨이 아니면) 아무 일도 없고 프롬프트는 계속 동작한다
+	if (!GameStateSetHandle.IsValid())
+	{
+		GameStateSetHandle = World->GameStateSetEvent.AddUObject(this, &UInteractPromptWidget::HandleGameStateSet);
+	}
+}
+
+void UInteractPromptWidget::HandleGameStateSet(AGameStateBase* NewGameState)
+{
+	if (!Cast<AHeistGameState>(NewGameState))
+	{
+		return;   // 페이즈가 없는 맵이다. 예전처럼 계속 동작하면 된다
+	}
+
+	BindToHeistGameState();
+}
+
+void UInteractPromptWidget::HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag /*OldPhase*/, EHeistPhaseReason /*Reason*/)
+{
+	ApplyPhaseGate(NewPhase);
+}
+
+void UInteractPromptWidget::ApplyPhaseGate(FGameplayTag Phase)
+{
+	// 경계도 게이지(UAlertGaugeWidget::ApplyPhaseVisibility)와 같은 화이트리스트다.
+	// "끌 페이즈" 를 나열하면 컷신 페이즈가 추가될 때 아무도 손대지 않아도
+	// 컷신 화면에 "[E] 집기" 가 저절로 나타난다 — 기본값은 꺼짐이어야 한다
+	const bool bAllowed = Phase.MatchesTag(HHTags::Phase_Heist)
+					   || Phase.MatchesTag(HHTags::Phase_Escape);
+
+	SetPromptAllowed(bAllowed, Phase.IsValid() ? *Phase.ToString() : TEXT("(접속 대기)"));
+}
+
+void UInteractPromptWidget::SetPromptAllowed(bool bAllowed, const TCHAR* Cause)
+{
+	if (bPromptAllowed == bAllowed)
+	{
+		return;
+	}
+	bPromptAllowed = bAllowed;
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 상호작용 프롬프트 %s (페이즈 %s)"),
+		   *GetName(), bPromptAllowed ? TEXT("켬") : TEXT("끔"), Cause);
+
+	if (!bPromptAllowed)
+	{
+		// 꺼지는 순간 이미 떠 있던 문구를 내린다. 다음 주기를 기다리면
+		// 결과 화면이 뜬 뒤에도 "[E] 집기" 가 0.1초 더 남는다
+		DebugReason = TEXT("페이즈에서 허용되지 않음");
+		HidePrompt();
+	}
+	else
+	{
+		// 켜지면 다음 주기를 기다리지 않고 바로 한 번 본다
+		RefreshFocus();
+	}
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -131,6 +237,22 @@ void UInteractPromptWidget::RefreshFocus()
 	if (!World)
 	{
 		HidePrompt();
+		return;
+	}
+
+	// ── ⓪ 페이즈가 허용하지 않으면 스윕까지 가지 않는다 ──
+	//
+	// 타이머를 껐다 켜지 않고 여기서 돌려보내는 이유는 디버그 표시 때문이다.
+	// 타이머를 멈추면 hh.UI.PromptDebug 를 켜도 화면에 아무 줄도 안 뜨고,
+	// 그러면 "페이즈 때문에 꺼진 것" 과 "위젯이 아예 안 붙은 것" 을 구별할 수 없다.
+	// 비싼 것은 타이머가 아니라 스윕이고, 그건 여기서 이미 막힌다
+	if (!bPromptAllowed)
+	{
+		HidePrompt();
+
+#if ENABLE_DRAW_DEBUG
+		DrawPromptDebug(World, FVector::ZeroVector, FVector::ZeroVector, FHitResult(), DebugReason);
+#endif
 		return;
 	}
 
@@ -235,7 +357,9 @@ void UInteractPromptWidget::DecidePrompt(AActor* Target, const APawn* Pawn)
 			}
 
 			DebugReason = TEXT("동료가 잡고 있음 — 함께 들기");
-			ShowPrompt(LOCTEXT("PromptCarryTogether", "[E] 함께 들기"), Who);
+			ShowPrompt(FText::Format(LOCTEXT("PromptCarryTogether", "[E] {0} 함께 들기"),
+									 HeavyUIText::LootName(Target)),
+					   Who);
 			return;
 		}
 	}
@@ -256,16 +380,20 @@ void UInteractPromptWidget::DecidePrompt(AActor* Target, const APawn* Pawn)
 	}
 
 	DebugReason = TEXT("집을 수 있음");
-	ShowPrompt(LOCTEXT("PromptGrab", "[E] 집기"), Detail);
+	ShowPrompt(FText::Format(LOCTEXT("PromptGrab", "[E] {0} 집기"), HeavyUIText::LootName(Target)),
+			   Detail);
 }
 
 void UInteractPromptWidget::ShowHoldingPrompt(AActor* Held)
 {
-	FText Detail;
+	// 들고 있는 물건은 이름을 아랫줄에 붙인다. 윗줄은 조작 안내라서
+	// 이름이 끼면 "[Q] 도자기 세트 놓기　[좌클릭] 도자기 세트 던지기" 처럼 길어진다
+	FText Detail = HeavyUIText::LootName(Held);
+
 	if (const ALootBase* Loot = Cast<ALootBase>(Held))
 	{
-		Detail = FText::Format(LOCTEXT("PromptValue", "${0}"),
-			FText::AsNumber(Loot->GetCurrentValue()));
+		Detail = FText::Format(LOCTEXT("PromptHeldValue", "{0} · ${1}"),
+			Detail, FText::AsNumber(Loot->GetCurrentValue()));
 	}
 
 	// 던질 수 없는 물건에 던지기를 안내하지 않는다 — 중량형이 여기 해당한다

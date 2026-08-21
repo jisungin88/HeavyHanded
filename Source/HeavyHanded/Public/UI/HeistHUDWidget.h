@@ -39,7 +39,12 @@ class HEAVYHANDED_API UHeistHUDWidget : public UUserWidget
 public:
 	/**
 	 * 현재 페이즈가 끝나기까지 남은 초.
-	 * @return 카운트다운이 있으면 true. Result 와 접속 대기는 false
+	 *
+	 * @return 카운트다운이 있으면 true. 접속 대기는 false
+	 *
+	 * [Result 도 true 다] 결과 페이즈에는 체류 시간(UHeistSettings::ResultSeconds)이
+	 *   걸려 있어서 여기서도 값이 나온다. 그건 결과 화면이 그릴 값이지 미션 타이머가
+	 *   아니므로, 화면에 쓰는 쪽(RefreshTimer)이 페이즈를 보고 따로 걸러낸다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	bool TryGetRemainingSeconds(float& OutSeconds) const;
@@ -48,7 +53,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	FGameplayTag GetCurrentPhase() const;
 
-	/** 현재 페이즈의 화면 문구 ("준비" · "본 작업" · "탈출" · "결과") */
+	/**
+	 * 현재 페이즈의 화면 문구 ("준비" · "본 작업" · "경찰 도착까지" · "결과").
+	 *
+	 * 도주는 들어온 사유에 따라 문구가 갈린다 — 경보면 "경찰 도착까지",
+	 * 제한 시간 만료면 "탈출까지". 페이즈 이름을 그대로 쓰지 않는 이유다.
+	 */
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	FText GetPhaseLabel() const;
 
@@ -60,7 +70,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	int32 GetTargetValue() const;
 
-	/** 남은 시간이 UrgentSeconds 이하인가. 색 전환 · 펄스 조건 */
+	/** 지금 경고 상태인가. 색 전환 · 펄스 조건. 도주 페이즈이거나 남은 시간이 얼마 없을 때다 */
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	bool IsUrgent() const { return bUrgent; }
 
@@ -97,8 +107,11 @@ protected:
 	/**
 	 * 이 시간 이하로 남으면 경고 상태가 된다.
 	 *
-	 * 기획서에 수치가 없어서 잡은 값이다. 도주 페이즈가 90초이므로 그보다 작아야
-	 * "도주 내내 빨간 화면" 이 되지 않는다.
+	 * 기획서에 수치가 없어서 잡은 값이다.
+	 *
+	 * [도주에는 적용되지 않는다] 도주 90초는 진입 순간부터 끝까지 경고 상태다.
+	 *   그래서 이 값은 준비 · 본 작업에서 "시간이 얼마 안 남았다" 를 알리는 용도로만 쓰인다.
+	 *   본 작업 제한 시간(7~9분)보다 충분히 작게 둘 것.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD", meta = (ClampMin = "0.0", Units = "s"))
 	float UrgentSeconds = 30.f;
@@ -134,7 +147,13 @@ private:
 	void RefreshTimer();
 
 	void ApplyObjective(int32 LoadedValue, int32 TargetValue);
-	void SetUrgent(bool bNewUrgent);
+	/**
+	 * 경고 상태를 켜고 끈다.
+	 *
+	 * @param Cause  왜 바뀌었는가. 로그 전용이라 로컬라이즈하지 않는다.
+	 *               빨간 타이머만 보고는 "도주라서" 와 "시간이 없어서" 를 구분할 수 없다
+	 */
+	void SetUrgent(bool bNewUrgent, const TCHAR* Cause);
 
 	/** 타이머 · 목표 금액을 통째로 보이거나 숨긴다 */
 	void SetHeistWidgetsVisible(bool bVisible);

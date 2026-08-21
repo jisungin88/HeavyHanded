@@ -3,8 +3,12 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Noise/NoiseTypes.h"          // EAlertLevel — UFUNCTION 파라미터라 전방 선언 불가
+#include "GameplayTagContainer.h"      // FGameplayTag — UFUNCTION 파라미터라 전방 선언 불가
+#include "Core/HeistPhase.h"           // EHeistPhaseReason — 델리게이트 콜백 시그니처에 들어간다
 #include "AlertGaugeWidget.generated.h"
 
+class AGameStateBase;
+class AHeistGameState;
 class UAlertComponent;
 class UProgressBar;
 class UTextBlock;
@@ -16,6 +20,11 @@ class UWidgetAnimation;
  * UAlertComponent 는 GameState 에 런타임 부착되고 클라이언트에는 복제로 도착한다.
  * 위젯이 먼저 만들어질 수 있어서 붙을 때까지 재시도한다 — 한 번만 찾고 포기하면
  * 클라이언트에서만 게이지가 영원히 0 으로 남는다.
+ *
+ * [본 작업과 도주에서만 보인다] 준비 시간의 경계도는 본 작업에 들어가는 순간
+ *   ResetAlert() 로 지워지므로 그때까지 보여주는 값은 곧 사라질 숫자다.
+ *   결과 화면의 경계도도 이미 끝난 판의 잔상이다. 그래서 페이즈를 구독해 스스로 숨는다.
+ *   작업 레벨이 아닌 맵(L_NoiseTest · GuardTest)에는 페이즈가 없어서 계속 보인다.
  *
  * [C++ 과 WBP 의 경계]
  *   막대 채우기 · 색 · 단계 이름 · 퍼센트 · 점멸 재생은 전부 C++ 이 한다.
@@ -53,6 +62,15 @@ public:
 	/** 경보(래치) 상태인가. 90초 카운트다운 표시 조건 */
 	UFUNCTION(BlueprintPure, Category = "UI|Alert")
 	bool IsAlarmed() const;
+
+	/**
+	 * 지금 페이즈에서 경계도가 의미 있는가. 작업 레벨이 아니면 항상 참이다.
+	 *
+	 * 본 작업과 도주에서만 참이다 — 준비 시간의 경계도는 본 작업에 들어가는 순간
+	 * ResetAlert() 로 지워지고, 결과 화면의 경계도는 이미 끝난 판의 잔상이다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "UI|Alert")
+	bool IsGaugeRelevant() const { return bGaugeRelevant; }
 
 protected:
 	//~ UUserWidget
@@ -120,6 +138,14 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Alert")
 	void OnLevelUpdated(EAlertLevel NewLevel, EAlertLevel OldLevel, FLinearColor LevelColor);
 
+	/**
+	 * 페이즈 때문에 게이지가 나타나거나 사라졌다.
+	 *
+	 * 가시성 자체는 C++ 이 이미 바꿨다. 여기는 페이드 · 사운드 자리다.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Alert")
+	void OnGaugeVisibilityChanged(bool bVisible);
+
 private:
 	UFUNCTION()
 	void HandleGaugeChanged(float NewGauge01);
@@ -129,6 +155,27 @@ private:
 
 	/** 성공할 때까지 재시도한다. 클라에서는 GameState 도 컴포넌트도 늦게 온다 */
 	void TryBind();
+
+	/**
+	 * 페이즈 구독을 건다. GameState 가 아직 없으면 도착할 때 다시 불린다.
+	 *
+	 * 위의 TryBind() 와 달리 재시도 타이머를 쓰지 않는다 — 엔진이 GameState 가
+	 * 세팅되는 순간을 UWorld::GameStateSetEvent 로 알려주기 때문이다.
+	 * (TryBind 쪽은 GameState 가 온 뒤에도 컴포넌트가 더 늦게 붙을 수 있어 폴링이 남아 있다.)
+	 */
+	void BindToHeistGameState();
+
+	/** UWorld::GameStateSetEvent 콜백. 작업 레벨의 GameState 면 구독을 건다 */
+	void HandleGameStateSet(AGameStateBase* NewGameState);
+
+	UFUNCTION()
+	void HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag OldPhase, EHeistPhaseReason Reason);
+
+	/** 이 페이즈에서 게이지를 보여줄지 정한다 */
+	void ApplyPhaseVisibility(FGameplayTag Phase);
+
+	/** 게이지 전체를 보이거나 숨긴다. 바뀔 때만 실제로 움직인다 */
+	void SetGaugeRelevant(bool bRelevant, const TCHAR* Cause);
 
 	/** 표시값을 막대와 퍼센트 글자에 반영한다 */
 	void ApplyGaugeVisual(float Gauge01);
@@ -147,6 +194,21 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UAlertComponent> BoundAlert;
+
+	UPROPERTY()
+	TObjectPtr<AHeistGameState> BoundState;
+
+	/** GameStateSetEvent 구독 해제용. 다이나믹 델리게이트가 아니라 핸들로 뗀다 */
+	FDelegateHandle GameStateSetHandle;
+
+	/**
+	 * 지금 페이즈에서 게이지를 보여줄 것인가.
+	 *
+	 * 기본값이 true 인 것은 의도다 — 작업 레벨이 아닌 맵(L_NoiseTest · GuardTest)에는
+	 * 페이즈가 없어서 이 값을 갱신할 사람이 아무도 없다. 기본이 false 면 그 맵들에서
+	 * 게이지가 영영 안 보이고, 원인은 화면만 봐서는 알 수 없다.
+	 */
+	bool bGaugeRelevant = true;
 
 	FTimerHandle BindRetryHandle;
 
