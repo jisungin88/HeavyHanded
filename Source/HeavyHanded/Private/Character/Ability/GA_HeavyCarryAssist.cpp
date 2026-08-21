@@ -3,6 +3,7 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "AbilitySystemComponent.h"
+#include "Core/HeavyHandedGameplayTags.h"   // Ability.HeavyCarryAssist · Event.Loot.Dropped 네이티브 태그
 
 DEFINE_LOG_CATEGORY_STATIC(LogHeavyCarry, Log, All);
 
@@ -15,14 +16,19 @@ UGA_HeavyCarryAssist::UGA_HeavyCarryAssist()
 
 	// "Ability.HeavyCarryAssist" 이벤트가 오면 자동으로 활성화되도록 등록.
 	// GAB_Interact 는 이 태그로 HandleGameplayEvent 만 부르고, 나머지는 여기서 처리한다.
+	//
+	// [문자열 조회를 쓰지 않는다] 여기는 CDO 생성 경로다. RequestGameplayTag 는 기본값이
+	//   ErrorIfNotFound 라, .ini 에 태그가 없으면 check() 가 터지고 그 시점이 모듈 로드라
+	//   **에디터가 아예 뜨지 않는다.** 실제로 그렇게 멈춘 적이 있다.
+	//   네이티브 태그는 정적 초기화 때 등록되고 오타는 컴파일러가 잡는다.
 	FAbilityTriggerData TriggerData;
-	TriggerData.TriggerTag = FGameplayTag::RequestGameplayTag(FName("Ability.HeavyCarryAssist"));
+	TriggerData.TriggerTag = HHTags::Ability_HeavyCarryAssist;
 	TriggerData.TriggerSource = EGameplayAbilityTriggerSource::GameplayEvent;
 	AbilityTriggers.Add(TriggerData);
 
 	// 같은 태그를 어빌리티 식별 태그로도 등록한다 - GAB_Interact 가 보조자의 자발적
 	// 해제를 CancelAbilities(WithTags=이 태그)로 찾아 취소할 때 쓴다.
-	AbilityTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.HeavyCarryAssist")));
+	AbilityTags.AddTag(HHTags::Ability_HeavyCarryAssist);
 }
 
 void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
@@ -89,9 +95,8 @@ void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 
 	// 주 운반자가 물건을 놓는 순간(BaseCharacter::SetHeldActor) 즉시 통지받아
 	// MonitorTask 의 다음 틱 폴링을 기다리지 않고 바로 정리한다.
-	static const FGameplayTag PrimaryReleasedEventTag = FGameplayTag::RequestGameplayTag(FName("Event.Loot.Dropped"));
 	UAbilityTask_WaitGameplayEvent* WaitReleaseTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
-		this, PrimaryReleasedEventTag, nullptr, /*OnlyTriggerOnce*/ true);
+		this, HHTags::Event_Loot_Dropped, nullptr, /*OnlyTriggerOnce*/ true);
 	WaitReleaseTask->EventReceived.AddDynamic(this, &UGA_HeavyCarryAssist::HandleImmediatePrimaryRelease);
 	WaitReleaseTask->ReadyForActivation();
 }

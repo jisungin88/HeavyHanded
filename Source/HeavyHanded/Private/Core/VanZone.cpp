@@ -4,17 +4,14 @@
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/DecalComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
-#include "UObject/ConstructorHelpers.h"
 #include "GameplayEffectTypes.h"
 #include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
@@ -38,7 +35,7 @@ namespace
 	/** 기본 화물칸 크기(cm, 반지름). 밴 메시가 정해지면 인스턴스에서 조정한다 */
 	constexpr float DefaultZoneExtent = 150.f;
 
-	/** 그레이박스 문짝 높이(cm). 엔진 큐브(100cm)를 이 높이로 늘린다 */
+	/** 뒷문 개구부 높이(cm). 조준 판의 크기와 하차 지점 기준이 된다 */
 	constexpr float DoorHeight = 200.f;
 
 	/** 하차 지점을 문짝에서 얼마나 더 바깥에 둘 것인가(cm) */
@@ -70,8 +67,16 @@ AVanZone::AVanZone()
 	// 복제하지 않는 액터는 RPC 를 보낼 수 없다.
 	bReplicates = true;
 
-	// 밴 자체가 움직이게 되면(도주 연출) 그때 이 값을 켠다. 지금은 정지해 있어 낭비다.
-	SetReplicateMovement(false);
+	// 밴은 매치 시작마다 진입점으로 옮겨진다 (AHeistGameMode::PlaceVan).
+	//
+	// [레벨 배치 액터라 반드시 켜야 한다] 클라이언트는 이 액터를 레벨 파일에서 이미 갖고 있고,
+	//   그 안에 저장된 위치를 쓴다. 스폰되는 액터와 달리 트랜스폼이 따로 오지 않는다.
+	//   꺼 두면 서버만 밴을 옮기고 클라이언트는 원래 배치 자리에 남아서,
+	//   **호스트에서는 멀쩡한데 클라이언트에서만 밴이 없는** 상태가 된다. 실제로 그랬다.
+	//
+	// [비용] 정지한 액터는 트랜스폼이 dirty 되지 않아 아무것도 보내지 않는다.
+	//   실제로 나가는 것은 진입점으로 옮기는 순간과, 나중에 도주 연출로 움직일 때뿐이다.
+	SetReplicateMovement(true);
 
 	// 루트는 판정 볼륨이 아니라 빈 기준점이다 — 밴 바닥 중앙, 로컬 +X 가 뒷문 방향.
 	//
@@ -109,28 +114,24 @@ AVanZone::AVanZone()
 	// 콜백은 걸지 않지만 겹침 추적은 켜야 한다. IsOverlappingActor 가 이 목록을 읽는다
 	BoardVolume->SetGenerateOverlapEvents(true);
 
-	VanDoor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VanDoor"));
-	VanDoor->SetupAttachment(VanRoot);
+	BoardAimTarget = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardAimTarget"));
+	BoardAimTarget->SetupAttachment(VanRoot);
 
-	// 그레이박스용 기본값. 큐브를 얇게 눌러 문짝 모양으로 쓴다.
-	// 비워 두면 조준할 것이 없어 승차가 아예 불가능해지므로 기본값이 있어야 한다
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDoorMesh(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (DefaultDoorMesh.Succeeded())
-	{
-		VanDoor->SetStaticMesh(DefaultDoorMesh.Object);
-	}
-
-	// 볼륨 뒤쪽 면(+X)에 세워 둔다. 두께 10cm · 폭 140cm · 높이 200cm 짜리 문짝이다.
-	// 큐브는 중심 기준이라 문 높이의 절반만큼 올려야 바닥에 선다
-	VanDoor->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, DoorHeight * 0.5f));
-	VanDoor->SetRelativeScale3D(FVector(0.1f, 1.4f, DoorHeight / 100.f));
+	// 뒷문 개구부를 덮는 판. 두께 10cm · 폭 140cm · 높이 200cm 로 시작하고,
+	// 실제 밴 메시가 들어오면 그 개구부에 맞춰 뷰포트에서 조정한다.
+	// 박스는 중심 기준이라 높이의 절반만큼 올려야 바닥에 선다
+	BoardAimTarget->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, DoorHeight * 0.5f));
+	BoardAimTarget->SetBoxExtent(FVector(5.f, 70.f, DoorHeight * 0.5f));
 
 	// 조준되는 것 하나가 이 컴포넌트의 전부다. 헤더 주석 참고 —
-	// 몸체가 아니라 문이므로 막을 것도 가릴 것도 없다
-	VanDoor->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	VanDoor->SetCollisionResponseToAllChannels(ECR_Ignore);
-	VanDoor->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	// 시야만 막고 나머지는 전부 통과시킨다
+	BoardAimTarget->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	BoardAimTarget->SetCollisionResponseToAllChannels(ECR_Ignore);
+	BoardAimTarget->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	// 게임 화면에는 보이지 않는다. 보이는 문짝은 BP 가 실제 메시로 따로 갖고,
+	// 그것들은 열리고 닫히며 움직인다 — 이 판은 그 자리에 고정돼 조준만 받는다
+	BoardAimTarget->SetHiddenInGame(true);
 
 	// 좌석. 화물칸 바닥에 둘씩 마주 보게 흩어 두고, 실제 배치는 뷰포트에서 한다.
 	// Z 가 0 인 이유는 앵커가 '발이 닿는 지점' 이고 VanRoot 가 바닥이기 때문이다 —

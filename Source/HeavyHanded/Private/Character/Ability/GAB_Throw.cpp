@@ -4,6 +4,7 @@
 #include "Character/Ability/GAB_Throw.h"
 #include "Character/BaseCharacter.h"
 #include "Interfaces/Carryable.h"
+#include "Core/HeavyHandedGameplayTags.h"   // Ability.Slot.Consumable 네이티브 태그
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
@@ -74,8 +75,7 @@ void UGAB_Throw::InputReleased(
 	if (!ActorInfo->IsNetAuthority())
 	{
 		FGameplayEventData Payload;
-		FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName("Ability.Slot.Consumable"));
-		SendGameplayEventToASCOnServer(EventTag, Payload);
+		SendGameplayEventToASCOnServer(HHTags::Ability_Slot_Consumable, Payload);
 
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 		return;

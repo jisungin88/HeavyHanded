@@ -1,5 +1,6 @@
 ﻿#include "Loot/LootBase.h"
 
+#include "Cart/HandCart.h"                // 적재 중에는 충격·소음을 끈다
 #include "Components/InputComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Loot/LootHeavyComponent.h"     // GetRequiredCarriers 를 여기서 물어본다
@@ -19,6 +20,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Noise/NoiseEmitterComponent.h" // 충돌 소음 — 붙이기만 하고 발행은 저쪽이 한다
+#include "Noise/NoiseTypes.h"            // FNoiseModifier — 카트 적재 중 감쇄에 쓴다
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
 
@@ -120,6 +122,7 @@ void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 	// 등록을 빠뜨려도 컴파일 에러가 나지 않고 호스트에서는 멀쩡히 동작한다. 반드시 확인할 것.
 	DOREPLIFETIME(ALootBase, PrimaryCarrier);
 	DOREPLIFETIME(ALootBase, SecondaryCarrier);
+	DOREPLIFETIME(ALootBase, ContainingCart);
 	DOREPLIFETIME(ALootBase, CurrentValue);
 	DOREPLIFETIME(ALootBase, LootTypeTags);
 	DOREPLIFETIME(ALootBase, LootStateTag);
@@ -632,12 +635,88 @@ bool ALootBase::CanBeCarriedBy(const APawn* Requester) const
 	return true;
 }
 
+void ALootBase::SetContainingCart(AHandCart* Cart)
+{
+	// 적재 판정은 서버가 정한다. 클라이언트는 복제로 받기만 한다.
+	if (!HasAuthority() || ContainingCart.Get() == Cart)
+	{
+		return;
+	}
+
+	ContainingCart = Cart;
+
+	if (!IsValid(NoiseEmitter))
+	{
+		return;
+	}
+
+	// 카트에서 카트로 바로 옮겨 실리는 경우가 있어, 걸어 두었던 것을 먼저 지우고 다시 건다.
+	// 겹쳐 걸면 나중에 하나만 지워져서 물건이 영영 조용해진다.
+	if (CartNoiseMuteHandle.IsValid())
+	{
+		NoiseEmitter->RemoveModifier(CartNoiseMuteHandle);
+		CartNoiseMuteHandle.Invalidate();
+	}
+
+	if (Cart)
+	{
+		// 배율 0 이면 발행 직전에 걸러진다 (UNoiseEmitterComponent 의 Modified <= 0 검사).
+		// 소음 파트가 장비·패시브용으로 열어 둔 확장점이라 저쪽 코드를 고칠 필요가 없다.
+		//
+		// AffectedTags 를 비워 두면 이 물건이 내는 소음 전부에 걸린다. 카트 안에서는
+		// 무엇에 부딪히든 조용해야 하므로 그게 맞다 — 카트가 벽에 박는 소리는
+		// 카트 자신의 NoiseEmitter 가 따로 낸다.
+		FNoiseModifier Mute;
+		Mute.Multiplier = 0.f;
+		CartNoiseMuteHandle = NoiseEmitter->AddModifier(Mute);
+	}
+}
+
+void ALootBase::TryContainInOverlappingCart()
+{
+	// 손에 아직 들려 있거나 이미 실려 있으면 할 일이 없다.
+	if (!HasAuthority() || IsValid(PrimaryCarrier.Get()) || ContainingCart.Get() != nullptr)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* Root = GetPhysicsRoot();
+	if (!IsValid(Root))
+	{
+		return;
+	}
+
+	// 카트 몸체(CartMesh)는 Block 이라 오버랩 목록에 잡히지 않는다.
+	// 여기서 나오는 카트는 적재 볼륨과 겹친 것뿐이라, 몸체에만 닿은 경우는 저절로 걸러진다.
+	TArray<AActor*> Overlapping;
+	Root->GetOverlappingActors(Overlapping, AHandCart::StaticClass());
+
+	for (AActor* Actor : Overlapping)
+	{
+		if (AHandCart* Cart = Cast<AHandCart>(Actor))
+		{
+			// 여러 카트가 겹쳐 있으면 먼저 찾은 쪽에 싣는다. 카트끼리 포개 놓는 상황 자체가
+			// 정상이 아니라, 여기서 우선순위를 따로 정하지 않는다.
+			Cart->ContainLoot(this);
+			return;
+		}
+	}
+}
+
 void ALootBase::OnGrabbed(APawn* Carrier)
 {
 	// Server RPC 는 요청일 뿐이다. 판정은 서버가 하고 클라이언트를 신뢰하지 않는다.
 	if (!HasAuthority() || !CanBeCarriedBy(Carrier))
 	{
 		return;
+	}
+
+	// 적재면 위에서 그대로 집어 올리면 볼륨 안에 머문 채 사람 손에 들린다.
+	// 그때는 EndOverlap 이 오지 않으므로 카트가 스스로 알아채지 못한다 — 여기서 알려준다.
+	// 안 하면 손에 든 물건이 계속 조용하고 안 깨진다.
+	if (AHandCart* Cart = ContainingCart.Get())
+	{
+		Cart->ReleaseLoot(this);
 	}
 
 	PrimaryCarrier = Carrier;
@@ -688,6 +767,11 @@ void ALootBase::OnReleased(APawn* Carrier)
 	SetPendingImpactCause(bHeavy ? ELootImpactCause::HeavyDrop : ELootImpactCause::Drop, Carrier);
 
 	ApplyCarryState();
+
+	// 카트 안까지 들고 가서 놓은 경우. 이미 볼륨 안이라 BeginOverlap 이 다시 오지 않으므로
+	// 여기서 직접 확인한다. ApplyCarryState 뒤에 부르는 것은 물리가 켜진 뒤여야
+	// 적재 상태와 물리 상태가 어긋나지 않기 때문이다.
+	TryContainInOverlappingCart();
 }
 
 bool ALootBase::CanBeThrown() const
@@ -1257,6 +1341,22 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 
 	// 게이팅 효과를 재려면 들어온 총량을 알아야 한다.
 	++DebugRawHitCount;
+
+	// 카트에 실려 있는 동안은 충격을 보고하지 않는다.
+	//
+	// 물리를 켜 둔 채로 싣기 때문에 물건이 카트 바닥·턱·다른 물건과 계속 부딪힌다.
+	// 그대로 세면 파손형이 밴까지 가는 동안 확실히 깨지고, 카트가 오히려 위험한 물건이 된다.
+	// 소음은 여기서 막지 않는다 — 그건 SetContainingCart 가 NoiseEmitter 쪽에 따로 건다.
+	//
+	// 유출(불안정형)은 이 경로를 안 타고 기울기로 판정하므로 그대로 살아 있다. 의도한 것이다.
+	// 카트 밖으로 쏟아지면 여기부터 다시 정상으로 돈다.
+	if (IsValid(ContainingCart))
+	{
+		ShowImpactDebug(
+			FString::Printf(TEXT("기각(카트 적재 중) %.0f"), ImpulseMagnitude),
+			FColor::Cyan, Hit.ImpactPoint, ImpulseMagnitude);
+		return;
+	}
 
 	// [1겹] 임계값 미만 무시.
 	// 구르거나 미세하게 재접촉하는 것까지 전부 OnHit 으로 온다.

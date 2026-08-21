@@ -355,8 +355,7 @@ void UGAB_Interact::PerformInteraction()
                 if (bHeavy)
                 {
                     // ★ 직접 함수 호출 대신 GameplayEvent 로 GA_HeavyCarryAssist 를 발동시킨다.
-                    static const FGameplayTag AssistEventTag =
-                        FGameplayTag::RequestGameplayTag(FName("Ability.HeavyCarryAssist"));
+                    const FGameplayTag& AssistEventTag = HHTags::Ability_HeavyCarryAssist;
 
                     FGameplayEventData EventData;
                     EventData.Target = HitActor;
