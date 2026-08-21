@@ -58,6 +58,28 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 
+	/**
+	 * 컨트롤러가 바뀌었다. **입력 매핑 컨텍스트를 붙이는 자리다.**
+	 *
+	 * [왜 BeginPlay 가 아닌가] GameMode 가 스폰하는 폰은 BeginPlay 시점에 아직 빙의 전이라
+	 *   GetController() 가 nullptr 이다 — 엔진이 SpawnDefaultPawnFor(→ BeginPlay) 를 먼저 하고
+	 *   FinishRestartPlayer 에서 Possess 하기 때문이다. BeginPlay 에서 붙이면 그 경로에서는
+	 *   매핑이 영영 안 붙고, **마우스도 키도 전혀 안 먹는다.**
+	 *
+	 *   레벨에 배치한 캐릭터(Auto Possess)는 빙의가 PreInitializeComponents 에서 일어나
+	 *   BeginPlay 보다 먼저라 문제가 드러나지 않았다. 그래서 개발용 테스트 맵에서는 멀쩡하고
+	 *   진입점 스폰을 쓰는 작업 레벨(저택)에서만 터졌다.
+	 *
+	 * 서버·클라이언트 양쪽에서, 빙의와 빙의 해제 때 모두 불린다.
+	 */
+	virtual void NotifyControllerChanged() override;
+
+	/**
+	 * 로컬 플레이어의 입력을 세운다 — 매핑 컨텍스트 부착 + 게임플레이 입력 모드 복구.
+	 * 로컬 플레이어가 아니면 조용히 아무것도 하지 않는다.
+	 */
+	void SetupLocalPlayerInput();
+
 	// --- 카메라 및 시점 컴포넌트 ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
