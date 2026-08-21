@@ -37,10 +37,16 @@ void AShelterPlayerController::BeginPlay()
 
 AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 {
-	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, GetPlayerState<AShelterPlayerState>(), *GetPlayerState<AShelterPlayerState>()->GetName());
-	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+	AShelterPlayerState* PS = GetPlayerState<AShelterPlayerState>();
 
-	return GetPlayerState<AShelterPlayerState>();
+	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, PS, PS ? *PS->GetName() : TEXT("NULL"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+	}
+
+	return PS;
 }
 
 

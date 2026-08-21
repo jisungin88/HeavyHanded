@@ -20,8 +20,21 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 	FString JoinedRoomName;
 
+	UPROPERTY(BlueprintReadWrite)
+	FString JoinedRoomCode;
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 MaxPlayers = 0;
+
+
 	UFUNCTION(BlueprintPure, Category = "Room")
 	FString GetJoinedRoomName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Room")
+	FString GetJoinedRoomCode() const;
+
+	UFUNCTION(BlueprintPure, Category = "Room")
+	int32 GetRoomMaxPlayer() const;
 
 
 };
