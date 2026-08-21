@@ -672,6 +672,37 @@ void ALootBase::SetContainingCart(AHandCart* Cart)
 	}
 }
 
+void ALootBase::TryContainInOverlappingCart()
+{
+	// 손에 아직 들려 있거나 이미 실려 있으면 할 일이 없다.
+	if (!HasAuthority() || IsValid(PrimaryCarrier.Get()) || ContainingCart.Get() != nullptr)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* Root = GetPhysicsRoot();
+	if (!IsValid(Root))
+	{
+		return;
+	}
+
+	// 카트 몸체(CartMesh)는 Block 이라 오버랩 목록에 잡히지 않는다.
+	// 여기서 나오는 카트는 적재 볼륨과 겹친 것뿐이라, 몸체에만 닿은 경우는 저절로 걸러진다.
+	TArray<AActor*> Overlapping;
+	Root->GetOverlappingActors(Overlapping, AHandCart::StaticClass());
+
+	for (AActor* Actor : Overlapping)
+	{
+		if (AHandCart* Cart = Cast<AHandCart>(Actor))
+		{
+			// 여러 카트가 겹쳐 있으면 먼저 찾은 쪽에 싣는다. 카트끼리 포개 놓는 상황 자체가
+			// 정상이 아니라, 여기서 우선순위를 따로 정하지 않는다.
+			Cart->ContainLoot(this);
+			return;
+		}
+	}
+}
+
 void ALootBase::OnGrabbed(APawn* Carrier)
 {
 	// Server RPC 는 요청일 뿐이다. 판정은 서버가 하고 클라이언트를 신뢰하지 않는다.
@@ -736,6 +767,11 @@ void ALootBase::OnReleased(APawn* Carrier)
 	SetPendingImpactCause(bHeavy ? ELootImpactCause::HeavyDrop : ELootImpactCause::Drop, Carrier);
 
 	ApplyCarryState();
+
+	// 카트 안까지 들고 가서 놓은 경우. 이미 볼륨 안이라 BeginOverlap 이 다시 오지 않으므로
+	// 여기서 직접 확인한다. ApplyCarryState 뒤에 부르는 것은 물리가 켜진 뒤여야
+	// 적재 상태와 물리 상태가 어긋나지 않기 때문이다.
+	TryContainInOverlappingCart();
 }
 
 bool ALootBase::CanBeThrown() const

@@ -230,6 +230,17 @@ bool AHandCart::ShouldReportHitAsNoise(const AActor* OtherActor) const
 		{
 			return false;
 		}
+
+		// 아직 적재 목록에 없더라도 볼륨 안이면 조용하다.
+		//
+		// 오버랩 이벤트와 물리 히트는 같은 프레임에 와도 순서가 보장되지 않는다.
+		// 세게 던져 넣으면 바닥에 닿는 첫 충돌이 BeginOverlap 보다 먼저 처리될 수 있고,
+		// 그때 목록만 보면 그 한 번을 놓쳐서 "던져 넣을 때마다 한 번씩 시끄럽다" 가 된다.
+		// 목록은 상태이고 이쪽은 사실이라, 사실을 한 번 더 본다.
+		if (IsValid(LoadVolume) && LoadVolume->IsOverlappingActor(OtherActor))
+		{
+			return false;
+		}
 	}
 
 	// 사람이 몸으로 미는 것도 소음이 아니다. 밀고 다니는 내내 접촉이 이어져서,
@@ -257,6 +268,15 @@ void AHandCart::HandleCartHit(UPrimitiveComponent* /*HitComponent*/, AActor* Oth
 	// [1겹] 임계값 미만 무시. 벽을 스치거나 바닥에 얹혀 있는 접촉까지 전부 OnHit 으로 온다.
 	if (ImpulseMagnitude < NoiseImpulseThreshold)
 	{
+		return;
+	}
+
+	// [1.5겹] 수직 충격은 카트가 부딪힌 것이 아니라 실린 하중이 바닥으로 빠지는 것이다.
+	// 이걸 안 막으면 물건을 실을 때마다 카트가 바닥을 치면서 소리가 난다. (헤더 주석 참고)
+	if (FMath::Abs(NormalImpulse.GetSafeNormal().Z) >= NoiseVerticalImpactCutoff)
+	{
+		UE_LOG(LogLoot, Verbose, TEXT("[Cart:%s] 수직 충격 무시 (%s, 세기 %.0f)"),
+			*GetName(), *GetNameSafe(OtherActor), ImpulseMagnitude);
 		return;
 	}
 

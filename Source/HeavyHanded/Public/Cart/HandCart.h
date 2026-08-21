@@ -68,6 +68,16 @@ public:
 	 */
 	void ReleaseLoot(ALootBase* Loot);
 
+	/**
+	 * 이 노획물을 적재 목록에 넣는다. (서버 전용)
+	 *
+	 * 보통은 LoadVolume 오버랩이 알아서 부르지만, 들고 들어와서 놓는 경우에는
+	 * 진입 시점에 손에 들려 있어 거부되고 놓는 시점에는 오버랩이 다시 오지 않는다.
+	 * 그 구멍을 ALootBase::TryContainInOverlappingCart 가 이 함수를 직접 불러 메운다.
+	 * ReleaseLoot 과 짝이다.
+	 */
+	void ContainLoot(ALootBase* Loot);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -95,6 +105,24 @@ protected:
 	/** 같은 대상에 대해 이 시간 안에는 다시 발행하지 않는다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Noise", meta = (ClampMin = "0.0", Units = "s"))
 	float NoiseDebounceSeconds = 0.3f;
+
+	/**
+	 * 충격 방향이 이만큼 수직에 가까우면(|Z| 성분) 소음으로 치지 않는다.
+	 *
+	 * [왜 필요한가] 물건을 카트에 실으면 그 하중이 바퀴를 통해 바닥으로 전달되면서
+	 *   강한 수직 충격이 잡힌다. 실제로 불안정형을 넣었을 때 물건 쪽 4409 에 이어
+	 *   카트-바닥 4080 이 찍혔다. 상대가 노획물이 아니라 Floor 라서 적재 목록 검사에
+	 *   걸리지 않고 그대로 소음이 됐다 — 조용히 옮기려고 산 장비가 실을 때마다 소리를 낸 것이다.
+	 *
+	 *   벽에 박는 충격은 벽 법선 방향이라 수평이다. 그래서 방향으로 갈린다.
+	 *
+	 * [한계] 카트를 높은 데서 떨어뜨리거나 계단에서 굴리면 그 착지음도 같이 죽는다.
+	 *   지금은 계단 대응 자체가 없어서 문제가 안 되지만, 계단이 들어오면 낙하 속도로
+	 *   예외를 두는 편이 낫다. 속도로 판정하지 않은 것은 OnHit 시점의 속도가 이미
+	 *   충돌로 감속된 뒤라서, 벽에 세게 박을수록 오히려 느리게 보이기 때문이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Noise", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float NoiseVerticalImpactCutoff = 0.7f;
 
 	/** 카트 자체의 질량(kg). 실린 물건 무게는 물리 엔진이 따로 더한다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Physics", meta = (ClampMin = "1.0"))
@@ -139,9 +167,6 @@ private:
 
 	/** 대상별 마지막 발행 시각. 짧은 시간 내 재발행을 막는다 */
 	TMap<TWeakObjectPtr<const AActor>, float> RecentNoiseTimes;
-
-	/** 적재 목록에 넣고 노획물 쪽 상태를 켠다. (서버 전용) */
-	void ContainLoot(ALootBase* Loot);
 
 	/**
 	 * 실려 있는 노획물. 서버에서만 유효하다.
