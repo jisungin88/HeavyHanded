@@ -582,21 +582,30 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot)
                 *GetNameSafe(NewHeldActor));
             return false;
         }
+
+        // ICarryable 은 스스로 성공을 보고했다(GetPrimaryCarrier() == this) — 어떻게
+        // 붙잡을지(AttachToComponent 든 Physics Handle 이든)는 구현체 책임이라 여기서
+        // Attach 여부를 다시 확인하지 않는다. 중량형은 Physics Handle 로만 붙잡고
+        // AttachToComponent 를 아예 안 써서, 아래 Attach 재확인 검증에 걸리면
+        // 정상적으로 붙잡았는데도 "부착 실패"로 오판해 곧바로 놓아버리게 된다.
     }
-
-    // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
-    // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
-    // 그 상태로 던지면 엉뚱한 곳에 임펄스가 들어간다.
-    const USceneComponent* NewRoot = NewHeldActor->GetRootComponent();
-    if (!NewRoot || NewRoot->GetAttachParent() != GetMesh())
+    else
     {
-        UE_LOG(LogCarry, Warning,
-            TEXT("[서버] %s 부착에 실패해 운반 상태로 넘기지 않는다. (직전 AttachTo 경고 확인)"),
-            *GetNameSafe(NewHeldActor));
+        // 레거시 폴백(ICarryable 을 구현하지 않은 액터) 전용 검증.
+        // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
+        // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
+        // 그 상태로 던지면 엉뚱한 곳에 임펄스가 들어간다.
+        const USceneComponent* NewRoot = NewHeldActor->GetRootComponent();
+        if (!NewRoot || NewRoot->GetAttachParent() != GetMesh())
+        {
+            UE_LOG(LogCarry, Warning,
+                TEXT("[서버] %s 부착에 실패해 운반 상태로 넘기지 않는다. (직전 AttachTo 경고 확인)"),
+                *GetNameSafe(NewHeldActor));
 
-        // 물리를 되돌려 원래 상태로 남긴다.
-        ApplyCarryState(NewHeldActor, false);
-        return false;
+            // 물리를 되돌려 원래 상태로 남긴다.
+            ApplyCarryState(NewHeldActor, false);
+            return false;
+        }
     }
 
     // 여기까지 왔으면 노획물 쪽은 이미 운반 상태다. 위 ApplyCarryState 가 다 했고,

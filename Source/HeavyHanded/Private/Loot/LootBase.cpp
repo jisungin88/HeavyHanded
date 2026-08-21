@@ -23,6 +23,7 @@
 #include "Noise/NoiseTypes.h"            // FNoiseModifier — 카트 적재 중 감쇄에 쓴다
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 
 // 노획물 액터와 하위 컴포넌트가 같은 카테고리로 찍는다. 선언은 Loot/LootLog.h.
 DEFINE_LOG_CATEGORY(LogLoot);
@@ -34,6 +35,9 @@ namespace LootCollisionProfiles
 
 	/** 소지 중 — 물리 OFF, 다른 캐릭터만 Block */
 	static const FName Carried(TEXT("CarriedLoot"));
+
+	/** 중량형 소지 중 — 물리는 계속 켠 채(Physics Handle), 채널 응답은 Carried 와 동일 */
+	static const FName CarriedHeavy(TEXT("CarriedHeavyLoot"));
 }
 
 /**
@@ -113,6 +117,9 @@ ALootBase::ALootBase()
 	// 충돌 소음. 붙이는 것 외에 해 줄 것이 없다 — 히트 바인딩도 서버 판정도 스스로 한다.
 	// ImpactComponentName 을 비워 두면 루트를 쓰는데, 루트가 곧 LootMesh 라 그대로 맞는다.
 	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
+
+	// 중량형 전용. 붙잡을 게 없으면 그냥 놀고 있는 컴포넌트라 일반 노획물에도 달아 둬도 무해하다.
+	HeavyCarryHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("HeavyCarryHandle"));
 }
 
 void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -361,8 +368,15 @@ void ALootBase::Tick(float DeltaSeconds)
 	{
 		bDebugAiming = false;
 		bCarriedWithoutSocket = false;
+		ReleaseHeavyPhysicsHandle();   // 운반자가 사라졌는데 핸들이 남아 있으면 물건이 허공에 얼어붙는다
 		SetActorTickEnabled(false);
 		return;
+	}
+
+	const bool bUsingHeavyHandle = HeavyCarryHandle && HeavyCarryHandle->GrabbedComponent != nullptr;
+	if (bUsingHeavyHandle && HasAuthority())
+	{
+		UpdateHeavyCarryHandleTarget(Carrier);
 	}
 
 	if (bCarriedWithoutSocket && HasAuthority())
@@ -374,7 +388,7 @@ void ALootBase::Tick(float DeltaSeconds)
 	{
 		ShowThrowTrajectory(ComputeThrowAimDirection());
 	}
-	else if (!bCarriedWithoutSocket)
+	else if (!bCarriedWithoutSocket && !bUsingHeavyHandle)
 	{
 		SetActorTickEnabled(false);
 	}
@@ -1016,11 +1030,6 @@ void ALootBase::ApplyCarryState()
 
 	if (bCarried)
 	{
-		// PhysicsHandle 로 물리를 유지한 채 드는 방식은 멀티에서 깨진다.
-		// 물리를 끄고 Attach 한 뒤, 놓기/던지기 순간에만 다시 켠다.
-		LootMesh->SetSimulatePhysics(false);
-		LootMesh->SetCollisionProfileName(LootCollisionProfiles::Carried);
-
 		// 소지 중 프로파일은 다른 캐릭터를 Block 한다. 그대로 두면 운반자 본인도 막혀서
 		// 자기 물건에 걸려 움직이지 못한다. 이동 스윕은 각 머신에서 로컬로 돌기 때문에
 		// 서버·클라이언트 양쪽에서 무시를 걸어야 한다. (그래서 이 함수가 ApplyCarryState 안에 있다)
@@ -1035,13 +1044,36 @@ void ALootBase::ApplyCarryState()
 			MoveIgnoredSecondary = Second;
 		}
 
-		AttachToCarrier(Carrier);
+		if (FindComponentByClass<ULootHeavyComponent>())
+		{
+			// 중량형은 무게감을 위해 물리를 계속 켜 둔 채 Grip_A 지점을 Physics Handle 로
+			// 당긴다. SetSimulatePhysics(false) 를 부르지 않는다 — 핸들은 시뮬레이션 중인
+			// 바디에만 힘을 줄 수 있다.
+			//
+			// CarriedLoot 이 아니라 CarriedHeavyLoot 을 쓴다 — 채널 응답은 동일하지만
+			// CollisionEnabled 가 QueryAndPhysics 다. CarriedLoot(QueryOnly)을 물리 켠 채로
+			// 쓰면 "SimulatePhysics 는 켜졌는데 콜리전은 물리 응답이 없다"는 모순이 생겨
+			// 엔진이 Invalid Simulate Options 경고를 내고 물리가 무효화된다.
+			LootMesh->SetCollisionProfileName(LootCollisionProfiles::CarriedHeavy);
+			AttachHeavyViaPhysicsHandle(Carrier);
+			SetActorTickEnabled(true);
+		}
+		else
+		{
+			// 물리를 끄고 Attach 한 뒤, 놓기/던지기 순간에만 다시 켠다.
+			LootMesh->SetSimulatePhysics(false);
+			LootMesh->SetCollisionProfileName(LootCollisionProfiles::Carried);
+			AttachToCarrier(Carrier);
+		}
 
 		SetLootStateTag(HHTags::Loot_State_Carried);
 	}
 	else
 	{
 		bCarriedWithoutSocket = false;
+
+		// 중량형이었다면 핸들부터 놓는다. 잡고 있지 않았으면 안에서 조용히 아무 일도 안 한다.
+		ReleaseHeavyPhysicsHandle();
 
 		// 들려 있던 것이 놓였을 때만 Dropped 로 간다.
 		//
@@ -1130,6 +1162,74 @@ void ALootBase::AttachToCarrier(APawn* Carrier)
 		SetActorTickEnabled(true);
 		UpdateNoSocketCarryTransform(Carrier);
 	}
+}
+
+void ALootBase::AttachHeavyViaPhysicsHandle(APawn* Carrier)
+{
+	if (!HasAuthority() || !IsValid(Carrier) || !HeavyCarryHandle || !IsValid(LootMesh))
+	{
+		return;
+	}
+
+	// 잡을 지점은 물건 원점이 아니라 Grip 소켓이어야 무게중심이 어긋난 물건도
+	// 자연스럽게 기운다. GetGripSocketFor 가 이 운반자가 A/B 중 어느 쪽인지 이미 안다.
+	FVector GrabLocation = LootMesh->GetComponentLocation();
+	FRotator GrabRotation = LootMesh->GetComponentRotation();
+
+	const FName GripSocket = GetGripSocketFor(Carrier);
+	if (GripSocket != NAME_None && LootMesh->DoesSocketExist(GripSocket))
+	{
+		const FTransform Grip = LootMesh->GetSocketTransform(GripSocket, RTS_World);
+		GrabLocation = Grip.GetLocation();
+		GrabRotation = Grip.Rotator();
+	}
+	else
+	{
+		UE_LOG(LogLoot, Warning,
+			TEXT("[Loot:%s] %s 가 잡을 Grip 소켓을 찾지 못해 메시 원점을 붙잡는다. "
+				 "DT_LootHeavy 의 그립 소켓 이름이 메시와 맞는지 확인할 것"),
+			*GetName(), *GetNameSafe(Carrier));
+	}
+
+	// 이미 잡고 있어도 다시 부르면 그 자리에서 새로 잡는다 — 주 운반자가 바뀌었을 때
+	// (놓은 사람 대신 보조자가 승격되는 경우 등) 옛 그립 지점에 매달린 채 남지 않는다.
+	HeavyCarryHandle->GrabComponentAtLocationWithRotation(LootMesh, NAME_None, GrabLocation, GrabRotation);
+
+	UpdateHeavyCarryHandleTarget(Carrier);
+}
+
+void ALootBase::ReleaseHeavyPhysicsHandle()
+{
+	if (HeavyCarryHandle && HeavyCarryHandle->GrabbedComponent)
+	{
+		HeavyCarryHandle->ReleaseComponent();
+	}
+}
+
+void ALootBase::UpdateHeavyCarryHandleTarget(const APawn* Carrier)
+{
+	if (!HasAuthority() || !HeavyCarryHandle || !HeavyCarryHandle->GrabbedComponent || !IsValid(Carrier))
+	{
+		return;
+	}
+
+	FVector TargetLocation = Carrier->GetActorLocation();
+	FRotator TargetRotation = Carrier->GetActorRotation();
+
+	if (const ACharacter* CarrierCharacter = Cast<ACharacter>(Carrier))
+	{
+		if (USkeletalMeshComponent* CarrierMesh = CarrierCharacter->GetMesh())
+		{
+			if (CarrierMesh->DoesSocketExist(CarrySocketName))
+			{
+				const FTransform Hand = CarrierMesh->GetSocketTransform(CarrySocketName, RTS_World);
+				TargetLocation = Hand.GetLocation();
+				TargetRotation = Hand.Rotator();
+			}
+		}
+	}
+
+	HeavyCarryHandle->SetTargetLocationAndRotation(TargetLocation, TargetRotation);
 }
 
 void ALootBase::ResolveReleaseOverlap(const APawn* Carrier)

@@ -12,6 +12,7 @@
 
 class UStaticMeshComponent;
 class UPrimitiveComponent;
+class UPhysicsHandleComponent;
 class UNoiseEmitterComponent;
 class AHandCart;
 class APawn;
@@ -326,6 +327,13 @@ protected:
 	TObjectPtr<UStaticMeshComponent> LootMesh;
 
 	/**
+	 * 중량형 운반 시 물리를 켠 채로 Grip_A 지점을 붙잡아 주 운반자 손 쪽으로 당기는 핸들.
+	 * 일반 노획물은 쓰지 않는다 — 그쪽은 AttachToCarrier(물리 끄고 Attach)를 그대로 쓴다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loot|Carry|Heavy")
+	TObjectPtr<UPhysicsHandleComponent> HeavyCarryHandle;
+
+	/**
 	 * 충돌을 소음으로 바꾼다. 소음 파트의 컴포넌트이고 여기서는 붙이기만 한다.
 	 *
 	 * [내가 부를 일이 없다] BeginPlay 에서 스스로 루트의 OnComponentHit 을 물고,
@@ -596,6 +604,19 @@ protected:
 
 	/** 운반자의 손 소켓에 어태치한다. 물리를 끈 뒤에 부른다 */
 	void AttachToCarrier(APawn* Carrier);
+
+	/**
+	 * 중량형 노획물을 Grip_A(GetGripSocketFor 가 알려주는 소켓) 지점에서 Physics Handle 로
+	 * 붙잡는다. 물리는 계속 켜 둔다 — AttachToCarrier 와 달리 SetSimulatePhysics(false) 를
+	 * 부르지 않는다. 서버 전용.
+	 */
+	void AttachHeavyViaPhysicsHandle(APawn* Carrier);
+
+	/** Physics Handle 을 놓는다. 잡고 있지 않을 때 불러도 안전하다(멱등) */
+	void ReleaseHeavyPhysicsHandle();
+
+	/** 매 프레임 Physics Handle 의 목표 위치/회전을 주 운반자 손 소켓으로 갱신한다. 서버 전용 */
+	void UpdateHeavyCarryHandleTarget(const APawn* Carrier);
 
 	UFUNCTION()
 	void HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
