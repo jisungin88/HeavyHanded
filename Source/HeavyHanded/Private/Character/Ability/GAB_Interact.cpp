@@ -11,6 +11,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Interfaces/Carryable.h"        // GetPrimaryCarrier 로 "이미 들려 있는가" 를 판정한다
 
 // 상호작용 진단용. 집기 실패는 예외 없이 조용히 넘어가므로 이유를 남긴다.
 DEFINE_LOG_CATEGORY_STATIC(LogInteract, Log, All);
@@ -347,8 +348,21 @@ void UGAB_Interact::PerformInteraction()
             }
 
             const bool bHeavy = IsHeavyLoot(HitActor);
+
+            // "이미 들려 있는가" 는 원래 Attach 여부로만 봤다. 중량형은 처음부터(물리 핸들
+            // 시절도, 지금의 Kinematic 도) AttachToComponent 를 쓴 적이 없어서 이 판정이
+            // 항상 false 로 나왔다 — 그래서 이미 1번이 들고 있어도 2번째 E 입력이 "새로
+            // 집는다" 경로로 새서 CanBeCarriedBy 에 조용히 거부당했다(2번째 플레이어가
+            // 못 집는 것처럼 보이던 원인).
+            //
+            // ICarryable 을 구현하는 노획물(일반·중량형 전부)은 PrimaryCarrier 로 정확히
+            // 판정한다. ICarryable 을 구현하지 않는 레거시 액터("Item" 태그만 있는 것)는
+            // 여전히 Attach 로만 운반 상태를 표현하므로 그 경로는 그대로 남겨 둔다.
+            const ICarryable* HitCarryable = Cast<const ICarryable>(HitActor);
             const USceneComponent* HitRoot = HitActor->GetRootComponent();
-            const bool bAlreadyCarried = HitRoot && HitRoot->GetAttachParent() != nullptr;
+            const bool bAlreadyCarried = HitCarryable
+                ? IsValid(HitCarryable->GetPrimaryCarrier())
+                : (HitRoot && HitRoot->GetAttachParent() != nullptr);
 
             if (bAlreadyCarried)
             {

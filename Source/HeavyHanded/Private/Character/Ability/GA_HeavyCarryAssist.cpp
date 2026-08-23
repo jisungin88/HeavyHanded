@@ -4,6 +4,7 @@
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "AbilitySystemComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"   // Ability.HeavyCarryAssist · Event.Loot.Dropped 네이티브 태그
+#include "Interfaces/Carryable.h"           // GetPrimaryCarrier/OnSecondGrabbed/OnSecondReleased
 
 DEFINE_LOG_CATEGORY_STATIC(LogHeavyCarry, Log, All);
 
@@ -45,20 +46,15 @@ void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 		return;
 	}
 
-	// Item 을 붙잡고 있는 주 운반자를 부착 관계로 역추적한다.
-	const USceneComponent* Root = Item ? Item->GetRootComponent() : nullptr;
+	// Item 을 붙잡고 있는 주 운반자를 찾는다. 예전엔 Attach 관계로 역추적했는데, 중량형은
+	// AttachToComponent 를 쓴 적이 없어서(물리 핸들 시절도, 지금의 Kinematic 도) 항상
+	// AttachParent 가 null 이라 이 어빌리티가 매번 "주 운반자 없음"으로 자기 취소하고
+	// 있었다 — 2번째 플레이어가 절대 보조를 시작할 수 없던 원인. ICarryable 이 이미
+	// PrimaryCarrier 를 정확히 들고 있으므로 그걸 직접 물어본다.
+	ICarryable* ItemCarryable = Cast<ICarryable>(Item);
+	ABaseCharacter* Primary = ItemCarryable ? Cast<ABaseCharacter>(ItemCarryable->GetPrimaryCarrier()) : nullptr;
 
-	if (!Root)
-	{
-		UE_LOG(LogHeavyCarry, Warning, TEXT("Item의 RootComponent가 유효하지 않아 취소한다."));
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
-	}
-
-	const USceneComponent* AttachParent = Root ? Root->GetAttachParent() : nullptr;
-	ABaseCharacter* Primary = AttachParent ? Cast<ABaseCharacter>(AttachParent->GetOwner()) : nullptr;
-
-	if (!Primary || Primary->GetHeldActor() != Item || Primary == Assistant || Primary->GetHeavyCarryAssistant())
+	if (!ItemCarryable || !Primary || Primary->GetHeldActor() != Item || Primary == Assistant || Primary->GetHeavyCarryAssistant())
 	{
 		UE_LOG(LogHeavyCarry, Log, TEXT("%s 는 지금 보조할 수 없다 (주 운반자 없음/자기 자신/이미 보조자 있음)."),
 			*GetNameSafe(Item));
@@ -68,6 +64,11 @@ void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 
 	PrimaryCarrier = Primary;
 	CarriedItem = Item;
+
+	// 노획물 쪽 SecondaryCarrier 도 채워야 한다. 여기까지는 캐릭터 쪽 상태만 갱신하고
+	// 있었는데, 그러면 ALootBase::HasEnoughCarriers() 가 계속 "1명"으로 알아서
+	// (2인이면 점프 허용 같은) 그 값에 기대는 규칙들이 안 맞는다.
+	ItemCarryable->OnSecondGrabbed(Assistant);
 
 	Primary->SetHeavyCarryAssistant(Assistant);
 	Assistant->SetAssistingPrimaryCarrier(Primary, Item);
@@ -218,6 +219,14 @@ void UGA_HeavyCarryAssist::CleanupCrossReferences()
 
 	if (Assistant)
 	{
+		// OnSecondGrabbed 의 반대쪽. 이걸 안 부르면 SecondaryCarrier 가 물건에 남은 채라
+		// HasEnoughCarriers() 가 계속 "2명"으로 알고, 보조자는 이미 떠났는데 점프 허용 같은
+		// 규칙이 계속 켜져 있게 된다.
+		if (ICarryable* ItemCarryable = Cast<ICarryable>(CarriedItem.Get()))
+		{
+			ItemCarryable->OnSecondReleased(Assistant);
+		}
+
 		Assistant->ClearAssistingPrimaryCarrier();
 		Assistant->SetHeavyCarryState(EHeavyCarryState::None);
 
