@@ -3,10 +3,14 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"                 // TActorIterator (임시 콘솔 명령)
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Loot/LootBase.h"
 #include "Loot/LootLog.h"
+#include "Net/UnrealNetwork.h"           // DOREPLIFETIME
 #include "Noise/NoiseSubsystem.h"        // 걸러낸 충돌만 직접 발행한다
 
 namespace
@@ -38,10 +42,78 @@ namespace
 	static const FVector DefaultLoadOffset(0.f, 0.f, 60.f);
 }
 
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/**
+	 * [임시] 가장 가까운 카트를 잡거나 놓는다.
+	 *
+	 * 카트를 잡는 정식 경로는 상호작용 키(UGAB_Interact)인데, 그 파일은 플레이어 파트라
+	 * 내가 고치지 않는다. 두 줄이 들어가기 전까지 끌기를 검증할 방법이 없어서 임시로 연다.
+	 * 저쪽에 아래 두 줄이 들어가면 이 명령은 지운다.
+	 *
+	 *     else if (AHandCart* Cart = Cast<AHandCart>(HitActor))
+	 *     {
+	 *         Cart->TryTogglePush(Character);
+	 *     }
+	 *
+	 * 리슨 서버 호스트 창에서만 동작한다. TryTogglePush 가 서버 전용이기 때문이다 —
+	 * 클라이언트 창에서 쓰려면 Server RPC 가 필요한데, 그건 정식 경로가 이미 갖고 있다.
+	 */
+	void ToggleNearestCart(UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+
+		const APlayerController* PC = World->GetFirstPlayerController();
+		APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+		if (!IsValid(Pawn))
+		{
+			UE_LOG(LogLoot, Warning, TEXT("[Cart] 조종 중인 폰이 없다 — 관전자 상태에서는 카트를 잡을 수 없다"));
+			return;
+		}
+
+		AHandCart* Nearest = nullptr;
+		float NearestDistSq = TNumericLimits<float>::Max();
+		for (TActorIterator<AHandCart> It(World); It; ++It)
+		{
+			const float DistSq = FVector::DistSquared(It->GetActorLocation(), Pawn->GetActorLocation());
+			if (DistSq < NearestDistSq)
+			{
+				NearestDistSq = DistSq;
+				Nearest = *It;
+			}
+		}
+
+		if (!Nearest)
+		{
+			UE_LOG(LogLoot, Warning, TEXT("[Cart] 레벨에 카트가 없다"));
+			return;
+		}
+
+		if (!Nearest->HasAuthority())
+		{
+			UE_LOG(LogLoot, Warning, TEXT("[Cart] 이 명령은 호스트 창에서만 동작한다"));
+			return;
+		}
+
+		Nearest->TryTogglePush(Pawn);
+	}
+}
+
+static FAutoConsoleCommandWithWorld GCartTogglePushCmd(
+	TEXT("hh.Cart.TogglePush"),
+	TEXT("[임시] 가장 가까운 카트를 잡거나 놓는다. 상호작용 키가 붙기 전까지 쓰는 검증용 경로."),
+	FConsoleCommandWithWorldDelegate::CreateStatic(&ToggleNearestCart));
+#endif
+
 AHandCart::AHandCart()
 {
-	// 매 프레임 할 일이 아직 없다. 끌기가 들어오면 그때 다시 판단한다.
-	PrimaryActorTick.bCanEverTick = false;
+	// 끌고 있는 동안에만 돈다. 맵에 놓인 카트가 아무것도 안 하면서 틱하지 않게 한다.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -131,7 +203,87 @@ void AHandCart::BeginPlay()
 		{
 			ContainLoot(Cast<ALootBase>(Actor));
 		}
+
+		WarnOnMissingGripSockets();
 	}
+}
+
+void AHandCart::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// 등록을 빠뜨려도 컴파일 에러도 경고도 없고, 호스트에서는 멀쩡히 돌아서 발견이 늦는다.
+	DOREPLIFETIME(AHandCart, CurrentPusher);
+}
+
+void AHandCart::WarnOnMissingGripSockets() const
+{
+	const UStaticMesh* Mesh = CartMesh ? CartMesh->GetStaticMesh() : nullptr;
+	if (!Mesh)
+	{
+		return;   // 메시 자체가 없는 경우는 BeginPlay 가 이미 경고했다
+	}
+
+	const FString MeshName = Mesh->GetName();
+
+	// 1) 이름이 비었나
+	if (GripSocketLeft.IsNone() || GripSocketRight.IsNone())
+	{
+		UE_LOG(LogLoot, Warning,
+			TEXT("[Cart:%s] 그립 소켓 이름이 비어 있다 (L='%s' R='%s') — 잡아도 카트가 "
+				 "사람 몸에 박힌 채 따라온다"),
+			*GetName(), *GripSocketLeft.ToString(), *GripSocketRight.ToString());
+		return;
+	}
+
+	// 2) 둘이 같은 이름인가. 그러면 간격이 0 이 되어 좌우가 사라진다
+	if (GripSocketLeft == GripSocketRight)
+	{
+		UE_LOG(LogLoot, Warning,
+			TEXT("[Cart:%s] 좌우 그립 소켓이 같은 이름이다 ('%s')"),
+			*GetName(), *GripSocketLeft.ToString());
+		return;
+	}
+
+	// 3) 메시에 실제로 있나. 대소문자까지 정확해야 한다
+	for (const FName& SocketName : { GripSocketLeft, GripSocketRight })
+	{
+		if (!CartMesh->DoesSocketExist(SocketName))
+		{
+			UE_LOG(LogLoot, Warning,
+				TEXT("[Cart:%s] 메시 '%s' 에 소켓 '%s' 가 없다 — 이름은 대소문자까지 일치해야 한다"),
+				*GetName(), *MeshName, *SocketName.ToString());
+		}
+	}
+
+	// 간격은 검사하지 않는다.
+	//
+	// 중량형은 그립 간격이 곧 두 사람 사이의 거리 제약이라 0 이면 기능이 성립하지 않았지만,
+	// 카트는 한 사람이 두 손으로 잡는 것이라 간격이 아무것도 결정하지 않는다.
+	// 추종에 쓰는 것은 두 그립의 중점 하나뿐이다. (2026-08-21)
+}
+
+FTransform AHandCart::GetGripTransform(bool bLeft) const
+{
+	const FName SocketName = bLeft ? GripSocketLeft : GripSocketRight;
+
+	if (IsValid(CartMesh) && !SocketName.IsNone() && CartMesh->DoesSocketExist(SocketName))
+	{
+		return CartMesh->GetSocketTransform(SocketName);
+	}
+
+	// 소켓이 없으면 카트 원점. 설정 실수는 BeginPlay 경고가 알린다.
+	return GetActorTransform();
+}
+
+FVector AHandCart::GetStandLocation() const
+{
+	const FVector GripMid = (GetGripTransform(true).GetLocation() + GetGripTransform(false).GetLocation()) * 0.5f;
+
+	// 손잡이는 카트 뒤쪽에 있으므로, 사람은 그립 중점에서 카트 뒤(-Forward)로 더 물러선 자리에 선다.
+	// 카트의 '앞' 은 액터 정면이 아니라 메시 축 보정을 거친 방향이다.
+	const FRotator CartFacing(0.f, GetActorRotation().Yaw + MeshForwardYawOffset, 0.f);
+	return GripMid - CartFacing.Vector() * StandOffset;
 }
 
 void AHandCart::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -153,6 +305,177 @@ void AHandCart::EndPlay(const EEndPlayReason::Type EndPlayReason)
 bool AHandCart::IsContaining(const ALootBase* Loot) const
 {
 	return Loot && ContainedLoot.Contains(Loot);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 끌기
+// ──────────────────────────────────────────────────────────────
+
+void AHandCart::TryTogglePush(APawn* Pawn)
+{
+	// Server RPC 는 요청일 뿐이다. 판정은 서버가 한다.
+	if (!HasAuthority() || !IsValid(Pawn))
+	{
+		return;
+	}
+
+	// 잡고 있던 사람이 다시 누르면 놓는다.
+	if (CurrentPusher.Get() == Pawn)
+	{
+		StopPush();
+		return;
+	}
+
+	// 한 번에 한 명만 끈다.
+	//
+	// 둘이 동시에 잡으면 각자 다른 목표 지점을 요구해서 카트가 두 사람 사이에서 진동한다.
+	// 기획서의 "1인이 밀어서 운반" 과도 맞고, 무엇보다 카트의 값어치가 '인원을 푸는 것' 이라
+	// 두 명이 붙잡혀 있으면 살 이유가 없어진다.
+	if (IsValid(CurrentPusher))
+	{
+		UE_LOG(LogLoot, Verbose, TEXT("[Cart:%s] %s 의 잡기 거부 — 이미 %s 가 끌고 있다"),
+			*GetName(), *Pawn->GetName(), *CurrentPusher->GetName());
+		return;
+	}
+
+	CurrentPusher = Pawn;
+	OnRep_CurrentPusher();      // 서버에서 값을 직접 바꾸면 OnRep 이 안 불린다
+	SetActorTickEnabled(true);
+
+	UE_LOG(LogLoot, Verbose, TEXT("[Cart:%s] %s 가 끌기 시작"), *GetName(), *Pawn->GetName());
+}
+
+void AHandCart::StopPush()
+{
+	if (!HasAuthority() || !CurrentPusher)
+	{
+		return;
+	}
+
+	UE_LOG(LogLoot, Verbose, TEXT("[Cart:%s] %s 가 끌기 종료"),
+		*GetName(), *GetNameSafe(CurrentPusher));
+
+	CurrentPusher = nullptr;
+	OnRep_CurrentPusher();
+	SetActorTickEnabled(false);
+
+	// 손을 놓는 순간 남아 있던 추종 속도로 카트가 혼자 미끄러져 나가지 않게 한다.
+	// 각속도만 끊는다 — 선속도까지 0 으로 만들면 밀던 기세가 뚝 끊겨 어색하다.
+	if (IsValid(CartMesh) && CartMesh->IsSimulatingPhysics())
+	{
+		CartMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	}
+}
+
+void AHandCart::OnRep_CurrentPusher()
+{
+	// 지금은 알릴 곳이 없다. 손 붙이기·UI 연출이 붙을 자리다.
+	// 클라이언트에서는 틱을 켜지 않는다 — 추종은 서버만 계산하고 결과만 복제된다.
+}
+
+void AHandCart::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// 물리 추종은 서버 권위다. 클라이언트가 각자 계산하면 사람마다 카트가 다른 데 있게 된다.
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (!IsValid(CurrentPusher))
+	{
+		// 끌던 사람이 사라졌다(접속 종료·파괴). 카트가 유령을 쫓지 않게 여기서 끊는다.
+		StopPush();
+		return;
+	}
+
+	UpdateFollow(DeltaSeconds);
+}
+
+bool AHandCart::ComputeFollowTarget(FVector& OutLocation, FQuat& OutRotation) const
+{
+	if (!IsValid(CurrentPusher) || !IsValid(CartMesh))
+	{
+		return false;
+	}
+
+	// 사람이 보는 방향(요만)을 카트 정면으로 삼는다.
+	//
+	// 컨트롤 회전을 쓰는 것은 화면을 돌리면 카트가 따라 도는 감각(R.E.P.O) 때문이다.
+	// 폰 회전을 쓰면 캐릭터가 실제로 도는 것보다 화면이 먼저 돌아서 반응이 굼떠 보인다.
+	// 피치는 버린다 — 하늘을 보면 카트가 뜨면 안 된다.
+	FRotator ViewRotation = CurrentPusher->GetControlRotation();
+	if (ViewRotation.IsNearlyZero())
+	{
+		// 컨트롤러가 없는 폰(AI·테스트용)이면 폰 자신의 방향을 쓴다
+		ViewRotation = CurrentPusher->GetActorRotation();
+	}
+	// 메시의 정면이 로컬 +X 가 아니면 그만큼 되돌린다.
+	// 이 보정이 없으면 카트가 옆으로 서고, 아래의 그립 역산도 같이 틀어져 목표가 사람 몸 안으로 들어간다.
+	const FRotator YawOnly(0.f, ViewRotation.Yaw - MeshForwardYawOffset, 0.f);
+	OutRotation = YawOnly.Quaternion();
+
+	// 사람이 바라보는 방향은 보정 전 값이다. 카트를 어느 쪽에 둘지는 메시 축과 무관하다.
+	const FVector ViewForward = FRotator(0.f, ViewRotation.Yaw, 0.f).Vector();
+
+	// 그립 중점이 사람 앞 StandOffset 지점에 오도록 카트 원점을 역산한다.
+	//
+	// 그립은 카트 로컬 좌표에 고정돼 있으므로, 목표 회전으로 돌린 뒤 빼면
+	// "그 자세일 때 카트 원점이 어디여야 하는가" 가 나온다.
+	const FVector GripMidWorld = (GetGripTransform(true).GetLocation() + GetGripTransform(false).GetLocation()) * 0.5f;
+	const FVector GripMidLocal = GetActorTransform().InverseTransformPosition(GripMidWorld);
+
+	const FVector StandLocation = CurrentPusher->GetActorLocation();
+	const FVector DesiredGripMid = StandLocation + ViewForward * StandOffset;
+
+	OutLocation = DesiredGripMid - OutRotation.RotateVector(GripMidLocal);
+
+	// 높이는 물리에 맡긴다. 목표 Z 를 강제하면 카트가 떠오르거나 바닥을 파고든다.
+	OutLocation.Z = GetActorLocation().Z;
+
+	return true;
+}
+
+void AHandCart::UpdateFollow(float DeltaSeconds)
+{
+	if (!IsValid(CartMesh) || !CartMesh->IsSimulatingPhysics() || DeltaSeconds <= 0.f)
+	{
+		return;
+	}
+
+	// 너무 멀어지면 놓는다. 벽 뒤로 돌아가거나 떨어졌을 때 카트가 벽을 긁으며 따라오는 것을 막는다.
+	const float Distance = FVector::Dist2D(GetActorLocation(), CurrentPusher->GetActorLocation());
+	if (Distance > MaxPushDistance)
+	{
+		UE_LOG(LogLoot, Verbose, TEXT("[Cart:%s] %.0fcm 떨어져 끌기 해제"), *GetName(), Distance);
+		StopPush();
+		return;
+	}
+
+	FVector TargetLocation;
+	FQuat   TargetRotation;
+	if (!ComputeFollowTarget(TargetLocation, TargetRotation))
+	{
+		return;
+	}
+
+	// [위치] 목표까지의 오차를 속도로 바꿔 넣는다.
+	//
+	// 위치를 대입하지 않는 이유 — 순간이동시키면 카트가 벽을 뚫고 사람 몸에 박힌다.
+	// 속도로 밀면 물리 솔버가 벽에서 막아 주고, 그 막힘이 콜리전을 통해 미는 사람에게 그대로
+	// 전달된다. "좁은 통로 불가" 라는 카트의 유일한 단점이 여기서 저절로 나온다.
+	const FVector Error = TargetLocation - GetActorLocation();
+	FVector DesiredVelocity = Error * FollowStiffness;
+	DesiredVelocity = DesiredVelocity.GetClampedToMaxSize(MaxFollowSpeed);
+
+	// Z 는 건드리지 않는다. 중력과 바닥 접촉이 계속 살아 있어야 한다.
+	const FVector CurrentVelocity = CartMesh->GetPhysicsLinearVelocity();
+	CartMesh->SetPhysicsLinearVelocity(FVector(DesiredVelocity.X, DesiredVelocity.Y, CurrentVelocity.Z));
+
+	// [회전] 요 오차를 각속도로. X·Y 회전은 생성자에서 잠가 두었으므로 여기서도 0 이다.
+	const float YawError = FMath::FindDeltaAngleDegrees(GetActorRotation().Yaw, TargetRotation.Rotator().Yaw);
+	CartMesh->SetPhysicsAngularVelocityInDegrees(FVector(0.f, 0.f, YawError * TurnStiffness));
 }
 
 void AHandCart::ContainLoot(ALootBase* Loot)

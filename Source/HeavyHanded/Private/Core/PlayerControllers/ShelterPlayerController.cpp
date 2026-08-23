@@ -35,11 +35,23 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
+/**
+ * 내 PlayerState. **아직 안 왔으면 nullptr 이다** — 호출부가 반드시 검사할 것.
+ *
+ * [여기 있던 화면 디버그 출력을 지웠다]
+ *   `GetPlayerState<>()->GetName()` 을 검사 없이 불러서, 방에 막 참가한 클라이언트가
+ *   접속하자마자 터졌다 (EXCEPTION_ACCESS_VIOLATION, 0x18 = UObject 의 NamePrivate 오프셋).
+ *
+ *   PlayerState 는 PlayerController 보다 늦게 도착한다. 접속 직후 한동안 nullptr 인 것이
+ *   정상이고, 그 창을 밟는 것은 예외가 아니라 규칙이다 (문서 02 8장 — "폰은 있는데 ASC 가
+ *   nullptr" 과 같은 상황이다).
+ *
+ *   덧붙여 이 함수는 `BlueprintPure` 다. BP 의 pure 노드는 **연결된 곳마다 다시 실행되므로**
+ *   여기 부수효과(화면 출력)를 두면 프레임마다 여러 번 돈다 (문서 03 4장).
+ *   조회 함수는 조회만 한다 — 디버그가 필요하면 별도의 non-pure 함수로 뺄 것.
+ */
 AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 {
-	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, GetPlayerState<AShelterPlayerState>(), *GetPlayerState<AShelterPlayerState>()->GetName());
-	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
-
 	return GetPlayerState<AShelterPlayerState>();
 }
 

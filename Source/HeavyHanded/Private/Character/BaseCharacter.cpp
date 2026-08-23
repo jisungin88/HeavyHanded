@@ -48,25 +48,85 @@ void ABaseCharacter::BeginPlay()
 	// 서버의 원격 폰도 빙의 순서에 따라 이 시점에 비어 있을 수 있다.
 	// 예전에는 여기서 Error 를 찍어 접속할 때마다 에러가 쌓였다.
 
+	// 레벨에 배치한 캐릭터(Auto Possess)는 여기서 이미 빙의돼 있다 —
+	// APawn::PreInitializeComponents 가 BeginPlay 보다 먼저 Possess 하기 때문이다.
+	//
+	// 반대로 GameMode 가 스폰하는 폰은 아직 빙의 전이라 여기서는 아무 일도 일어나지 않고,
+	// 그때는 NotifyControllerChanged 가 받는다. 두 경로 모두 같은 함수 하나를 부른다.
+	SetupLocalPlayerInput();
+}
+
+void ABaseCharacter::NotifyControllerChanged()
+{
+	Super::NotifyControllerChanged();
+
+	// 빙의가 BeginPlay 뒤에 오는 경로(진입점 스폰)를 여기서 받는다.
+	// 빙의 해제 때도 불리지만, 그때는 컨트롤러가 없어 아래에서 조용히 되돌아간다
+	SetupLocalPlayerInput();
+}
+
+void ABaseCharacter::SetupLocalPlayerInput()
+{
 	// 클라이언트든 서버든 '로컬 플레이어'인 경우에만 입력 매핑을 추가한다.
-    if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
-    {
-        // 이 캐릭터를 조종하는 로컬 플레이어인지 확인 (AI나 다른 플레이어 소유일 때 오류 방지)
-        if (PlayerController->IsLocalController())
-        {
-            if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
-            {
-                if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
-                {
-                    // 에디터에서 UPROPERTY로 IMC를 할당해 둔 경우 (예: DefaultMappingContext)
-                    if (DefaultMappingContext)
-                    {
-                        Subsystem->AddMappingContext(DefaultMappingContext, 0);
-                    }
-                }
-            }
-        }
-    }
+	APlayerController* PlayerController = Cast<APlayerController>(GetController());
+	if (!PlayerController)
+	{
+		return;
+	}
+
+	// 이 캐릭터를 조종하는 로컬 플레이어인지 확인 (AI나 다른 플레이어 소유일 때 오류 방지)
+	if (!PlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer();
+	if (!LocalPlayer)
+	{
+		return;
+	}
+
+	// 게임플레이 입력 모드를 되돌린다. **매핑 컨텍스트보다 먼저 한다** —
+	// IMC 지정을 빠뜨린 캐릭터라도 마우스는 창에 붙어 있어야 원인을 찾을 수 있다.
+	//
+	// [왜 여기서 되돌려야 하나] 입력 모드는 PlayerController 가 아니라 UGameViewportClient 에
+	//   기록되고, 그 객체는 GameInstance 소유라 **레벨 이동을 건너 살아남는다.**
+	//   은신처의 PC_ShelterPlayerController 가 로비 UI 때문에 SetInputMode_GameAndUI 를 부르는데,
+	//   엔진 구현(FInputModeGameAndUI::ApplyInputMode)이 이렇게 한다 —
+	//       SlateOperations.ReleaseMouseCapture();
+	//       GameViewportClient.SetMouseCaptureMode(EMouseCaptureMode::CaptureDuringMouseDown);
+	//   그리고 작업 레벨의 PlayerController 는 엔진 기본 APlayerController 라 아무도 되돌리지 않는다.
+	//   그 결과 저택에서 마우스가 창에 안 붙고 커서가 화면 밖으로 빠진다.
+	//   (증상이 "회전이 제한적이다", "alt-tab 하고 오면 정상이다" 로 나타났던 것이 이것이다)
+	//
+	// 은신처는 ABaseCharacter 를 스폰하지 않으므로(GM_ShelterGameMode 에 DefaultPawnClass 가 없어
+	// ADefaultPawn 을 쓴다) 이 호출이 로비 UI 를 방해하지 않는다.
+	PlayerController->SetInputMode(FInputModeGameOnly());
+	PlayerController->SetShowMouseCursor(false);
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer);
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	// 에디터에서 UPROPERTY로 IMC를 할당해 둔 경우 (예: DefaultMappingContext)
+	//
+	// 비어 있으면 이 캐릭터는 아무 입력도 받지 못한다. 그 상태의 증상이 "마우스도 키도
+	// 안 먹는다" 뿐이라 원인을 짐작할 수 없으므로, 조용히 넘어가지 않고 한 번 알린다
+	if (!DefaultMappingContext)
+	{
+		UE_LOG(LogCarry, Warning,
+			TEXT("%s 에 DefaultMappingContext 가 비어 있어 입력 매핑을 붙이지 못했습니다. "
+				 "캐릭터 블루프린트에서 IMC 를 지정하세요."),
+			*GetName());
+		return;
+	}
+
+	// 두 경로(BeginPlay · NotifyControllerChanged)에서 모두 불리므로 중복 호출이 된다.
+	// AddMappingContext 는 같은 컨텍스트를 두 번 넣지 않으므로 그대로 두어도 안전하다
+	Subsystem->AddMappingContext(DefaultMappingContext, 0);
 }
 
 void ABaseCharacter::PossessedBy(AController* NewController)

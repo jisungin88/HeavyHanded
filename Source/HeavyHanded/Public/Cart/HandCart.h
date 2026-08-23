@@ -78,9 +78,60 @@ public:
 	 */
 	void ContainLoot(ALootBase* Loot);
 
+	// ── 끌기 ─────────────────────────────────────────────────────────────
+
+	/**
+	 * 상호작용 키로 카트를 잡거나 놓는다. (서버 전용 — 플레이어 파트가 부르는 유일한 진입점)
+	 *
+	 * [왜 이 모양인가]
+	 *   UGAB_Interact 는 시선에 맞은 액터를 if-else 사슬로 분기하는데, 그 파일은 플레이어 파트다.
+	 *   AVanZone 이 TryToggleBoarding 하나로 처리되는 것과 같은 모양으로 맞춰서,
+	 *   저쪽에 들어갈 코드가 두 줄로 끝나게 한다.
+	 *
+	 *       else if (AHandCart* Cart = Cast<AHandCart>(HitActor))
+	 *       {
+	 *           Cart->TryTogglePush(Character);
+	 *       }
+	 *
+	 *   잡을 수 있는지, 이미 누가 잡고 있는지, 어떻게 따라가는지는 전부 이 클래스 안에 있다.
+	 *   Server RPC 는 요청일 뿐이므로 판정은 여기서 한다 — 클라이언트를 신뢰하지 않는다.
+	 */
+	void TryTogglePush(APawn* Pawn);
+
+	/**
+	 * 끌기를 강제로 푼다. (서버 전용)
+	 *
+	 * 플레이어가 다운되거나 체포되는 등, 카트가 스스로 알 수 없는 이유로 손을 놓아야 할 때
+	 * 플레이어 파트가 부른다. 카트는 거리와 유효성까지만 스스로 본다 —
+	 * 폰의 상태 태그를 카트가 들여다보기 시작하면 경계가 무너진다.
+	 */
+	void StopPush();
+
+	/** 지금 이 카트를 끌고 있는 사람. 없으면 nullptr */
+	UFUNCTION(BlueprintPure, Category = "Cart|Push")
+	APawn* GetPusher() const { return CurrentPusher; }
+
+	UFUNCTION(BlueprintPure, Category = "Cart|Push")
+	bool IsBeingPushed() const { return CurrentPusher != nullptr; }
+
+	/**
+	 * 손잡이 그립의 월드 트랜스폼. bLeft 가 참이면 왼손 쪽.
+	 *
+	 * 손 IK 나 붙이기 연출에 쓰라고 열어 둔다. 소켓이 없으면 카트 원점을 돌려주므로
+	 * 반환값만 보고는 설정 실수를 알 수 없다 — 그건 BeginPlay 경고가 잡는다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Cart|Push")
+	FTransform GetGripTransform(bool bLeft) const;
+
+	/** 카트를 끌 때 사람이 서게 되는 지점. 그립 중점에서 손잡이 바깥으로 물러난 자리다 */
+	UFUNCTION(BlueprintPure, Category = "Cart|Push")
+	FVector GetStandLocation() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** 물리 바디이자 루트 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cart")
@@ -123,6 +174,68 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Noise", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float NoiseVerticalImpactCutoff = 0.7f;
+
+	// ── 끌기 설정 ────────────────────────────────────────────────────────
+
+	/** 왼손 그립 소켓 이름. CartMesh 의 스태틱 메시에 있어야 한다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push")
+	FName GripSocketLeft = TEXT("Push_Grip_L");
+
+	/** 오른손 그립 소켓 이름 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push")
+	FName GripSocketRight = TEXT("Push_Grip_R");
+
+	/** 그립 중점에서 사람이 서는 자리까지의 거리(cm). 팔 길이쯤 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "0.0", Units = "cm"))
+	float StandOffset = 75.f;
+
+	/**
+	 * 메시의 정면이 로컬 +X 에서 몇 도 돌아가 있는가.
+	 *
+	 * 카트를 사람 시선 방향으로 놓을 때 이 값만큼 되돌린다. 임포트된 메시의 축이 무엇을
+	 * 정면으로 삼았는지는 만든 사람마다 달라서, 코드가 알 방법이 없다.
+	 *
+	 * 축이 틀어지면 카트가 옆으로 보이는 데서 그치지 않는다. 그립 위치를 역산하는 계산도
+	 * 같이 틀어져서 목표 지점이 사람 몸 안쪽으로 잡히고, 카트는 Pawn 을 Block 하므로
+	 * 물리 엔진이 겹침을 풀려고 카트를 위로 밀어낸다 — 실제로 그 증상이 나왔다.
+	 *
+	 * 0 / 90 / -90 / 180 중에서 화면을 보며 맞는 값을 고르면 된다. (2026-08-21)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "-180.0", ClampMax = "180.0"))
+	float MeshForwardYawOffset = 0.f;
+
+	/**
+	 * 목표 지점으로 얼마나 세게 당길지. 클수록 사람 움직임에 딱 붙는다.
+	 *
+	 * 너무 키우면 벽에 낀 상태에서 카트가 부들부들 떨고, 너무 낮추면 사람만 앞서 나가고
+	 * 카트가 뒤늦게 따라온다. 12 안팎에서 시작한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "0.1"))
+	float FollowStiffness = 12.f;
+
+	/**
+	 * 따라가는 속도 상한(cm/s).
+	 *
+	 * [순간이동을 하지 않는 이유] 위치를 대입하면 카트가 벽을 뚫고 사람 몸에 박힌다.
+	 *   속도로 밀면 물리 솔버가 벽에서 막아 주고, 그 막힘이 그대로 미는 사람에게 전달된다 —
+	 *   기획서상 카트의 유일한 단점인 "좁은 통로 불가" 가 여기서 나온다.
+	 *   상한을 두는 것은 한 프레임에 너무 멀리 뛰어 벽을 통과하는 것을 막기 위해서다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "1.0"))
+	float MaxFollowSpeed = 600.f;
+
+	/** 카트가 사람 시선 방향으로 도는 속도 계수. 클수록 빠르게 정렬된다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "0.1"))
+	float TurnStiffness = 8.f;
+
+	/**
+	 * 이 거리(cm)보다 멀어지면 손을 놓는다.
+	 *
+	 * 벽 뒤로 돌아가거나 낙사해서 카트와 떨어졌을 때 카트가 벽을 긁으며 따라오는 것을 막는다.
+	 * 잡은 채로 뒷걸음질하는 정상 조작까지 끊지 않도록 넉넉히 잡는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Push", meta = (ClampMin = "0.0", Units = "cm"))
+	float MaxPushDistance = 300.f;
 
 	/** 카트 자체의 질량(kg). 실린 물건 무게는 물리 엔진이 따로 더한다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cart|Physics", meta = (ClampMin = "1.0"))
@@ -167,6 +280,34 @@ private:
 
 	/** 대상별 마지막 발행 시각. 짧은 시간 내 재발행을 막는다 */
 	TMap<TWeakObjectPtr<const AActor>, float> RecentNoiseTimes;
+
+	/**
+	 * 끌고 있는 사람. 복제한다 — 클라이언트도 "지금 누가 잡고 있나" 를 알아야
+	 * 손 붙이기 연출을 각자 돌릴 수 있다. 판정은 서버만 한다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_CurrentPusher, VisibleInstanceOnly, Category = "Cart|Push")
+	TObjectPtr<APawn> CurrentPusher;
+
+	UFUNCTION()
+	void OnRep_CurrentPusher();
+
+	/** 매 프레임 카트를 사람 앞으로 당긴다. 서버에서만 돈다 */
+	void UpdateFollow(float DeltaSeconds);
+
+	/** 사람의 위치·시선으로부터 카트가 있어야 할 자리를 구한다. 못 구하면 false */
+	bool ComputeFollowTarget(FVector& OutLocation, FQuat& OutRotation) const;
+
+	/**
+	 * 그립 소켓이 없으면 경고한다. (서버 전용)
+	 *
+	 * 이름이 틀리면 그립 위치가 조용히 카트 원점으로 떨어진다. 그러면 카트가 사람 몸에
+	 * 겹치려 들면서 서로 밀어내는 엉뚱한 증상으로만 드러나 원인까지 가는 데 한참 걸린다.
+	 *
+	 * 중량형과 달리 간격은 보지 않는다 — 거기서는 그립 간격이 곧 두 사람 사이의 거리 제약이라
+	 * 0 이면 기능이 성립하지 않았지만, 카트는 한 사람이 두 손으로 잡는 것이라
+	 * 간격이 아무것도 결정하지 않는다.
+	 */
+	void WarnOnMissingGripSockets() const;
 
 	/**
 	 * 실려 있는 노획물. 서버에서만 유효하다.
