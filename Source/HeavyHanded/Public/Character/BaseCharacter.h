@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "AbilitySystemInterface.h"
 #include "InputActionValue.h"
+#include "GameplayTagContainer.h"   // FGameplayTag — OnSprintTagChanged 시그니처에 값으로 쓴다
 #include "BaseCharacter.generated.h"
 
 USTRUCT(BlueprintType)
@@ -38,6 +39,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UNoiseEmitterComponent;
 
 UCLASS()
 class HEAVYHANDED_API ABaseCharacter : public ACharacter, public IAbilitySystemInterface
@@ -86,6 +88,11 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+	// 소음 발행 — 노획물 충돌 소음과 같은 컴포넌트다. 캐릭터는 물리 충돌 경로(HandleHit)
+	// 대신 ReportTaggedNoise 를 직접 불러 쓴다 (걷기/뛰기는 물리 충돌이 아니라서).
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Noise")
+	TObjectPtr<UNoiseEmitterComponent> NoiseEmitter;
 
 	// --- Enhanced Input Actions ---
 	// 에디터에서 블루프린트로 생성한 Input Action 에셋을 할당할 수 있습니다.
@@ -195,6 +202,21 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
 	TSubclassOf<class UGameplayEffect> CrouchGameplayEffectClass;
+
+	// State.Sprinting 태그가 붙고 떨어질 때 호출된다 (ASC->RegisterGameplayTagEvent 구독).
+	// SprintGameplayEffectClass 가 이 태그를 부여하도록 만들어져 있어야 동작한다.
+	void OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount);
+
+	// SprintNoiseTimerHandle 이 반복 호출하는 함수. Noise.Player.Run 을 발행한다.
+	void EmitSprintNoise();
+
+	// Sprint 중 소음을 반복 발행하는 타이머. State.Sprinting 이 붙어 있는 동안만 돈다.
+	FTimerHandle SprintNoiseTimerHandle;
+
+	// Sprint 소음 발행 간격(초). 발소리 박자에 맞춰 디자이너가 튜닝할 수 있게 노출한다.
+	// 나중에 발소리 애님 노티파이로 옮기면 이 타이머 자체가 필요 없어진다.
+	UPROPERTY(EditDefaultsOnly, Category = "Noise", meta = (ClampMin = "0.05", Units = "s"))
+	float SprintNoiseInterval = 0.4f;
 
 public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);

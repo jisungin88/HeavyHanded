@@ -18,6 +18,7 @@
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Loot/LootBase.h"               // ComputeHeavyCarryTransform, GetSoloDragPitchDegrees
 #include "Loot/LootHeavyComponent.h"     // GetGripSocketA/B
+#include "Noise/NoiseEmitterComponent.h" // Sprint 소음 발행
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -36,6 +37,8 @@ ABaseCharacter::ABaseCharacter()
 
     // 카메라 위치를 캐릭터의 눈높이(약 Z축 64cm 위)로 설정
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
+
+    NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
 
     // --- 캐릭터 이동 및 회전 방향 설정 ---
     bUseControllerRotationYaw = true; // 1인칭은 시선과 몸통 방향을 일치시키기 위해 true로 설정
@@ -321,6 +324,11 @@ void ABaseCharacter::BindAttributeDelegates()
         // MovementSpeed 속성 변화를 감지하는 델리게이트 구독
         ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetMovementSpeedAttribute()).AddUObject(this, &ABaseCharacter::OnMovementSpeedChanged);
     }
+
+    // State.Sprinting 태그 추가/제거를 구독한다. SprintGameplayEffectClass 가 이 태그를
+    // 부여하도록 만들어져 있어야 한다 — 태그만 있고 GE 가 안 붙이면 이 델리게이트는 영원히 안 불린다.
+    ASC->RegisterGameplayTagEvent(HHTags::State_Sprinting, EGameplayTagEventType::NewOrRemoved)
+        .AddUObject(this, &ABaseCharacter::OnSprintTagChanged);
 }
 
 // 속성이 변경될 때 자동 호출되어 실제 무브먼트 속도에 적용
@@ -330,6 +338,45 @@ void ABaseCharacter::OnMovementSpeedChanged(const FOnAttributeChangeData& Data)
     {
         // Data.NewValue는 변경된 MovementSpeed의 새로운 값입니다.
         MoveComp->MaxWalkSpeed = Data.NewValue;
+    }
+}
+
+void ABaseCharacter::OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+    // ReportTaggedNoise 자체도 서버 전용이라, 타이머를 클라이언트에서 돌릴 이유가 없다.
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (NewCount > 0)
+    {
+        // 시작하자마자 한 번 내고, 이후 SprintNoiseInterval 마다 반복한다.
+        GetWorld()->GetTimerManager().SetTimer(
+            SprintNoiseTimerHandle, this, &ABaseCharacter::EmitSprintNoise,
+            SprintNoiseInterval, /*bLoop*/ true, /*FirstDelay*/ 0.f);
+    }
+    else
+    {
+        GetWorld()->GetTimerManager().ClearTimer(SprintNoiseTimerHandle);
+    }
+}
+
+void ABaseCharacter::EmitSprintNoise()
+{
+    if (!NoiseEmitter)
+    {
+        return;
+    }
+
+    // Noise.* 는 지성인 소유라 네이티브 태그로 올리지 않고 문자열로 조회한다
+    // (Config/Tags/Noise.ini 에 이미 정의돼 있다).
+    static const FGameplayTag RunNoiseTag =
+        FGameplayTag::RequestGameplayTag(FName("Noise.Player.Run"), /*ErrorIfNotFound*/ false);
+
+    if (RunNoiseTag.IsValid())
+    {
+        NoiseEmitter->ReportTaggedNoise(RunNoiseTag);
     }
 }
 

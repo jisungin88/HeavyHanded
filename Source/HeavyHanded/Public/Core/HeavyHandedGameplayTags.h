@@ -107,6 +107,13 @@ namespace HHTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Downed);
 
 	/**
+	 * 뛰기(Shift 홀드) 중. SprintGameplayEffectClass 가 부여/해제한다.
+	 * ABaseCharacter::OnSprintTagChanged 가 이 태그의 추가/제거를 구독해 Noise.Player.Run
+	 * 반복 발행 타이머를 켜고 끈다 (Config/Tags/State.ini 의 원래 설계 의도 그대로).
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Sprinting);
+
+	/**
 	 * 밴 승차 완료.
 	 *
 	 * [진리원이 아니다] 탈출 판정의 근거는 AHeistGameState 의 승차 명단이고, 이 태그는
