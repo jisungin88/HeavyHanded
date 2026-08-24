@@ -5,6 +5,7 @@
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
+#include "Core/RunProgressSubsystem.h"
 
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
@@ -48,6 +49,9 @@ AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 
 	return PS;
 }
+
+
+
 
 
 //void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
@@ -213,6 +217,69 @@ void AShelterPlayerController::ServerClearJob_Implementation()
 	GameState->ClearJob(MyPlayerState);
 }
 
+void AShelterPlayerController::serverConfirmedJob_Implementation()
+{
+
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	// config/Role.ini 참고할 것
+	
+	//	"Role.Brute"
+	//	"Role.Ghost"
+	//	"Role.Oracle"
+	//	"Role.Mimic"
+
+
+	FUniqueNetIdRepl PlayerId = GetMyPlayerState()->GetUniqueId();
+
+	FGameplayTag RoleTag;
+	switch (GetMyPlayerState()->SelectedJob)
+	{
+	case EJobType::Brute:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Brute"));
+		break;
+
+	case EJobType::Ghost:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Ghost"));
+		break;
+
+	case EJobType::Oracle:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Oracle"));
+		break;
+
+	case EJobType::Mimic:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Mimic"));
+		break;
+
+	default:
+		break;
+	}
+		
+
+	if (Subsystem)
+	{
+		Subsystem->TrySelectRole(PlayerId, RoleTag);
+	}
+
+}
 
 
 
+void AShelterPlayerController::serverIngameTravel_Implementation()
+{
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	// config/Phase.ini 참고할 것
+	
+	// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
+	FGameplayTag NewSiteTag = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
+
+	// GameplayTagList=(Tag="Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
+	// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
+	// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
+
+	if (Subsystem)
+	{
+		Subsystem->TryDepartToSite(NewSiteTag);
+	}
+}

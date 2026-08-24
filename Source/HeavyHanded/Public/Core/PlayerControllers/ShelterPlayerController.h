@@ -41,6 +41,12 @@ public:
 	AShelterPlayerState* GetMyPlayerState() const;
 
 
+
+
+
+	// ----------------------------------------------------------------
+
+
 	/**
 	 * 채팅 한 줄을 서버로 보낸다. 채팅 UI(WBP_ChatBox)가 호출한다.
 	 *
@@ -78,9 +84,19 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerSelectJob(EJobType NewJob);
 
-	// 현재 직업 선택 해제
+	// 현재 직업 선택 해제 - 역할 못바꿔서 지워도 될듯
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerClearJob();
+
+	// 역할 확정 버튼 누르고 다음 화면 넘어갈 때
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void serverConfirmedJob();
+
+	// -------------------------------------------------------
+
+		// 인게임 이동
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void serverIngameTravel();
 
 
 
