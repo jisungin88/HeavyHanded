@@ -17,6 +17,8 @@
 #include "Core/HeistLog.h"
 #include "Core/HeistSettings.h"
 #include "Core/HeistStartGate.h"
+#include "Core/HeistTravel.h"
+#include "Core/PlayerControllers/HeistPlayerController.h"
 #include "Core/RunProgressSubsystem.h"
 #include "Core/VanZone.h"
 #include "Loot/LootBase.h"          // hh.Result.Show 가 TSubclassOf<ALootBase> 를 이름으로 푼다
@@ -39,6 +41,23 @@ namespace
 AHeistGameMode::AHeistGameMode()
 {
 	GameStateClass = AHeistGameState::StaticClass();
+
+	// 작업 레벨의 컨트롤러를 여기서 못 박는다. BP 가 아니라 C++ 인 이유는 GameStateClass 와
+	// 짝이기 때문이다 — 한쪽만 BP 에 있으면 장소 BP(GM_MansionGameMode 등)를 새로 만들 때
+	// 한쪽만 지정하고도 그럴듯하게 돈다
+	PlayerControllerClass = AHeistPlayerController::StaticClass();
+
+	// 관전자에게 자유 비행 폰을 주지 않는다.
+	//
+	// [왜 nullptr 인가] 엔진 기본 ASpectatorPawn 은 벽을 통과해 날아다닌다. 체포된 사람이
+	//   그것으로 저택을 훑고 경비 · 트랩 · 대형 금고 위치를 음성으로 알려 주면 잠입 게임이
+	//   그 자리에서 무너진다 — 오라클의 '전 구역 스캔' 을 공짜로, 무제한으로 쓰는 셈이다.
+	//   폰이 없으면 카메라는 ViewTarget 밖에 못 보고, 그 대상은 AHeistPlayerController 가
+	//   살아 있는 팀원으로만 고른다.
+	//
+	// AGameStateBase::SpectatorClass 로 복제되므로 클라이언트도 스폰하지 않는다
+	// (APlayerController::SpawnSpectatorPawn 이 GameState 쪽 값을 읽는다).
+	SpectatorClass = nullptr;
 
 	// 페이즈는 접속 대기가 끝난 뒤에 시작한다. 엔진 기본 매치 흐름과 겹치지 않게
 	// bDelayedStart 는 건드리지 않는다 — 접속 대기는 우리 쪽 타이머로만 관리한다
@@ -365,6 +384,44 @@ void AHeistGameMode::HandleMatchHasStarted()
 	TickStartWait();   // 혼자 시작하는 경우 첫 주기를 기다릴 이유가 없다
 }
 
+FString AHeistGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
+	const FString& Options, const FString& Portal)
+{
+	const FString ErrorMessage = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+	if (!ErrorMessage.IsEmpty())
+	{
+		return ErrorMessage;
+	}
+
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run || !Run->IsArrested(UniqueId))
+	{
+		return ErrorMessage;
+	}
+
+	APlayerState* PS = NewPlayerController ? NewPlayerController->PlayerState : nullptr;
+	if (!PS)
+	{
+		// Super 가 PlayerState 를 만들지 못했다면 접속 자체가 성립하지 않은 것이다.
+		// 조용히 넘기면 체포자가 그대로 플레이하게 되므로 남긴다
+		UE_LOG(LogHeist, Warning,
+			TEXT("체포자의 PlayerState 가 없어 관전으로 넘기지 못했습니다. 그대로 플레이합니다."));
+		return ErrorMessage;
+	}
+
+	// 이 한 줄이 관전의 전부다. 폰 스폰은 AGameModeBase::HandleStartingNewPlayer 가
+	// MustSpectate() 를 보고 알아서 건너뛰고, 인원 집계도 AGameMode::PostLogin 이
+	// NumSpectators 로 돌린다 — 우리가 따로 막을 곳이 없다.
+	//
+	// 카메라를 어디에 둘지는 여기서 정하지 않는다. 시점은 순수 표현이고 로컬에서만
+	// 의미가 있어서 AHeistPlayerController 가 자기 화면에 대해 고른다.
+	PS->SetIsOnlyASpectator(true);
+
+	UE_LOG(LogHeist, Log, TEXT("체포자 %s — 이 판은 관전한다."), *PS->GetPlayerName());
+
+	return ErrorMessage;
+}
+
 void AHeistGameMode::PostLogin(APlayerController* NewPlayer)
 {
 	Super::PostLogin(NewPlayer);
@@ -417,7 +474,16 @@ FHeistStartConditions AHeistGameMode::MakeStartConditions()
 	const float Now = World ? World->GetTimeSeconds() : 0.f;
 
 	FHeistStartConditions Conditions;
-	Conditions.NumPlayers = GetNumPlayers();
+	// 관전자를 더한다. AGameMode::GetNumPlayers() 는 NumPlayers + NumTravellingPlayers 인데,
+	// AGameMode::PostLogin 은 MustSpectate 인 접속을 NumSpectators 로만 세고 그 둘 중 어느
+	// 쪽에도 넣지 않는다. 그래서 체포자가 한 명이라도 있으면 인원이 영영 예정치에 못 미쳐
+	// **매 판 상한(기본 30초)을 다 기다린 뒤 TimedOut 경고와 함께 시작한다.**
+	//
+	// 관전자도 기다릴 대상이다 — 레벨을 로딩하고 접속하는 것은 똑같고, 결과 화면을 같이 본다.
+	// 대신 관전자의 로딩 완료 여부는 구분하지 않는다 (엔진이 NumTravellingPlayers 에 넣지
+	// 않으므로 알 방법이 없다). 관전자가 준비 시간 일부를 놓치는 것은 플레이어가 놓치는 것과
+	// 무게가 다르므로 그 부정확은 받아들인다.
+	Conditions.NumPlayers = GetNumPlayers() + GetNumSpectators();
 	Conditions.NumTravellingPlayers = NumTravellingPlayers;
 	Conditions.ExpectedPlayers = ExpectedPlayers;
 	Conditions.SecondsSinceLastLogin = Now - LastLoginTime;
@@ -563,6 +629,7 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 
 		PayoutTeamGold();
 		CarryOverArrests();
+		ReleaseServedSpectators();
 		RecordSiteProgress();
 	}
 }
@@ -803,6 +870,37 @@ void AHeistGameMode::CarryOverArrests()
 	Run->RecordArrested(ArrestedIds);
 }
 
+void AHeistGameMode::ReleaseServedSpectators()
+{
+	const AHeistGameState* GS = GetGameState<AHeistGameState>();
+	if (!GS)
+	{
+		return;
+	}
+
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run || Run->GetArrestedNum() == 0)
+	{
+		return;
+	}
+
+	// 이번 판을 관전으로 보낸 사람들. IsCountedPlayer 가 관전자를 걸러내므로 이들은
+	// 적재 · 승차 · 체포 어디에도 나타나지 않았다 — PlayerArray 를 직접 훑는 수밖에 없다
+	TArray<FUniqueNetIdRepl> ServedIds;
+
+	for (const APlayerState* Player : GS->PlayerArray)
+	{
+		if (IsValid(Player) && Player->IsOnlyASpectator())
+		{
+			ServedIds.Add(Player->GetUniqueId());
+		}
+	}
+
+	// 접속을 끊고 나간 관전자는 여기 잡히지 않아 체포가 그대로 남는다. 그게 맞다 —
+	// 형기는 판을 끝까지 지켜본 대가이고, 나갔다 들어온 것으로 면제되면 안 된다
+	Run->ReleaseArrested(ServedIds);
+}
+
 void AHeistGameMode::HandlePhaseElapsed()
 {
 	// 결과 화면의 만료는 다음 페이즈로 가는 것이 아니라 매치의 끝이다.
@@ -850,11 +948,48 @@ void AHeistGameMode::FinishMatch_Implementation()
 	bFinished = true;
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 
-	// 여기서 레벨을 옮기지 않는다. ServerTravel 은 세션 파트 소관이고 어디로 돌아갈지도
-	// 그쪽 흐름이 정한다 — BP_HeistGameMode 에서 이 함수를 재정의해 붙이면 된다.
-	UE_LOG(LogHeist, Warning,
-		TEXT("매치 종료 — 돌아갈 레벨이 지정되지 않아 결과 화면에 머뭅니다. "
-			 "BP_HeistGameMode 에서 FinishMatch 를 재정의해 ServerTravel 을 붙이세요."));
+	// 은신처로 돌려보낸다. 이걸 안 하면 한 판이 끝나도 결과 화면에서 영영 나오지 못한다 —
+	// 사이클이 닫히지 않으므로 상점 · 구출 · 다음 목표 선택이 전부 도달 불가능해진다.
+	//
+	// [BP 재정의 자리는 그대로다] BlueprintNativeEvent 라서 BP_HeistGameMode 가 이 함수를
+	//   재정의하면 여기는 실행되지 않는다. 엔딩 크레딧 같은 분기가 정해지면 그쪽에서 가른다.
+	const FSoftObjectPath HideoutPath = UHeistSettings::Get()->GetHideoutLevel();
+
+	// 지정돼 있지 않으면 떠나지 않는다. TryDepartToSite 와 같은 판단이다 —
+	// "모르겠으면 기본 맵" 으로 폴백하면 전원이 엉뚱한 곳으로 끌려가고 되돌릴 방법이 없다
+	if (HideoutPath.IsNull())
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("매치 종료 — 은신처 레벨이 지정되지 않아 결과 화면에 머뭅니다. "
+				 "Project Settings → Game → Heist → Hideout Level 을 지정하세요."));
+		return;
+	}
+
+	// 인원 수를 0 으로 넘겨 ?ExpectedPlayers 를 붙이지 않는다. 접속 대기는 작업 레벨에만
+	// 있고(AHeistGameMode), 은신처는 기다릴 것이 없어 그 옵션을 읽는 쪽이 없다.
+	// URL 조립을 TryDepartToSite 와 같은 함수에 맡기는 것은 패키지 이름 추출이 한 곳이어야
+	// 하기 때문이다 — 소프트 경로를 그대로 넘기면 맵을 못 찾는데 그 실패는 조용하다
+	const FString TravelURL = HeistTravel::BuildTravelURL(HideoutPath, 0);
+	if (TravelURL.IsEmpty())
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("매치 종료 — 은신처 경로 '%s' 에서 패키지 이름을 얻지 못해 이동하지 못했습니다."),
+			*HideoutPath.ToString());
+		return;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("매치 종료 — 은신처로 돌아갑니다 → %s"), *TravelURL);
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// 비-심리스 travel 이다. 이 줄 뒤로 같은 월드가 이어지지 않으므로 결과 확정
+	// (체포 · 등급 · 정산 · 장소 통과)은 전부 Phase.Result 진입에서 이미 끝나 있어야 한다.
+	// 레벨을 건너 살아남는 것은 URunProgressSubsystem 뿐이다
+	World->ServerTravel(TravelURL);
 }
 
 void AHeistGameMode::AdvancePhase(EHeistPhaseReason Reason)
