@@ -63,7 +63,7 @@ AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 	}
 
 	return PS;
-	return GetPlayerState<AShelterPlayerState>();
+	//return GetPlayerState<AShelterPlayerState>();
 }
 
 
