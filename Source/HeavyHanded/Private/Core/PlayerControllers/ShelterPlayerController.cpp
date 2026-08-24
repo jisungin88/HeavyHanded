@@ -37,6 +37,18 @@ void AShelterPlayerController::BeginPlay()
 		*RoomName
 	);
 
+
+
+	bShowMouseCursor = true;
+
+	FInputModeGameAndUI InputMode;
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+	SetInputMode(InputMode);
+
+
+
 }
 
 /**
@@ -399,7 +411,25 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	}
 
 
+	// 마우스 커서 강제 표시
+	bShowMouseCursor = true;
 
+	FInputModeGameAndUI InputMode;
+	InputMode.SetWidgetToFocus(nullptr);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+
+	SetInputMode(InputMode);
+
+	// 한 번 더 강제 설정
+	int32 SizeX = 0;
+	int32 SizeY = 0;
+
+	GetViewportSize(SizeX, SizeY);
+
+	SetMouseLocation(SizeX / 2, SizeY / 2);
+
+	bShowMouseCursor = true;
 
 
 }
