@@ -12,6 +12,7 @@
 #include "AbilitySystemInterface.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Interfaces/Carryable.h"        // GetPrimaryCarrier 로 "이미 들려 있는가" 를 판정한다
+#include "Interfaces/Interactable.h"        // GetPrimaryCarrier 로 "이미 들려 있는가" 를 판정한다
 
 // 상호작용 진단용. 집기 실패는 예외 없이 조용히 넘어가므로 이유를 남긴다.
 DEFINE_LOG_CATEGORY_STATIC(LogInteract, Log, All);
@@ -394,24 +395,29 @@ void UGAB_Interact::PerformInteraction()
                 UE_LOG(LogInteract, Log, TEXT("집기 성공: %s (Heavy=%s)"), *HitActor->GetName(), bHeavy ? TEXT("O") : TEXT("X"));
             }
         }
-        // 2. 밴 — 승차 / 하차 (담당: 지성인)
-        //
-        // TODO(구조): 여기서 코어 루프 클래스를 직접 캐스트하는 것은 임시다.
-        //   상호작용 대상이 늘어날 때마다(문·좌대·금고·협력 장치) 이 사슬이 계속 길어지고,
-        //   그때마다 남의 파트가 이 파일을 고쳐야 한다. 대상 쪽이 구현하는 인터페이스
-        //   (IInteractable::OnInteract)로 뒤집어야 하는데, 그건 담당 영역을 여럿 건너는
-        //   결정이라 전영배와 합의한 뒤에 한다.
-        //
-        //   그때까지 밴 쪽 조건과 처리는 전부 AVanZone 안에 있다 — 여기는 넘겨주기만 한다.
-        else if (AVanZone* Van = Cast<AVanZone>(HitActor))
-        {
-            Van->TryToggleBoarding(Character);
-        }
-        // 3. "Door" 태그가 붙어있는 경우 (아직 GameplayTag 대응 없음 — 위 TODO 참조)
-        else if (HitActor->ActorHasTag(LegacyDoorActorTagName))
-        {
-            UE_LOG(LogInteract, Log, TEXT("문 상호작용: %s"), *HitActor->GetName());
-        }
+		// 2. 밴 — 승차 / 하차 (담당: 지성인)
+		// IInteractable 전환 중. AVanZone 이 IInteractable 을 구현하면 이 주석을 지우고
+		// 위쪽 IInteractable 분기가 자연히 처리한다. 그 전까지만 남겨 둔다.
+		//else if (AVanZone* Van = Cast<AVanZone>(HitActor))
+		//{
+		//    Van->TryToggleBoarding(Character);
+		//}
+		// 3. "Door" 태그가 붙어있는 경우 — 마찬가지로 IInteractable 전환 대상
+		//else if (HitActor->ActorHasTag(LegacyDoorActorTagName))
+		//{
+		//    UE_LOG(LogInteract, Log, TEXT("문 상호작용: %s"), *HitActor->GetName());
+		//}
+
+		// 2. IInteractable 을 구현한 대상 — 문·상점·상자·밴 등 '집지 않는' 즉발성 상호작용.
+		//    실제 동작은 전부 구현체(담당 팀원) 책임이고, GAB_Interact 는 대상 종류를 몰라도 된다.
+		//    ImplementsInterface + Execute_ 조합을 써야 블루프린트로만 오버라이드한
+		//    구현도 정상 호출된다 — Cast<IInteractable> 로 직접 부르면 C++ 기본 구현만 실행되고
+		//    블루프린트 쪽 오버라이드는 조용히 무시된다.
+		else if (HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		{
+			IInteractable::Execute_OnInteract(HitActor, Character);
+			UE_LOG(LogInteract, Log, TEXT("IInteractable 상호작용: %s"), *HitActor->GetName());
+		}
         // 4. 태그가 없거나 다른 사물이 맞은 경우
         else
         {
