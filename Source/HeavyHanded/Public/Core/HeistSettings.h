@@ -110,6 +110,25 @@ public:
 		return FSoftObjectPath();
 	}
 
+	/**
+	 * 판이 끝나면 돌아갈 은신처 레벨.
+	 *
+	 * [왜 SiteLevels 와 같은 표에 안 넣는가] 은신처는 장소(Site.*)가 아니다. 표에 끼워 넣으면
+	 * 목표 선택 UI 가 그 표를 그릴 때 은신처가 갈 수 있는 작업 장소로 섞여 나오고,
+	 * 캠페인 통과 판정(RecordSiteCleared)도 그것을 세게 된다.
+	 *
+	 * [비어 있으면 떠나지 않는다] SiteLevels 와 같은 판단이다 — "모르겠으면 기본 맵" 은
+	 * 정답인 적이 없다. 지정하지 않으면 결과 화면에 머물고 경고가 남는다.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Travel")
+	TSoftObjectPtr<UWorld> HideoutLevel;
+
+	/** 은신처 레벨 경로. 지정돼 있지 않으면 빈 경로다 — 호출부가 이동을 막아야 한다 */
+	FSoftObjectPath GetHideoutLevel() const
+	{
+		return HideoutLevel.ToSoftObjectPath();
+	}
+
 	// ── 접속 대기 (Phase.Prep 이전) ──
 	//
 	// 리슨 서버라 호스트는 레벨이 열리는 즉시 들어와 있고 클라이언트는 로딩이 늦다.

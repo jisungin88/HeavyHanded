@@ -36,6 +36,20 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
+
+	/**
+	 * 접속한 사람의 PlayerState 가 만들어진 직후. **체포자를 관전자로 표시하는 자리다.**
+	 *
+	 * [왜 PostLogin 이 아닌가] AGameModeBase::PostLogin 은 Super 안에서 이미
+	 *   HandleStartingNewPlayer → RestartPlayer 까지 밟아 폰을 스폰한다. 거기서 표시하면
+	 *   한 프레임 폰이 생겼다 사라지고, AGameMode::PostLogin 의 인원 집계도 플레이어로 세어진다.
+	 *   InitNewPlayer 는 Login 단계라 그 전이고, 신원(FUniqueNetIdRepl)을 인자로 받는다 —
+	 *   레벨을 건너 살아남는 체포 명단의 키가 정확히 그것이다.
+	 *
+	 * 표시만 하면 폰 스폰은 엔진이 알아서 건너뛴다 (AGameModeBase::MustSpectate).
+	 */
+	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
+		const FString& Options, const FString& Portal = TEXT("")) override;
 	virtual void Logout(AController* Exiting) override;
 
 	/**
@@ -276,6 +290,17 @@ private:
 	 * 등급이나 지급 여부와 무관하게 항상 넘긴다. 잡힌 것은 잡힌 것이다.
 	 */
 	void CarryOverArrests();
+
+	/**
+	 * 이 판을 관전으로 보낸 사람들의 체포를 푼다. (결과 확정 시)
+	 *
+	 * 체포의 대가는 "다음 작업 관전" 이므로, 한 판을 관전했으면 형기가 끝난 것이다.
+	 * 여기서 풀지 않으면 한 번 잡힌 사람이 은신처에서 돈을 낼 때까지 영영 관전만 한다.
+	 *
+	 * CarryOverArrests 와 겹치지 않는다 — 관전자는 IsCountedPlayer 에서 걸러지므로
+	 * 이번 판의 체포 명단에 애초에 들어가지 않는다. 그래서 순서를 신경 쓸 필요가 없다.
+	 */
+	void ReleaseServedSpectators();
 
 	/**
 	 * 이 플레이어의 다운 상태 변화를 구독한다.
