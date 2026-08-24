@@ -84,38 +84,48 @@ void ATitlePlayerController::TitleCreateSession
     Settings.bAllowJoinInProgress = true;
     Settings.bUsesPresence = false;
 
-
 	// NetGameInstanceSubsystem에 저장
 	UNetGameInstanceSubsystem* NetSubsystem =
 		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
-    
+
+
+	FString RoomNameRand = RoomName.IsEmpty() ? FString::Printf(TEXT("랜덤 방 제목_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8)) : RoomName;
+
     Settings.Set(
         FName(TEXT("ROOM_NAME")),
-        RoomName,
+		RoomNameRand,
         //EOnlineDataAdvertisementType::ViaPing
         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
     );
 
-
-
 	if (NetSubsystem)
 	{
-		NetSubsystem->JoinedRoomName = RoomName;
+		NetSubsystem->JoinedRoomName = RoomNameRand;
+		NetSubsystem->MaxPlayers = maxPlayer;
 	}
+    
+    if (!isPublic)
+    {
+        FString RoomCode = GenerateRoomCode();
+	
+        Settings.Set(
+            FName(TEXT("ROOM_CODE")),
+            RoomCode,
+            EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
+        );
 
-    
-    // 비공개 방만 코드 생성
-    // if (!isPublic)
-    // {
-    //     FString RoomCode = GenerateRoomCode();
-	// 
-    //     Settings.Set(
-    //         FName(TEXT("ROOM_CODE")),
-    //         RoomCode,
-    //         EOnlineDataAdvertisementType::ViaOnlineServiceAndPing
-    //     );
-    // }
-    
+		if (NetSubsystem)
+		{
+			NetSubsystem->JoinedRoomCode = RoomCode;
+		}
+
+    }
+
+
+	
+
+
+
 
 
 	if (StartHandle.IsValid())
@@ -347,17 +357,17 @@ void ATitlePlayerController::TitleOnFindSessionsComplete(bool bWasSuccessful)
  		bool bHasRoomName = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_NAME")), RoomName);
 		SessionDebug(TEXT("ROOM_NAME Found"), bHasRoomName);
 
-		//bool bHasRoomCode = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_CODE")), RoomCode);
-		//SessionDebug(TEXT("ROOM_CODE Found"), bHasRoomCode);
+		bool bHasRoomCode = Result.Session.SessionSettings.Get(FName(TEXT("ROOM_CODE")), RoomCode);
+		SessionDebug(TEXT("ROOM_CODE Found"), bHasRoomCode);
 
 
 
 		//임시 제거
-        ///// // 비공개 방 제외
-        ///// if (bHasRoomCode)
-        ///// {
-        /////     continue;
-        ///// }
+        // 비공개 방 제외
+        if (bHasRoomCode)
+        {
+            continue;
+        }
 
 
 		SessionDebug(FString::Printf(TEXT("Public Room Name = %s"), *RoomName), true);
@@ -486,6 +496,7 @@ void ATitlePlayerController::TitleJoinSession(int32 SearchIndex)
 	if (NetSubsystem)
 	{
 		NetSubsystem->JoinedRoomName = RoomName;
+		NetSubsystem->MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
 	}
 
 

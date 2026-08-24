@@ -4,7 +4,9 @@
 #include "UObject/SoftObjectPath.h"   // FSoftObjectPath 를 값으로 주고받는다
 
 /**
- * "은신처에서 작업 장소로 떠날 때 어떤 URL 로 ServerTravel 하는가" 를 만드는 곳.
+ * 레벨 사이를 ServerTravel 할 때 어떤 URL 을 쓰는가를 만드는 곳.
+ *   은신처 → 작업 장소(URunProgressSubsystem::TryDepartToSite)와
+ *   작업 장소 → 은신처(AHeistGameMode::FinishMatch) 양쪽이 같이 쓴다.
  *
  * [왜 한 줄짜리를 떼어냈는가]
  *   이 문자열이 틀려도 **아무 일도 일어나지 않은 것처럼 보인다.** 맵은 정상적으로 열리고

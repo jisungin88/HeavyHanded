@@ -7,6 +7,7 @@
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
+#include "GameplayTagContainer.h"
 
 #include "ShelterPlayerController.generated.h"
 
@@ -39,6 +40,12 @@ public:
 
 	UFUNCTION(BlueprintPure)
 	AShelterPlayerState* GetMyPlayerState() const;
+
+
+
+
+
+	// ----------------------------------------------------------------
 
 
 	/**
@@ -78,10 +85,29 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerSelectJob(EJobType NewJob);
 
-	// 현재 직업 선택 해제
+	// 현재 직업 선택 해제 - 역할 못바꿔서 지워도 될듯
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerClearJob();
 
+	// 역할 확정 버튼 누르고 다음 화면 넘어갈 때
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void serverConfirmedJob();
+
+	// -------------------------------------------------------
+
+		// 인게임 이동
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void serverIngameTravel();
+
+
+protected:
+
+	// 직업별 Pawn 클래스
+	UPROPERTY(EditDefaultsOnly, Category = "Job")
+	TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
+
+	// Pawn을 실제로 생성하고 빙의
+	void SpawnJobPawn(FGameplayTag JobTag);
 
 
 };
