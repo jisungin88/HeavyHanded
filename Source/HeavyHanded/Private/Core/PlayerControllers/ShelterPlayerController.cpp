@@ -7,6 +7,9 @@
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
 #include "Core/RunProgressSubsystem.h"
 
+#include "GameFramework/PlayerStart.h"
+#include "EngineUtils.h"
+
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 
@@ -277,6 +280,9 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 		Subsystem->TrySelectRole(PlayerId, RoleTag);
 	}
 
+	// pawn 스폰
+	SpawnJobPawn(RoleTag);
+
 }
 
 
@@ -299,3 +305,102 @@ void AShelterPlayerController::serverIngameTravel_Implementation()
 		Subsystem->TryDepartToSite(NewSiteTag);
 	}
 }
+
+void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
+{
+
+	// 1. 권한 체크
+	if (!HasAuthority())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+				TEXT("1.[SpawnJobPawn] HasAuthority() == FALSE"));
+		}
+
+		return;
+	}
+
+
+	// 2. GameplayTag에 해당하는 Pawn 클래스 찾기
+	TSubclassOf<APawn>* FoundPawnClass = JobPawnMap.Find(JobTag);
+
+	if (!FoundPawnClass || !(*FoundPawnClass))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("2. [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
+		}
+
+		return;
+	}
+
+	TSubclassOf<APawn> PawnClass = *FoundPawnClass;
+
+
+	// 3. 기존 Pawn의 위치/회전 저장
+	FVector JobSpawnLocation = FVector::ZeroVector;
+	FRotator JobSpawnRotation = FRotator::ZeroRotator;
+	bool bFoundPlayerStart = false;
+
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+	{
+		APlayerStart* PlayerStart = *It;
+
+		if (PlayerStart && PlayerStart->Tags.Contains(JobTag.GetTagName()))
+		{
+			JobSpawnLocation = PlayerStart->GetActorLocation();
+			JobSpawnRotation = PlayerStart->GetActorRotation();
+			bFoundPlayerStart = true;
+			break;
+		}
+	}
+
+	if (!bFoundPlayerStart)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("3. [SpawnJobPawn] PlayerStart NOT FOUND / JobTag = %s"), *JobTag.ToString()));
+		}
+
+		return;
+	}
+
+
+	// 4. 새로운 Pawn Spawn
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = nullptr;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	APawn* NewPawn = GetWorld()->SpawnActor<APawn>(PawnClass, JobSpawnLocation, JobSpawnRotation, SpawnParams);
+
+	if (!NewPawn)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("4.[SpawnJobPawn] Failed to spawn Pawn [%s]"), *GetNameSafe(PawnClass)));
+		}
+
+		return;
+	}
+
+
+	// 5. PlayerController가 새로운 Pawn 빙의
+	Possess(NewPawn);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+			FString::Printf(TEXT("5.[SpawnJobPawn] SUCCESS / PC=%s / Job=%s / Pawn=%s"), *GetName(), *JobTag.ToString(), *NewPawn->GetName()));
+	}
+
+
+
+
+
+}
+

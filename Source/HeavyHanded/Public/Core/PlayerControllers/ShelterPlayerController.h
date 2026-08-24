@@ -7,6 +7,7 @@
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
+#include "GameplayTagContainer.h"
 
 #include "ShelterPlayerController.generated.h"
 
@@ -98,6 +99,15 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void serverIngameTravel();
 
+
+protected:
+
+	// 직업별 Pawn 클래스
+	UPROPERTY(EditDefaultsOnly, Category = "Job")
+	TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
+
+	// Pawn을 실제로 생성하고 빙의
+	void SpawnJobPawn(FGameplayTag JobTag);
 
 
 };
