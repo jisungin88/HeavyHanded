@@ -113,7 +113,38 @@ private:
 
 
 
-	bool bPendingCreateSession = false;
+	/**
+	 * DestroySession 이 끝난 뒤 이어서 할 일.
+	 *
+	 * [왜 필요한가] 기존 GameSession 이 남아 있으면 생성도 참가도 **곧바로 할 수 없다.**
+	 *   OnlineSubsystemNull 이 "Session (GameSession) already exists, can't join twice" 로
+	 *   거절하고, 그 결과는 Join Result = 5(UnknownError)로만 돌아온다.
+	 *   그래서 먼저 지우고, 완료 콜백에서 원래 하려던 것을 이어서 한다.
+	 *
+	 * 한 번에 하나만 예약된다 — 두 경로 모두 예약 직후 곧바로 반환하기 때문이다.
+	 */
+	enum class EPendingSessionAction : uint8
+	{
+		None,
+		Create,
+		Join
+	};
+
+	EPendingSessionAction PendingAction = EPendingSessionAction::None;
+
+	/** PendingAction == Create 일 때 다시 넘길 인자 */
+	FString PendingRoomName;
+	int32 PendingMaxPlayer = 0;
+	bool bPendingIsPublic = true;
+
+	/** PendingAction == Join 일 때 다시 쓸 PublicSessionResults 인덱스 */
+	int32 PendingJoinIndex = INDEX_NONE;
+
+	/**
+	 * 기존 세션을 지우고 PendingAction 을 예약한다.
+	 * @return 삭제를 시작했으면 true — 호출부는 곧바로 반환해야 한다
+	 */
+	bool BeginDestroyForPendingAction();
 
 	FDelegateHandle DestroyHandle;
 
