@@ -3,12 +3,8 @@
 #include "Blueprint/UserWidget.h"
 
 /**
- * 이 베이스만의 로그 카테고리.
- *
- * LogHeist 를 쓰지 않는 이유는 이 클래스가 코어 루프 소유가 아니기 때문이다 —
- * 은신처(세션 파트)와 작업 레벨이 같이 쓴다. 남의 카테고리에 로그를 섞으면
- * "이 판이 왜 Escape 로 넘어갔나" 를 따라가는 필터에 은신처 상점 로그가 끼어든다.
- * 문서 07 의 기본값(.cpp 안의 STATIC)이기도 하다.
+ * 이 베이스만의 로그 카테고리. LogHeist 를 쓰지 않는 것은 이 클래스가 코어 루프 소유가
+ * 아니기 때문이다 — 남의 카테고리에 섞으면 코어 루프 필터에 은신처 로그가 끼어든다.
  */
 DEFINE_LOG_CATEGORY_STATIC(LogHHPlayerController, Log, All);
 

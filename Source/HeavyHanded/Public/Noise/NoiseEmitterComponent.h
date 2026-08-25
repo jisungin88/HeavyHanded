@@ -14,13 +14,9 @@ class UPrimitiveComponent;
 struct FNoiseProfileRow;
 
 /**
- * 물리 충돌을 소음으로 바꾼다. 노획물·장비처럼 부딪히면 소리가 나는 액터에 붙인다.
- *
- * 서버 전용 — 클라에서는 히트 델리게이트를 아예 바인딩하지 않는다.
- * 클라마다 물리 결과가 미세하게 달라서 신뢰할 수 없기 때문이다 (문서 02 네트워크).
- *
- * 충돌 스팸을 묶는 상태 머신은 FNoiseSpamFilter 에 따로 있다. 이 컴포넌트가 하는 일은
- * "물리 히트 -> 크기" 변환과 모디파이어 적용, 그리고 필터가 뱉은 것을 서브시스템에 넘기는 것뿐이다.
+ * 물리 충돌을 소음으로 바꾼다. 부딪히면 소리가 나는 액터에 붙인다.
+ * 서버 전용 — 클라마다 물리 결과가 달라서 히트 델리게이트를 아예 바인딩하지 않는다.
+ * 스팸을 묶는 상태 머신은 FNoiseSpamFilter 에 따로 있다.
  */
 UCLASS(ClassGroup = (Noise), meta = (BlueprintSpawnableComponent))
 class HEAVYHANDED_API UNoiseEmitterComponent : public UActorComponent
@@ -38,10 +34,8 @@ public:
 	//~ End
 
 	/**
-	 * 충돌이 아닌 경로로 소음을 낸다 (던지기 · 파괴 · 떨어뜨리기 · 유출).
-	 * 스팸 필터와 모디파이어를 똑같이 거친다. 서버에서만 유효하다.
-	 *
-	 * @param LoudnessScale  0~1. 프로파일 기본 크기에 곱해진다
+	 * 충돌이 아닌 경로로 소음을 낸다 (던지기 · 파괴 · 떨어뜨리기 · 유출). 서버 전용.
+	 * 스팸 필터와 모디파이어를 똑같이 거친다. LoudnessScale 은 프로파일 기본 크기에 곱해진다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Noise")
 	void ReportTaggedNoise(FGameplayTag Tag, float LoudnessScale = 1.f);
@@ -98,18 +92,14 @@ private:
 	void EmitThroughFilter(FGameplayTag Tag, float Loudness, const FVector& Location);
 
 	/**
-	 * 필터가 뱉은 항목 1건을 실제로 발행하고 쿨다운을 시작한다.
-	 *
-	 * @param bKeepTicking  false 면 틱을 다시 켜지 않는다. 파괴 도중(FlushPendingEmits)에는
-	 *                      쿨다운을 내려줄 다음 틱 자체가 없으므로 켜봐야 의미가 없다
+	 * 필터가 뱉은 항목 1건을 발행하고 쿨다운을 시작한다.
+	 * bKeepTicking 이 false 면 틱을 다시 켜지 않는다 — 파괴 도중에는 다음 틱 자체가 없다.
 	 */
 	void EmitNow(const FNoisePendingEmit& Emit, bool bKeepTicking);
 
 	/**
 	 * 프리미티브의 물리 재질 계수. 없으면 1.0.
-	 *
-	 * @param PreferredMaterial  "맞은 지점" 의 재질. 있으면 바디 기본값보다 우선한다.
-	 *                           HitComponent 쪽에는 넘기지 말 것 — HandleHit 주석 참고
+	 * PreferredMaterial 은 "맞은 지점" 의 재질로 바디 기본값보다 우선한다.
 	 */
 	float GetSurfaceCoeff(const UPrimitiveComponent* Component, const UPhysicalMaterial* PreferredMaterial) const;
 
@@ -124,12 +114,8 @@ private:
 	TWeakObjectPtr<UPrimitiveComponent> ImpactComponent;
 
 	// ── ImpactTag 프로파일 캐시 ──
-	//
-	// 물리 히트는 구르는 프롭 하나가 초당 수십 번씩 발생시킨다.
-	// 그때마다 DataTable 을 다시 뒤질 이유가 없다 — ImpactTag 는 런타임에 안 바뀐다.
-	//
-	// 대신 게임 도중 DT_NoiseProfiles 를 다시 임포트해도 이 값들은 갱신되지 않는다.
-	// 임펄스 밸런싱을 만졌으면 PIE 를 다시 시작할 것.
+	// 구르는 프롭 하나가 초당 수십 번 히트를 낸다. 대신 게임 도중 DT_NoiseProfiles 를
+	// 다시 임포트해도 갱신되지 않는다 — 임펄스 밸런싱을 만졌으면 PIE 를 다시 시작할 것.
 
 	bool  bImpactProfileCached = false;
 	float CachedMinImpulse     = 0.f;

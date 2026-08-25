@@ -20,14 +20,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogAlert, Log, All);
 namespace
 {
 	/**
-	 * 임계값 비교 여유. float 연산 오차 한두 ULP 를 흡수한다.
-	 *
-	 * UE 는 게임 모듈을 /fp:fast 로 빌드한다 (VCToolChain.cs — FPSemanticsMode.Default).
-	 * 이 모드에서 컴파일러는 x / 100.f 를 x * 0.01f 로 바꿀 수 있는데,
-	 * 0.01f 가 0.01 보다 미세하게 작아서 67 을 곱하면 0.669999957 이 나온다.
-	 * 리터럴 0.67f(0.670000017) 보다 1 ULP 낮아서 "67% 인데 경계 단계가 아닌" 상태가 된다.
-	 *
-	 * 히스테리시스 간격(4%p = 0.04)보다 400 배 작아서 단계 판정에는 영향을 주지 않는다.
+	 * 임계값 비교 여유. float 오차 한두 ULP 를 흡수한다.
+	 * UE 가 /fp:fast 로 빌드해서 x / 100.f 가 x * 0.01f 로 바뀌면 67 이 0.669999957 이 되고,
+	 * "67% 인데 경계 단계가 아닌" 상태가 된다. 히스테리시스 간격보다 400배 작다.
 	 */
 	constexpr float AlertThresholdTolerance = 1.e-4f;
 
@@ -257,13 +252,9 @@ void UAlertComponent::ApplyGauge(float NewGauge)
 	const float Clamped = FMath::Clamp(NewGauge, 0.f, 1.f);
 	const EAlertLevel NextLevel = EvaluateLevel(Clamped, AlertLevel);
 
-	// 정확히 비교한다. FMath::IsNearlyEqual(기본 허용오차 1e-4) 을 쓰면
-	// 프레임당 감소량이 그보다 작을 때 통째로 버려진다. 기본 감소율 1%/초 기준
-	// 100fps 를 넘으면(1e-2 / 100 = 1e-4) 매 프레임 버려지고, 누적되지도 않으므로
-	// 경계도가 영원히 안 내려간다. 컴파일 경고도 로그도 없이 조용히 멈추는 종류의 버그다.
-	//
-	// 매 프레임 값이 바뀌어도 복제와 브로드캐스트는 늘지 않는다 —
-	// 둘 다 ReplicatedGauge(uint8) 가 실제로 한 칸 움직였을 때만 일어난다
+	// **정확히 비교한다.** IsNearlyEqual(1e-4) 을 쓰면 100fps 이상에서 프레임당 감소량이
+	// 그보다 작아 통째로 버려지고, 누적도 안 되어 경계도가 영원히 안 내려간다.
+	// 매 프레임 값이 바뀌어도 복제는 늘지 않는다 — 양자화 값이 한 칸 움직일 때만 나간다
 	const bool bGaugeChanged = (Clamped != AlertGauge);
 	const bool bLevelChanged = (NextLevel != AlertLevel);
 
@@ -448,11 +439,8 @@ void UAlertComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 }
 
 // ──────────────────────────────────────────────────────────────
-// [디버그 전용] 치트
-//
-// 쉬핑 빌드에서는 코드째 빠진다. hh.Alert.Set 0 은 경보를 지우는 치트라
-// 협동 잠입 게임의 출시 빌드 콘솔에 남아 있으면 안 된다.
-// 개발 · 테스트 빌드에서도 ECVF_Cheat 를 달아 이 파일 위쪽 CVarNoiseDebug 와 규칙을 맞춘다.
+// [디버그 전용] 치트. 쉬핑 빌드에서는 코드째 빠진다 —
+// hh.Alert.Set 0 은 경보를 지우는 치트라 출시 빌드 콘솔에 남아 있으면 안 된다
 // ──────────────────────────────────────────────────────────────
 #if !UE_BUILD_SHIPPING
 

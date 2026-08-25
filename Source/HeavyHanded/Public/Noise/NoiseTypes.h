@@ -89,14 +89,9 @@ struct FNoiseEvent
 	float Loudness01 = 0.f;
 
 	/**
-	 * 0~1. 경계도에 기여하는 비율. 들리는 크기와는 별개의 축이다.
-	 *
-	 * 구르는 와인 랙처럼 같은 소리가 연달아 날 때, 경비에게는 매번 제대로 들려야 하지만
-	 * 저택 경계도는 한 번 굴린 것으로 100% 가 차면 안 된다.
-	 * 그래서 "얼마나 크게 들리는가"(Loudness01)와 "얼마나 새로운 정보인가"(AlertScale)를
-	 * 분리한다. UNoiseEmitterComponent 의 스팸 필터가 이 값을 낮춰서 보낸다.
-	 *
-	 * 1.0 이 기본이며, 직접 ReportNoise 를 부르는 쪽은 신경 쓸 필요가 없다.
+	 * 0~1. 경계도에 기여하는 비율. **들리는 크기와는 별개의 축이다** —
+	 * 구르는 물체는 경비에게 매번 들려야 하지만 경계도가 한 번에 100% 차면 안 된다.
+	 * 기본 1.0 이고 스팸 필터를 가진 호출부만 낮춰서 보낸다.
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Noise")
 	float AlertScale = 1.f;
@@ -139,9 +134,7 @@ struct FNoiseStimulus
 
 /**
  * 소음 감쇄 · 치환 규칙 1건. 장비나 패시브가 UNoiseEmitterComponent 에 등록한다.
- *
- * 인터페이스가 아니라 값 구조체인 이유 — 다른 사람이 소음 코드를 상속하거나 수정하지 않고
- * 등록/해제만으로 끝내게 하려는 것이다.
+ * 인터페이스가 아니라 값 구조체인 것은 남이 소음 코드를 건드리지 않고 등록/해제만으로 끝내게 하려는 것.
  */
 USTRUCT(BlueprintType)
 struct FNoiseModifier

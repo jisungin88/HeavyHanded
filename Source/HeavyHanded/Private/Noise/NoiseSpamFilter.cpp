@@ -3,14 +3,9 @@
 namespace
 {
 	/**
-	 * 대기 중인 소리 1건을 발행 항목으로 바꾼다. 호출 전에 PendingMaxLoudness > 0 이 보장돼야 한다.
-	 *
-	 * Loudness 는 절대값 그대로 나간다 — 구르는 와인 랙은 경비에게 매번 제 크기로 들려야 하고,
-	 * 여기를 깎으면 전파 반경까지 같이 쪼그라든다.
-	 *
-	 * 억제는 AlertScale 한쪽에서만 한다. 직전 발행보다 커지지 않았으면 0 이 되어
-	 * "경비에겐 들리지만 저택 경계도는 오르지 않는" 상태가 된다.
-	 * UNoiseSubsystem::ReportNoise 의 발행 게이트는 Loudness 이므로 AlertScale 0 도 정상 발행된다.
+	 * 대기 중인 소리 1건을 발행 항목으로 바꾼다. 호출 전에 PendingMaxLoudness > 0 이어야 한다.
+	 * Loudness 는 절대값 그대로 나가고(깎으면 전파 반경까지 쪼그라든다) 억제는 AlertScale 쪽에서만 한다.
+	 * 발행 게이트가 Loudness 라 AlertScale 0 도 정상 발행된다 — 들리지만 경계도는 안 오른다.
 	 */
 	FNoisePendingEmit MakePendingEmit(FGameplayTag Tag, const FNoiseEmitState& State)
 	{
@@ -58,13 +53,8 @@ bool FNoiseSpamFilter::Advance(float DeltaTime, FNoisePendingEmitArray& OutEmits
 		}
 
 		// 쿨다운이 풀렸고 대기 중인 소리가 있으면 무조건 내보낸다.
-		//
-		// 여기에 "직전 발행보다 커야 한다" 는 조건을 걸면 안 된다.
-		// 체감(ConsecutiveFalloff) 때문에 두 번째 발행부터는 항상 직전보다 작아지므로,
-		// 그 조건은 곧 "첫 한 번만 소리가 나고 그 뒤로는 완전 무음" 을 뜻한다.
-		// 구르는 프롭으로 경비 인지 게이지를 채우는 것이 원리적으로 불가능해진다.
-		//
-		// 첫 발행은 LastEmittedLoudness 가 0 이라 AlertScale 이 1.0 이 된다
+		// **"직전보다 커야 한다" 는 조건을 걸면 안 된다** — 체감 때문에 두 번째부터는 항상
+		// 작아지므로 첫 한 번만 소리가 나고 그 뒤로는 완전 무음이 된다
 		bool bEmitQueued = false;
 		if (State.CooldownRemaining <= 0.f && State.PendingMaxLoudness > 0.f)
 		{

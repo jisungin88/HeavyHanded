@@ -8,12 +8,9 @@
 // ──────────────────────────────────────────────────────────────
 // FNoiseSpamFilter 회귀 테스트
 //
-// 이 필터는 밸런싱 값이 계속 바뀔 자리인데, 잘못 고쳐도 컴파일 에러도 로그도 없이
-// "경비가 소리를 못 듣는다" 로만 드러난다. 그래서 순수 상태 머신으로 떼어내 두고
-// (입력 시퀀스 -> 발행 시퀀스) 를 여기서 못박는다.
-//
-// 에디터에서: Window > Test Automation > HeavyHanded.Noise.SpamFilter
-// 커맨드라인: UnrealEditor-Cmd.exe <uproject> -ExecCmds="Automation RunTests HeavyHanded.Noise; Quit" -unattended -nullrhi
+// 밸런싱 값이 계속 바뀔 자리인데 잘못 고쳐도 "경비가 소리를 못 듣는다" 로만 드러난다.
+// 그래서 (입력 시퀀스 → 발행 시퀀스) 를 여기서 못박는다.
+// 실행: Window > Test Automation > HeavyHanded.Noise.SpamFilter
 // ──────────────────────────────────────────────────────────────
 
 namespace
