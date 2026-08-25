@@ -7,3 +7,13 @@ FString UNetGameInstanceSubsystem::GetJoinedRoomName() const
 {
 	return JoinedRoomName;
 }
+
+FString UNetGameInstanceSubsystem::GetJoinedRoomCode() const
+{
+	return JoinedRoomCode;
+}
+
+int32 UNetGameInstanceSubsystem::GetRoomMaxPlayer() const
+{
+	return MaxPlayers;
+}

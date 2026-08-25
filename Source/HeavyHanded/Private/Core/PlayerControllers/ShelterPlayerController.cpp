@@ -5,6 +5,10 @@
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
+#include "Core/RunProgressSubsystem.h"
+
+#include "GameFramework/PlayerStart.h"
+#include "EngineUtils.h"
 
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
@@ -33,15 +37,52 @@ void AShelterPlayerController::BeginPlay()
 		*RoomName
 	);
 
+
+
+	bShowMouseCursor = true;
+
+	FInputModeGameAndUI InputMode;
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+	SetInputMode(InputMode);
+
+
+
 }
 
+/**
+ * 내 PlayerState. **아직 안 왔으면 nullptr 이다** — 호출부가 반드시 검사할 것.
+ *
+ * [여기 있던 화면 디버그 출력을 지웠다]
+ *   `GetPlayerState<>()->GetName()` 을 검사 없이 불러서, 방에 막 참가한 클라이언트가
+ *   접속하자마자 터졌다 (EXCEPTION_ACCESS_VIOLATION, 0x18 = UObject 의 NamePrivate 오프셋).
+ *
+ *   PlayerState 는 PlayerController 보다 늦게 도착한다. 접속 직후 한동안 nullptr 인 것이
+ *   정상이고, 그 창을 밟는 것은 예외가 아니라 규칙이다 (문서 02 8장 — "폰은 있는데 ASC 가
+ *   nullptr" 과 같은 상황이다).
+ *
+ *   덧붙여 이 함수는 `BlueprintPure` 다. BP 의 pure 노드는 **연결된 곳마다 다시 실행되므로**
+ *   여기 부수효과(화면 출력)를 두면 프레임마다 여러 번 돈다 (문서 03 4장).
+ *   조회 함수는 조회만 한다 — 디버그가 필요하면 별도의 non-pure 함수로 뺄 것.
+ */
 AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 {
-	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, GetPlayerState<AShelterPlayerState>(), *GetPlayerState<AShelterPlayerState>()->GetName());
-	GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+	AShelterPlayerState* PS = GetPlayerState<AShelterPlayerState>();
 
-	return GetPlayerState<AShelterPlayerState>();
+	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, PS, PS ? *PS->GetName() : TEXT("NULL"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+	}
+
+	return PS;
+	//return GetPlayerState<AShelterPlayerState>();
 }
+
+
+
 
 
 //void AShelterPlayerController::Client_ReceiveChatMessage(const FString& PlayerName, const FString& Message)
@@ -207,6 +248,189 @@ void AShelterPlayerController::ServerClearJob_Implementation()
 	GameState->ClearJob(MyPlayerState);
 }
 
+void AShelterPlayerController::serverConfirmedJob_Implementation()
+{
+
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	// config/Role.ini 참고할 것
+	
+	//	"Role.Brute"
+	//	"Role.Ghost"
+	//	"Role.Oracle"
+	//	"Role.Mimic"
 
 
+	FUniqueNetIdRepl PlayerId = GetMyPlayerState()->GetUniqueId();
+
+	FGameplayTag RoleTag;
+	switch (GetMyPlayerState()->SelectedJob)
+	{
+	case EJobType::Brute:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Brute"));
+		break;
+
+	case EJobType::Ghost:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Ghost"));
+		break;
+
+	case EJobType::Oracle:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Oracle"));
+		break;
+
+	case EJobType::Mimic:
+		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Mimic"));
+		break;
+
+	default:
+		break;
+	}
+		
+
+	if (Subsystem)
+	{
+		Subsystem->TrySelectRole(PlayerId, RoleTag);
+	}
+
+	// pawn 스폰
+	SpawnJobPawn(RoleTag);
+
+}
+
+
+
+void AShelterPlayerController::serverIngameTravel_Implementation()
+{
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	// config/Phase.ini 참고할 것
+	
+	// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
+	FGameplayTag NewSiteTag = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
+
+	// GameplayTagList=(Tag="Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
+	// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
+	// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
+
+	if (Subsystem)
+	{
+		Subsystem->TryDepartToSite(NewSiteTag);
+	}
+}
+
+void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
+{
+
+	// 1. 권한 체크
+	if (!HasAuthority())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+				TEXT("1.[SpawnJobPawn] HasAuthority() == FALSE"));
+		}
+
+		return;
+	}
+
+
+	// 2. GameplayTag에 해당하는 Pawn 클래스 찾기
+	TSubclassOf<APawn>* FoundPawnClass = JobPawnMap.Find(JobTag);
+
+	if (!FoundPawnClass || !(*FoundPawnClass))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("2. [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
+		}
+
+		return;
+	}
+
+	TSubclassOf<APawn> PawnClass = *FoundPawnClass;
+
+
+	// 3. 기존 Pawn의 위치/회전 저장
+	FVector JobSpawnLocation = FVector::ZeroVector;
+	FRotator JobSpawnRotation = FRotator::ZeroRotator;
+	bool bFoundPlayerStart = false;
+
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+	{
+		APlayerStart* PlayerStart = *It;
+
+		if (PlayerStart && PlayerStart->Tags.Contains(JobTag.GetTagName()))
+		{
+			JobSpawnLocation = PlayerStart->GetActorLocation();
+			JobSpawnRotation = PlayerStart->GetActorRotation();
+			bFoundPlayerStart = true;
+			break;
+		}
+	}
+
+	if (!bFoundPlayerStart)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("3. [SpawnJobPawn] PlayerStart NOT FOUND / JobTag = %s"), *JobTag.ToString()));
+		}
+
+		return;
+	}
+
+
+	// 4. 새로운 Pawn Spawn
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = nullptr;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	APawn* NewPawn = GetWorld()->SpawnActor<APawn>(PawnClass, JobSpawnLocation, JobSpawnRotation, SpawnParams);
+
+	if (!NewPawn)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+				FString::Printf(TEXT("4.[SpawnJobPawn] Failed to spawn Pawn [%s]"), *GetNameSafe(PawnClass)));
+		}
+
+		return;
+	}
+
+
+	// 5. PlayerController가 새로운 Pawn 빙의
+	Possess(NewPawn);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
+			FString::Printf(TEXT("5.[SpawnJobPawn] SUCCESS / PC=%s / Job=%s / Pawn=%s"), *GetName(), *JobTag.ToString(), *NewPawn->GetName()));
+	}
+
+
+	// 마우스 커서 강제 표시
+	bShowMouseCursor = true;
+
+	FInputModeGameAndUI InputMode;
+	InputMode.SetWidgetToFocus(nullptr);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+
+	SetInputMode(InputMode);
+
+	// 한 번 더 강제 설정
+	int32 SizeX = 0;
+	int32 SizeY = 0;
+
+	GetViewportSize(SizeX, SizeY);
+
+	SetMouseLocation(SizeX / 2, SizeY / 2);
+
+	bShowMouseCursor = true;
+
+
+}
 

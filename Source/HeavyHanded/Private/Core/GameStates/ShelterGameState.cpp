@@ -4,6 +4,7 @@
 #include "Core/GameStates/ShelterGameState.h"
 #include "Net/UnrealNetwork.h"
 
+
 int32 AShelterGameState::GetLobbyPlayerCount() const
 {
 	return PlayerArray.Num();
@@ -168,9 +169,20 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	// 직업 변경
 	PlayerState->SetSelectedJob(NewJob);
 
+
+
+
+
+
+
+
+
 	// 값 자체를 변경해야 클라이언트에서 OnRep가 실행됨
 	JobStateChanged++;
 	//OnJobStateChanged.Broadcast();
+
+
+
 
 
 	return true;

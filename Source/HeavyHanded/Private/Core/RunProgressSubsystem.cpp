@@ -4,6 +4,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"   // GetNumPlayers() — 출발 시 대기 인원
+#include "GameFramework/GameStateBase.h"  // PlayerArray — hh.Run.Arrest 가 인덱스로 고른다
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "HAL/IConsoleManager.h"
@@ -290,6 +291,37 @@ bool URunProgressSubsystem::TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Co
 		Cost, TeamGold, ArrestedPlayers.Num());
 
 	return true;
+}
+
+void URunProgressSubsystem::ReleaseArrested(const TArray<FUniqueNetIdRepl>& PlayerIds)
+{
+	if (!EnsureServerAuthority(TEXT("ReleaseArrested")))
+	{
+		return;
+	}
+
+	int32 ReleasedNum = 0;
+
+	for (const FUniqueNetIdRepl& PlayerId : PlayerIds)
+	{
+		// 신원을 모르는 접속은 애초에 명단에 들어가지 못한다 (RecordArrested 참고).
+		// 여기서 걸러 두지 않으면 빈 키 하나로 Remove 가 돌아 로그가 어긋난다
+		if (!PlayerId.IsValid())
+		{
+			continue;
+		}
+
+		if (ArrestedPlayers.Remove(PlayerId) > 0)
+		{
+			++ReleasedNum;
+		}
+	}
+
+	if (ReleasedNum > 0)
+	{
+		UE_LOG(LogHeist, Log, TEXT("관전 %d명 형기 만료 — 구출 대기 %d명 남음"),
+			ReleasedNum, ArrestedPlayers.Num());
+	}
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -852,4 +884,55 @@ static FAutoConsoleCommandWithWorld GRunResetCampaignCommand(
 	  TEXT("hh.Run.ResetCampaign"),
 	  TEXT("새 방을 연다. 팀 골드와 역할까지 전부 비운다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&RunResetCampaignCommand),
+	  ECVF_Cheat);
+
+/**
+ * 관전을 손으로 확인하려면 체포자가 한 명 있어야 한다. 그것을 정상 경로로 만들려면
+ * 한 판을 일부러 지고, 누군가는 밴을 못 타고, 결과 화면까지 봐야 한다 —
+ * 관전 화면 한 줄을 고칠 때마다 그것을 반복할 수는 없다.
+ *
+ * 인덱스는 AGameStateBase::PlayerArray 순서다. 2인 PIE 에서 0 은 호스트, 1 은 클라이언트다.
+ * 클라이언트를 관전으로 보내야 "남을 보고 있는" 화면을 볼 수 있으니 보통 1 을 쓴다.
+ */
+static void RunArrestCommand(const TArray<FString>& Args, UWorld* World)
+{
+	URunProgressSubsystem* Run = GetRunForCheat(World);
+	if (!Run)
+	{
+		return;
+	}
+
+	const AGameStateBase* GS = World ? World->GetGameState() : nullptr;
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("GameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Index = Args.IsValidIndex(0) ? FCString::Atoi(*Args[0]) : 0;
+	if (!GS->PlayerArray.IsValidIndex(Index))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("플레이어 인덱스 %d 가 없습니다 (접속 %d명)."),
+			Index, GS->PlayerArray.Num());
+		return;
+	}
+
+	const APlayerState* Target = GS->PlayerArray[Index];
+	if (!IsValid(Target))
+	{
+		return;
+	}
+
+	Run->RecordArrested({ Target->GetUniqueId() });
+
+	UE_LOG(LogHeist, Log,
+		TEXT("%s 를 체포 명단에 넣었습니다. **다음 작업 레벨로 이동해야** 관전으로 들어갑니다 — "
+		     "체포는 접속(InitNewPlayer) 시점에만 판정하므로 지금 이 판에는 반영되지 않습니다."),
+		*Target->GetPlayerName());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunArrestCommand(
+	  TEXT("hh.Run.Arrest"),
+	  TEXT("hh.Run.Arrest [인덱스] — 해당 플레이어를 체포 명단에 넣는다. 다음 작업에서 관전자가 된다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunArrestCommand),
 	  ECVF_Cheat);
