@@ -9,9 +9,13 @@
 #include "Noise/PerceptionMeterComponent.h"
 #include "AI/GuardSettings.h"
 #include "Engine/DataTable.h"
-// TODO: 실제 GameState 클래스명 및 소속 폴더로 교체
-// (예: Core 폴더에 있다면 "Core/HeistGameState.h")
-// #include "Core/HeistGameState.h"
+#include "BrainComponent.h"
+#include "Core/GameStates/HeistGameState.h"
+#include "Core/HeavyHandedGameplayTags.h"
+#include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
+#include "Perception/AISense_Hearing.h"
+#include "Perception/AISense_Sight.h"
 #include "AI/GuardBlackboardKeys.h"
 #include "Alert/AlertComponent.h"
 #include "AITypes.h"
@@ -52,6 +56,110 @@ AGuardAIController::AGuardAIController()
 
 	PerceptionComp->ConfigureSense(*SightConfig);
 	PerceptionComp->ConfigureSense(*HearingConfig);
+}
+
+void AGuardAIController::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UWorld* World = GetWorld())
+	{
+		// 두 경로가 다 필요하다 — 레벨에 처음부터 놓인 경비와 AGuardSpawner 가 나중에 뿌리는
+		// 경비는 GameState 도착 시점이 다르다. 이미 와 있으면 지금 붙고, 아직이면 도착할 때 붙는다
+		BindToGameState(World->GetGameState());
+
+		GameStateSetHandle =
+			World->GameStateSetEvent.AddUObject(this, &AGuardAIController::BindToGameState);
+	}
+}
+
+void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	UnbindFromGameState();
+
+	if (UWorld* World = GetWorld())
+	{
+		if (GameStateSetHandle.IsValid())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+			GameStateSetHandle.Reset();
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void AGuardAIController::BindToGameState(AGameStateBase* GameState)
+{
+	AHeistGameState* HeistState = Cast<AHeistGameState>(GameState);
+
+	// 작업 레벨이 아니면(GuardTest · L_NoiseTest 등) 아무것도 하지 않는다 —
+	// 그 맵들에는 페이즈가 없고, 경비는 지금처럼 계속 순찰해야 검증이 된다.
+	//
+	// 같은 GameState 로 두 번 불리는 것도 정상 경로다 (BeginPlay 와 GameStateSetEvent 가 겹친다).
+	// 걸러내지 않으면 델리게이트가 두 번 붙는다
+	if (!HeistState || HeistState == BoundGameState)
+	{
+		return;
+	}
+
+	UnbindFromGameState();
+
+	BoundGameState = HeistState;
+	HeistState->OnPhaseChanged.AddDynamic(this, &AGuardAIController::HandleHeistPhaseChanged);
+
+	// 판이 이미 끝난 뒤에 스폰된 경비는 지나간 전환 알림을 못 받는다.
+	// 지금 값으로 한 번 맞춰 두지 않으면 결과 화면 뒤에서 혼자 순찰을 시작한다
+	const FGameplayTag CurrentPhase = HeistState->GetCurrentPhase();
+	if (CurrentPhase.IsValid())
+	{
+		HandleHeistPhaseChanged(CurrentPhase, FGameplayTag(), HeistState->GetPhaseReason());
+	}
+}
+
+void AGuardAIController::UnbindFromGameState()
+{
+	if (!BoundGameState)
+	{
+		return;
+	}
+
+	BoundGameState->OnPhaseChanged.RemoveDynamic(this, &AGuardAIController::HandleHeistPhaseChanged);
+	BoundGameState = nullptr;
+}
+
+void AGuardAIController::HandleHeistPhaseChanged(
+	FGameplayTag NewPhase, FGameplayTag /*OldPhase*/, EHeistPhaseReason /*Reason*/)
+{
+	if (NewPhase.MatchesTag(HHTags::Phase_Result))
+	{
+		StopForMatchEnd();
+	}
+}
+
+void AGuardAIController::StopForMatchEnd()
+{
+	UE_LOG(LogGuardAI, Log, TEXT("[%s] 판이 끝나 순찰을 멈춘다."), *GetNameSafe(GetPawn()));
+
+	// BT 를 먼저 세운다. 이동 정지보다 나중에 하면 정지 직후 태스크가 한 번 더 돌아
+	// 새 목적지를 잡아 버릴 수 있다
+	if (UBrainComponent* Brain = GetBrainComponent())
+	{
+		Brain->StopLogic(TEXT("Heist finished"));
+	}
+
+	StopMovement();
+
+	// 지각도 끈다. 안 끄면 결과 화면이 떠 있는 동안에도 인지 게이지가 차고 경계도가 계속 오른다 —
+	// 화면에는 멈춰 선 경비가 보이는데 숫자만 움직이는 상태가 된다
+	if (PerceptionComp)
+	{
+		PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
+		PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), false);
+	}
+
+	// 머리 위 게이지 갱신 타이머도 멈춘다. 게이지는 더 이상 변하지 않는다
+	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
 }
 
 void AGuardAIController::OnPossess(APawn* InPawn)
@@ -603,11 +711,11 @@ void AGuardAIController::SelectNextPatrolPoint()
 
 		const FVector PawnLocation = GuardPawn->GetActorLocation();
 
-		UE_LOG(LogGuardAI, Log,
-			TEXT("[%s] 순찰 지점 %d 선택: %s | dt=%.3fs | 폰 위치 %s | 남은 거리 %.0f"),
-			*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString(),
-			DeltaSinceLast, *PawnLocation.ToCompactString(),
-			FVector::Dist(PawnLocation, NextLocation));
+		// UE_LOG(LogGuardAI, Log,
+		// 	TEXT("[%s] 순찰 지점 %d 선택: %s | dt=%.3fs | 폰 위치 %s | 남은 거리 %.0f"),
+		// 	*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString(),
+		// 	DeltaSinceLast, *PawnLocation.ToCompactString(),
+		// 	FVector::Dist(PawnLocation, NextLocation));
 	}
 	else
 	{
