@@ -2,8 +2,52 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "GameplayTagContainer.h"       // FGameplayTag 를 값으로 보유 — 전방 선언 불가
+#include "UObject/SoftObjectPtr.h"      // TSoftObjectPtr 를 값으로 보유
+#include "UObject/SoftObjectPath.h"     // FSoftObjectPath 를 값으로 반환
 #include "Core/HeistOutcome.h"          // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
 #include "HeistSettings.generated.h"
+
+class UWorld;
+
+/**
+ * 장소(Site.*) 하나와 그 작업 레벨.
+ *
+ * [왜 TMap 이 아니라 구조체 배열인가]
+ *   TMap 의 키가 FGameplayTag 면 `.ini` 직렬화가 `((TagName="Site.Mansion"), ...)` 형태가 되어
+ *   손으로 고칠 수 없는 줄이 된다. 필드 이름이 남는 구조체 배열은 그대로 읽고 고칠 수 있다.
+ *   장소는 셋뿐이라 선형 조회의 비용도 논할 것이 없다.
+ *
+ * [왜 DataTable 이 아닌가]
+ *   행이 여럿이니 문서 04 의 기준으로는 DataTable 쪽에 가깝다. 그래도 여기 둔 이유가 둘 있다 —
+ *     1. 밸런싱 수치가 아니라 **경로 배선**이다. 기획이 플레이테스트 중에 만질 값이 아니다
+ *     2. `.uasset` 은 병합이 안 된다. 이 표는 레벨을 만드는 사람마다 한 줄씩 더하게 되는데,
+ *        그걸 DataTable 로 두면 두 사람이 같은 날 장소를 추가할 때 한쪽이 소실된다 (문서 06)
+ *   장소별 밸런싱(목표 금액 · 제한 시간)은 여전히 사이트별 GameMode BP 가 갖는다.
+ */
+USTRUCT()
+struct FHeistSiteLevel
+{
+	GENERATED_BODY()
+
+	// 필드에는 config 를 달지 않는다 — 저장 단위는 바깥의 SiteLevels 배열이고,
+	// 구조체는 통째로 직렬화된다. 여기 달아 봐야 아무 뜻이 없다
+
+	/** 이 장소의 식별자(Site.*). Config/Tags/Phase.ini 에 등록된 것만 의미가 있다 */
+	UPROPERTY(EditAnywhere, Category = "Travel")
+	FGameplayTag SiteTag;
+
+	/**
+	 * 이 장소의 작업 레벨.
+	 *
+	 * 소프트 참조인 이유는 UNoiseSettings::NoiseProfiles 와 같다 — Settings 는 모듈 로드 시점에
+	 * 만들어지고, 하드 참조로 두면 그때 레벨이 통째로 로드된다.
+	 * 여기서는 로드하지 않는다. 경로만 꺼내 ServerTravel 에 넘긴다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Travel",
+		meta = (AllowedClasses = "/Script/Engine.World"))
+	TSoftObjectPtr<UWorld> Level;
+};
 
 /**
  * 코어 루프 밸런싱. Project Settings → Game → Heist.
@@ -26,6 +70,64 @@ public:
 	static const UHeistSettings* Get() { return GetDefault<UHeistSettings>(); }
 
 	virtual FName GetCategoryName() const override { return TEXT("Game"); }
+
+	// ── 장소 이동 ──
+	//
+	// 기획서 2장 — 은신처에서 다음 목표를 고르고 출발한다. 그 '출발' 이 어느 맵을 여는가가
+	// 이 표다. URunProgressSubsystem::TryDepartToSite 가 유일한 소비자다.
+
+	/**
+	 * 장소(Site.*) → 작업 레벨. **새 장소 맵을 만들면 여기 한 줄을 더한다.**
+	 *
+	 * 등록되지 않은 장소로 출발을 시도하면 떠나지 않고 경고를 남긴다 — 엉뚱한 맵을 열지 않는다.
+	 * 같은 태그를 두 번 넣으면 앞선 것이 이긴다. 막지는 않으니 넣지 말 것.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Travel", meta = (TitleProperty = "SiteTag"))
+	TArray<FHeistSiteLevel> SiteLevels;
+
+	/**
+	 * 이 장소의 레벨 경로. **등록돼 있지 않으면 빈 경로다** — 호출부가 출발을 막아야 한다.
+	 *
+	 * 배열을 직접 노출하지 않고 래퍼를 두는 것은 UNoiseSettings::GetSurfaceCoeff 와 같은 이유다.
+	 * 다만 여기서는 안전한 기본값이 없다 — "모르겠으면 저택" 은 어떤 상황에서도 정답이 아니다.
+	 * 없는 것은 없다고 답하고, 그 판단은 부르는 쪽이 한다.
+	 */
+	FSoftObjectPath GetSiteLevel(const FGameplayTag& SiteTag) const
+	{
+		if (!SiteTag.IsValid())
+		{
+			return FSoftObjectPath();
+		}
+
+		for (const FHeistSiteLevel& Entry : SiteLevels)
+		{
+			if (Entry.SiteTag == SiteTag)
+			{
+				return Entry.Level.ToSoftObjectPath();
+			}
+		}
+
+		return FSoftObjectPath();
+	}
+
+	/**
+	 * 판이 끝나면 돌아갈 은신처 레벨.
+	 *
+	 * [왜 SiteLevels 와 같은 표에 안 넣는가] 은신처는 장소(Site.*)가 아니다. 표에 끼워 넣으면
+	 * 목표 선택 UI 가 그 표를 그릴 때 은신처가 갈 수 있는 작업 장소로 섞여 나오고,
+	 * 캠페인 통과 판정(RecordSiteCleared)도 그것을 세게 된다.
+	 *
+	 * [비어 있으면 떠나지 않는다] SiteLevels 와 같은 판단이다 — "모르겠으면 기본 맵" 은
+	 * 정답인 적이 없다. 지정하지 않으면 결과 화면에 머물고 경고가 남는다.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Travel")
+	TSoftObjectPtr<UWorld> HideoutLevel;
+
+	/** 은신처 레벨 경로. 지정돼 있지 않으면 빈 경로다 — 호출부가 이동을 막아야 한다 */
+	FSoftObjectPath GetHideoutLevel() const
+	{
+		return HideoutLevel.ToSoftObjectPath();
+	}
 
 	// ── 접속 대기 (Phase.Prep 이전) ──
 	//

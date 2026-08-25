@@ -3,11 +3,15 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"   // GetNumPlayers() — 출발 시 대기 인원
+#include "GameFramework/GameStateBase.h"  // PlayerArray — hh.Run.Arrest 가 인덱스로 고른다
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "HAL/IConsoleManager.h"
 
 #include "Core/HeistLog.h"
+#include "Core/HeistSettings.h"
+#include "Core/HeistTravel.h"
 #include "Shared/NetAuthority.h"
 
 URunProgressSubsystem* URunProgressSubsystem::Get(const UObject* WorldContext)
@@ -289,6 +293,37 @@ bool URunProgressSubsystem::TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Co
 	return true;
 }
 
+void URunProgressSubsystem::ReleaseArrested(const TArray<FUniqueNetIdRepl>& PlayerIds)
+{
+	if (!EnsureServerAuthority(TEXT("ReleaseArrested")))
+	{
+		return;
+	}
+
+	int32 ReleasedNum = 0;
+
+	for (const FUniqueNetIdRepl& PlayerId : PlayerIds)
+	{
+		// 신원을 모르는 접속은 애초에 명단에 들어가지 못한다 (RecordArrested 참고).
+		// 여기서 걸러 두지 않으면 빈 키 하나로 Remove 가 돌아 로그가 어긋난다
+		if (!PlayerId.IsValid())
+		{
+			continue;
+		}
+
+		if (ArrestedPlayers.Remove(PlayerId) > 0)
+		{
+			++ReleasedNum;
+		}
+	}
+
+	if (ReleasedNum > 0)
+	{
+		UE_LOG(LogHeist, Log, TEXT("관전 %d명 형기 만료 — 구출 대기 %d명 남음"),
+			ReleasedNum, ArrestedPlayers.Num());
+	}
+}
+
 // ──────────────────────────────────────────────────────────────
 // 수명 경계
 // ──────────────────────────────────────────────────────────────
@@ -325,6 +360,80 @@ void URunProgressSubsystem::RecordSiteCleared(const FGameplayTag& SiteTag)
 bool URunProgressSubsystem::IsSiteCleared(FGameplayTag SiteTag) const
 {
 	return SiteTag.IsValid() && ClearedSites.Contains(SiteTag);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 출발
+// ──────────────────────────────────────────────────────────────
+
+bool URunProgressSubsystem::TryDepartToSite(const FGameplayTag& SiteTag)
+{
+	if (!EnsureServerAuthority(TEXT("TryDepartToSite")))
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 실패 — 월드가 없습니다."));
+		return false;
+	}
+
+	if (!SiteTag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 실패 — 장소 태그가 비어 있습니다."));
+		return false;
+	}
+
+	const FSoftObjectPath LevelPath = UHeistSettings::Get()->GetSiteLevel(SiteTag);
+
+	// 등록되지 않은 장소다. 여기서 폴백으로 아무 맵이나 열면 전원이 엉뚱한 곳으로 끌려가고,
+	// 되돌릴 방법이 없다. 안 떠나는 쪽이 언제나 낫다
+	if (LevelPath.IsNull())
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("출발 실패 — %s 의 레벨이 등록되지 않았습니다. "
+				 "Project Settings → Game → Heist → Site Levels 에 추가하세요."),
+			*SiteTag.ToString());
+		return false;
+	}
+
+	// 몇 명을 기다릴지 알려 준다. 이걸 빠뜨리면 저택 쪽이 인원을 모른 채로 조용 시간 폴백에
+	// 떨어져서 "가끔 한 명 두고 출발" 이 된다 (HeistStartGate).
+	//
+	// 명단이 확정돼 있으면 그것이 답이다. 아직 세션 파트가 채우지 않았으면 지금 접속해 있는
+	// 인원으로 대신한다 — 은신처에 있는 사람이 곧 갈 사람이라 이 시점에는 같은 수다
+	int32 ExpectedPlayers = GetRosterNum();
+	if (ExpectedPlayers <= 0)
+	{
+		// GetNumPlayers() 가 non-const 라 const 포인터로 받을 수 없다
+		if (AGameModeBase* GameMode = World->GetAuthGameMode())
+		{
+			ExpectedPlayers = GameMode->GetNumPlayers();
+		}
+	}
+
+	const FString TravelURL = HeistTravel::BuildTravelURL(LevelPath, ExpectedPlayers);
+	if (TravelURL.IsEmpty())
+	{
+		UE_LOG(LogHeist, Warning,
+			TEXT("출발 실패 — %s 의 레벨 경로 '%s' 에서 패키지 이름을 얻지 못했습니다."),
+			*SiteTag.ToString(), *LevelPath.ToString());
+		return false;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("출발 — %s / 진입점 %s / %d명 대기 예정 → %s"),
+		*SiteTag.ToString(),
+		SelectedEntry.IsValid() ? *SelectedEntry.ToString() : TEXT("(미선택 — 기본 진입점)"),
+		ExpectedPlayers,
+		*TravelURL);
+
+	// 비-심리스 travel 이다. 이 줄 뒤로 같은 월드가 이어지지 않는다 —
+	// 출발 직전에 할 일은 전부 위에서 끝나 있어야 한다
+	World->ServerTravel(TravelURL);
+
+	return true;
 }
 
 bool URunProgressSubsystem::TrySelectEntry(const FGameplayTag& EntryTag)
@@ -659,6 +768,57 @@ static FAutoConsoleCommandWithWorldAndArgs GRunEntryCommand(
 	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunEntryCommand),
 	  ECVF_Cheat);
 
+// 은신처 목표 선택 UI 가 붙기 전까지 출발하는 유일한 수단이다.
+//
+// [기본값을 두지 않는다] 인자를 생략하면 등록된 장소를 찍어 주고 떠나지 않는다.
+//   "생략하면 저택" 으로 두면 그것이 코드 안의 하드코딩이 되고, 장소가 늘어난 뒤에도
+//   아무도 그 기본값을 고치지 않는다. 목록을 보여 주는 편이 실제로 더 빠르다
+static void RunDepartCommand(const TArray<FString>& Args, UWorld* World)
+{
+	URunProgressSubsystem* Run = GetRunForCheat(World);
+	if (!Run)
+	{
+		return;
+	}
+
+	const UHeistSettings* Settings = UHeistSettings::Get();
+
+	if (!Args.IsValidIndex(0))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("사용법: hh.Run.Depart Site.Mansion"));
+
+		if (Settings->SiteLevels.IsEmpty())
+		{
+			UE_LOG(LogHeist, Warning,
+				TEXT("  등록된 장소가 없습니다 — Project Settings → Game → Heist → Site Levels"));
+			return;
+		}
+
+		for (const FHeistSiteLevel& Entry : Settings->SiteLevels)
+		{
+			UE_LOG(LogHeist, Log, TEXT("  %s → %s"),
+				*Entry.SiteTag.ToString(), *Entry.Level.ToSoftObjectPath().ToString());
+		}
+		return;
+	}
+
+	const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Args[0]), /*ErrorIfNotFound=*/false);
+	if (!Tag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("'%s' 는 등록된 태그가 아닙니다."), *Args[0]);
+		return;
+	}
+
+	// 실패 사유는 TryDepartToSite 가 로그로 남긴다. 성공하면 이 아래는 실행되지 않는다
+	Run->TryDepartToSite(Tag);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunDepartCommand(
+	  TEXT("hh.Run.Depart"),
+	  TEXT("hh.Run.Depart <Site.태그> — 그 장소로 출발한다(ServerTravel). 인자를 비우면 등록된 장소를 찍는다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunDepartCommand),
+	  ECVF_Cheat);
+
 // 은신처 구출 UI 가 없어서 이것이 유일한 확인 수단이다.
 //
 // [로컬 플레이어가 아니라 명단의 앞에서부터 구출한다] 이 명령은 서버 전용인데
@@ -724,4 +884,55 @@ static FAutoConsoleCommandWithWorld GRunResetCampaignCommand(
 	  TEXT("hh.Run.ResetCampaign"),
 	  TEXT("새 방을 연다. 팀 골드와 역할까지 전부 비운다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&RunResetCampaignCommand),
+	  ECVF_Cheat);
+
+/**
+ * 관전을 손으로 확인하려면 체포자가 한 명 있어야 한다. 그것을 정상 경로로 만들려면
+ * 한 판을 일부러 지고, 누군가는 밴을 못 타고, 결과 화면까지 봐야 한다 —
+ * 관전 화면 한 줄을 고칠 때마다 그것을 반복할 수는 없다.
+ *
+ * 인덱스는 AGameStateBase::PlayerArray 순서다. 2인 PIE 에서 0 은 호스트, 1 은 클라이언트다.
+ * 클라이언트를 관전으로 보내야 "남을 보고 있는" 화면을 볼 수 있으니 보통 1 을 쓴다.
+ */
+static void RunArrestCommand(const TArray<FString>& Args, UWorld* World)
+{
+	URunProgressSubsystem* Run = GetRunForCheat(World);
+	if (!Run)
+	{
+		return;
+	}
+
+	const AGameStateBase* GS = World ? World->GetGameState() : nullptr;
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("GameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Index = Args.IsValidIndex(0) ? FCString::Atoi(*Args[0]) : 0;
+	if (!GS->PlayerArray.IsValidIndex(Index))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("플레이어 인덱스 %d 가 없습니다 (접속 %d명)."),
+			Index, GS->PlayerArray.Num());
+		return;
+	}
+
+	const APlayerState* Target = GS->PlayerArray[Index];
+	if (!IsValid(Target))
+	{
+		return;
+	}
+
+	Run->RecordArrested({ Target->GetUniqueId() });
+
+	UE_LOG(LogHeist, Log,
+		TEXT("%s 를 체포 명단에 넣었습니다. **다음 작업 레벨로 이동해야** 관전으로 들어갑니다 — "
+		     "체포는 접속(InitNewPlayer) 시점에만 판정하므로 지금 이 판에는 반영되지 않습니다."),
+		*Target->GetPlayerName());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunArrestCommand(
+	  TEXT("hh.Run.Arrest"),
+	  TEXT("hh.Run.Arrest [인덱스] — 해당 플레이어를 체포 명단에 넣는다. 다음 작업에서 관전자가 된다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunArrestCommand),
 	  ECVF_Cheat);

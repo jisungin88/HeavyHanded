@@ -465,7 +465,9 @@ void UHeistResultWidget::HandleConfirmClicked()
 	// 같은 확인이 여러 번 날아가고, 화면은 그동안 눌리지 않은 것처럼 보인다
 	bLocalConfirmed = true;
 
-	PC->Server_ConfirmResult();
+	// develop 의 정식 컨트롤러가 확인을 켜고 끌 수 있게 열어 두었다.
+	// 이 화면은 취소를 제공하지 않으므로 항상 true 다
+	PC->Server_SetResultConfirmed(true);
 
 	ApplyConfirmVisual();
 	OnLocalConfirmed();
