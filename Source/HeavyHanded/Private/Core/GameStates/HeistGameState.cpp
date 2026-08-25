@@ -23,6 +23,7 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	DOREPLIFETIME(AHeistGameState, StartWaitState);
 	DOREPLIFETIME(AHeistGameState, CurrentPhase);
 	DOREPLIFETIME(AHeistGameState, EntryTag);
 	DOREPLIFETIME(AHeistGameState, PhaseEndServerTime);
@@ -117,6 +118,40 @@ void AHeistGameState::SetPhase(const FGameplayTag& NewPhase, float DurationSecon
 	// 서버에서는 RepNotify 가 자동으로 불리지 않는다. 구독자가 서버 · 클라 어디에 있든
 	// 같은 시점에 같은 값을 받게 하려면 여기서 직접 불러 준다
 	OnRep_CurrentPhase(OldPhase);
+}
+
+void AHeistGameState::SetStartWaitState(const FHeistStartWaitState& NewState)
+{
+	if (!HasAuthority())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("SetStartWaitState 무시 — 클라이언트에서 호출되었습니다."));
+		return;
+	}
+
+	// 대기 루프가 0.25초마다 부른다. 같은 값이면 여기서 끊는다 —
+	// 안 그러면 대기 내내 같은 구조체가 계속 dirty 로 나간다
+	if (StartWaitState.bWaiting == NewState.bWaiting
+		&& StartWaitState.NumConnected == NewState.NumConnected
+		&& StartWaitState.NumExpected == NewState.NumExpected
+		&& StartWaitState.NumTravelling == NewState.NumTravelling)
+	{
+		return;
+	}
+
+	StartWaitState = NewState;
+
+	// 서버에서도 알린다. 호스트의 PlayerController 도 클라이언트와 똑같이 입력이 막혀야 하고,
+	// 서버에는 RepNotify 가 오지 않는다 (문서 02 의 OnRep 재실행 패턴)
+	OnRep_StartWaitState();
+}
+
+void AHeistGameState::OnRep_StartWaitState()
+{
+	UE_LOG(LogHeist, Verbose, TEXT("접속 대기 %s — %d명 (로딩 중 %d명) / 예정 %d명"),
+		StartWaitState.bWaiting ? TEXT("중") : TEXT("종료"),
+		StartWaitState.NumConnected, StartWaitState.NumTravelling, StartWaitState.NumExpected);
+
+	OnStartWaitChanged.Broadcast(StartWaitState);
 }
 
 void AHeistGameState::OnRep_CurrentPhase(FGameplayTag OldPhase)
@@ -215,11 +250,8 @@ void AHeistGameState::FinalizeOutcome()
 		}
 	}
 
-	// 최소 1인이 빠져나오면 작업은 성립한다 (기획서 2장 승패 조건).
-	//
-	// 아무도 남지 않은 판(전원 이탈)을 성공으로 읽는 함정은 이 조건 자체가 막는다 —
-	// 셀 사람이 없으면 EscapedNum 이 0 이라 그대로 실패로 떨어진다. '전원 탈출' 로 세던
-	// 시절에는 0명 중 0명이 참이라 CountedNum > 0 가드를 따로 세워야 했다.
+	// 최소 1인이 빠져나오면 작업은 성립한다. 전원 이탈을 성공으로 읽는 함정은 이 조건이 막는다 —
+	// 셀 사람이 없으면 EscapedNum 이 0 이라 그대로 실패다
 	const bool bAnyoneEscaped = EscapedNum > 0;
 
 	Outcome = HeistOutcome::Evaluate(IsTargetReached(), bAnyoneEscaped);
@@ -256,12 +288,8 @@ void AHeistGameState::SetResultConfirmed(APlayerState* Player, bool bConfirmed)
 		return;
 	}
 
-	// Result 에서만 받는다. 승차 명단이 Result 에서만 잠기는 것과 짝이다.
-	//
-	// 그전에 들어온 확인이 명단에 쌓이면 Result 진입 순간에는 값이 안 바뀌어
-	// OnResultConfirmChanged 가 울리지 않는다. 전원이 이미 확인한 상태인데 아무도
-	// 그 사실을 모르고, 체류 시간이 다 될 때까지 결과 화면에 갇힌다.
-	// 지금은 확인을 넣을 UI 경로가 없지만 세션·UI 파트의 Server RPC 가 붙는 순간 열린다.
+	// Result 에서만 받는다. 그전 확인이 쌓이면 Result 진입 순간에 값이 안 바뀌어
+	// OnResultConfirmChanged 가 울리지 않고, 전원이 확인했는데도 체류 시간까지 갇힌다
 	if (!IsPhase(HHTags::Phase_Result))
 	{
 		UE_LOG(LogHeist, Verbose, TEXT("결과 확인 무시 — 아직 결과 화면이 아니다 (%s)"),
@@ -385,12 +413,9 @@ void AHeistGameState::SetMirrorTag(APlayerState* Player, const FGameplayTag& Tag
 		return;
 	}
 
-	// Loose 태그를 쓰는 이유는 이 상태의 주인이 GAS 가 아니기 때문이다. 진리원은 명단이고
-	// 태그는 그 사본이라, 태그를 만드는 GameplayEffect 를 따로 두면 주인이 둘이 된다.
-	//
-	// 복제판(AddReplicated~)인 이유는 이 태그의 유일한 용도가 남에게 보이는 것이라서다.
-	// 그냥 AddLooseGameplayTag 는 서버에만 붙어서, 정작 이걸 읽어야 할 클라이언트 HUD 와
-	// 어빌리티 차단 판정에는 아무것도 도착하지 않는다.
+	// Loose 인 것은 이 상태의 주인이 GAS 가 아니기 때문이다 — GE 를 따로 두면 주인이 둘이 된다.
+	// **복제판이어야 한다.** AddLooseGameplayTag 는 서버에만 붙어서, 정작 읽어야 할
+	// 클라이언트 HUD 와 어빌리티 차단 판정에는 아무것도 도착하지 않는다
 	if (bApply)
 	{
 		ASC->AddReplicatedLooseGameplayTag(Tag);
@@ -451,14 +476,9 @@ void AHeistGameState::SetBoarded(APlayerState* Player, bool bBoarded)
 		return;
 	}
 
-	// Result 에 들어간 뒤로는 명단이 얼어야 한다.
-	//
-	// 체포는 ResolveArrests 가 이미 확정했고 등급도 그 위에서 나왔다. 여기서 승차만 더
-	// 바뀌면 탈출 명단에도 체포 명단에도 없는 사람이 생겨, 결과 화면이 자기가 표시하는
-	// 등급과 어긋난 명단을 그린다.
-	//
-	// 계기가 둘이라 이 자리에서 막는다 — 결과 화면에서의 하차 상호작용(AVanZone)과
-	// 접속 종료(AHeistGameMode::Logout). 부르는 쪽에서 각각 막으면 반드시 한쪽이 빠진다.
+	// Result 뒤로는 명단이 얼어야 한다. 승차만 더 바뀌면 탈출에도 체포에도 없는 사람이 생겨
+	// 결과 화면이 등급과 어긋난 명단을 그린다.
+	// 계기가 둘(하차 상호작용 · 접속 종료)이라 부르는 쪽이 아니라 여기서 막는다
 	if (IsPhase(HHTags::Phase_Result))
 	{
 		UE_LOG(LogHeist, Verbose, TEXT("승차 명단 변경 무시 — 이미 결과가 확정된 판이다 (%s)"),

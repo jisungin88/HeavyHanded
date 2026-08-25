@@ -28,12 +28,7 @@ namespace
 {
 	/**
 	 * 접속 대기 조건을 다시 보는 주기(초).
-	 *
-	 * "로딩이 끝났다" 와 "인원이 다 찼다" 는 알림으로 오지 않는다. NumTravellingPlayers 는
-	 * 엔진이 조용히 깎는 카운터고, PostLogin 은 접속 시점이지 로딩 완료 시점이 아니다.
-	 * 그래서 폴링이다. 대기 구간에서만 도는 데다 하는 일이 정수 비교 몇 개뿐이라 비용이 없다.
-	 *
-	 * 밸런싱 값이 아니라 구현 상수라 UHeistSettings 에 두지 않는다.
+	 * "로딩이 끝났다" 는 알림으로 오지 않아 폴링이다 — 대기 구간에서만 돌고 정수 비교뿐이다.
 	 */
 	constexpr float StartWaitPollSeconds = 0.25f;
 }
@@ -47,16 +42,9 @@ AHeistGameMode::AHeistGameMode()
 	// 한쪽만 지정하고도 그럴듯하게 돈다
 	PlayerControllerClass = AHeistPlayerController::StaticClass();
 
-	// 관전자에게 자유 비행 폰을 주지 않는다.
-	//
-	// [왜 nullptr 인가] 엔진 기본 ASpectatorPawn 은 벽을 통과해 날아다닌다. 체포된 사람이
-	//   그것으로 저택을 훑고 경비 · 트랩 · 대형 금고 위치를 음성으로 알려 주면 잠입 게임이
-	//   그 자리에서 무너진다 — 오라클의 '전 구역 스캔' 을 공짜로, 무제한으로 쓰는 셈이다.
-	//   폰이 없으면 카메라는 ViewTarget 밖에 못 보고, 그 대상은 AHeistPlayerController 가
-	//   살아 있는 팀원으로만 고른다.
-	//
-	// AGameStateBase::SpectatorClass 로 복제되므로 클라이언트도 스폰하지 않는다
-	// (APlayerController::SpawnSpectatorPawn 이 GameState 쪽 값을 읽는다).
+	// 관전자에게 자유 비행 폰을 주지 않는다. 엔진 기본 ASpectatorPawn 은 벽을 통과해서,
+	// 체포자가 경비 · 트랩 · 금고 위치를 음성으로 알려 주면 잠입 게임이 무너진다.
+	// 폰이 없으면 카메라는 팀원 시점에만 붙는다
 	SpectatorClass = nullptr;
 
 	// 페이즈는 접속 대기가 끝난 뒤에 시작한다. 엔진 기본 매치 흐름과 겹치지 않게
@@ -85,11 +73,8 @@ void AHeistGameMode::InitGame(const FString& MapName, const FString& Options, FS
 int32 AHeistGameMode::ResolveExpectedPlayers(const FString& Options) const
 {
 	// 1순위 — 런 진행 서브시스템. 로비에서 확정된 명단이 레벨 이동을 건너 살아 있다.
-	//
-	//   [주의] 서브시스템은 서버 것과 클라이언트 것이 서로 다른 객체다.
-	//     호스트가 넣은 값은 참가자에게 가지 않는다. 여기서 읽는 것이 안전한 이유는
-	//     이 함수가 서버 전용(GameMode)이기 때문이다. 클라이언트도 알아야 하는 값이
-	//     생기면 서브시스템이 아니라 AHeistGameState 로 복제할 것.
+	// 서브시스템은 서버와 클라이언트가 서로 다른 객체다. 여기서 읽어도 되는 것은
+	// 이 함수가 서버 전용이기 때문이고, 클라도 알아야 할 값이면 GameState 로 복제할 것
 	if (const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
 	{
 		const int32 RosterNum = Run->GetRosterNum();
@@ -115,10 +100,7 @@ int32 AHeistGameMode::ResolveExpectedPlayers(const FString& Options) const
 }
 
 // ──────────────────────────────────────────────────────────────
-// 진입점
-//
-// 기획서 2장 — 팀은 은신처에서 진입로를 고르고 전원이 그 자리에서 시작한다.
-// 밴도 같이 간다. 진입점은 곧 밴에서 내리는 자리다.
+// 진입점 — 전원이 같은 자리에서 시작하고 밴도 같이 간다
 // ──────────────────────────────────────────────────────────────
 
 void AHeistGameMode::ResolveEntryPoint()
@@ -213,11 +195,8 @@ void AHeistGameMode::ResolveEntryPoint()
 		break;
 	}
 
-	// HUD 가 "정문으로 진입" 을 그리려면 클라이언트도 알아야 한다.
-	// 은신처 값(URunProgressSubsystem)은 복제되지 않으므로 여기서 GameState 로 옮긴다.
-	//
-	// GameState 가 아직 없을 수 있다 — 첫 스폰이 매치 시작보다 먼저인 경로다.
-	// 그때는 HandleMatchHasStarted 가 다시 넣는다
+	// 은신처 값은 복제되지 않으므로 GameState 로 옮긴다. 아직 GameState 가 없을 수 있고
+	// (첫 스폰이 매치 시작보다 먼저인 경로) 그때는 HandleMatchHasStarted 가 다시 넣는다
 	if (AHeistGameState* GS = GetGameState<AHeistGameState>())
 	{
 		GS->SetEntryTag(IsValid(ResolvedEntry) ? ResolvedEntry->GetEntryTag() : FGameplayTag());
@@ -409,12 +388,8 @@ FString AHeistGameMode::InitNewPlayer(APlayerController* NewPlayerController, co
 		return ErrorMessage;
 	}
 
-	// 이 한 줄이 관전의 전부다. 폰 스폰은 AGameModeBase::HandleStartingNewPlayer 가
-	// MustSpectate() 를 보고 알아서 건너뛰고, 인원 집계도 AGameMode::PostLogin 이
-	// NumSpectators 로 돌린다 — 우리가 따로 막을 곳이 없다.
-	//
-	// 카메라를 어디에 둘지는 여기서 정하지 않는다. 시점은 순수 표현이고 로컬에서만
-	// 의미가 있어서 AHeistPlayerController 가 자기 화면에 대해 고른다.
+	// 이 한 줄이 관전의 전부다. 폰 스폰과 인원 집계는 엔진이 MustSpectate 를 보고 알아서 한다.
+	// 카메라를 어디에 둘지는 로컬 문제라 AHeistPlayerController 가 정한다
 	PS->SetIsOnlyASpectator(true);
 
 	UE_LOG(LogHeist, Log, TEXT("체포자 %s — 이 판은 관전한다."), *PS->GetPlayerName());
@@ -474,15 +449,9 @@ FHeistStartConditions AHeistGameMode::MakeStartConditions()
 	const float Now = World ? World->GetTimeSeconds() : 0.f;
 
 	FHeistStartConditions Conditions;
-	// 관전자를 더한다. AGameMode::GetNumPlayers() 는 NumPlayers + NumTravellingPlayers 인데,
-	// AGameMode::PostLogin 은 MustSpectate 인 접속을 NumSpectators 로만 세고 그 둘 중 어느
-	// 쪽에도 넣지 않는다. 그래서 체포자가 한 명이라도 있으면 인원이 영영 예정치에 못 미쳐
-	// **매 판 상한(기본 30초)을 다 기다린 뒤 TimedOut 경고와 함께 시작한다.**
-	//
-	// 관전자도 기다릴 대상이다 — 레벨을 로딩하고 접속하는 것은 똑같고, 결과 화면을 같이 본다.
-	// 대신 관전자의 로딩 완료 여부는 구분하지 않는다 (엔진이 NumTravellingPlayers 에 넣지
-	// 않으므로 알 방법이 없다). 관전자가 준비 시간 일부를 놓치는 것은 플레이어가 놓치는 것과
-	// 무게가 다르므로 그 부정확은 받아들인다.
+	// 관전자를 더한다. GetNumPlayers() 는 MustSpectate 인 접속을 세지 않아서, 체포자가
+	// 한 명이라도 있으면 인원이 영영 예정치에 못 미쳐 **매 판 상한을 다 기다린다.**
+	// 관전자의 로딩 완료 여부는 엔진이 알려주지 않으므로 구분하지 않는다
 	Conditions.NumPlayers = GetNumPlayers() + GetNumSpectators();
 	Conditions.NumTravellingPlayers = NumTravellingPlayers;
 	Conditions.ExpectedPlayers = ExpectedPlayers;
@@ -505,6 +474,9 @@ void AHeistGameMode::TickStartWait()
 	switch (HeistStartGate::Evaluate(Conditions))
 	{
 	case EHeistStartDecision::Wait:
+		// 아직 기다린다. 클라이언트가 "무엇을 기다리는지" 를 알아야 로딩 표시를 띄우고
+		// 조작을 막을 수 있다 — 판정은 서버가 하지만 표시와 입력은 각자 자기 화면의 몫이다
+		PublishStartWait(Conditions, /*bWaiting=*/true);
 		return;
 
 	case EHeistStartDecision::TimedOut:
@@ -533,7 +505,30 @@ void AHeistGameMode::StartPrep()
 
 	UE_LOG(LogHeist, Log, TEXT("접속 대기 종료 — %d명으로 시작합니다."), GetNumPlayers());
 
+	// 페이즈보다 **먼저** 대기 해제를 알린다. 순서가 뒤집히면 Prep 이 도착한 프레임에도
+	// 입력이 아직 막혀 있어, 45초짜리 준비 시간의 앞부분을 한 틱 잃는다
+	PublishStartWait(MakeStartConditions(), /*bWaiting=*/false);
+
 	EnterPhase(HHTags::Phase_Prep, EHeistPhaseReason::Scheduled);
+}
+
+void AHeistGameMode::PublishStartWait(const FHeistStartConditions& Conditions, bool bWaiting)
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+
+	// 대기 초반에는 GameState 가 아직 없을 수 있다. 다음 폴링에서 다시 온다
+	if (!GS)
+	{
+		return;
+	}
+
+	FHeistStartWaitState State;
+	State.bWaiting = bWaiting;
+	State.NumConnected = Conditions.NumPlayers;
+	State.NumExpected = Conditions.ExpectedPlayers;
+	State.NumTravelling = Conditions.NumTravellingPlayers;
+
+	GS->SetStartWaitState(State);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -607,13 +602,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 				TEXT("GameState 에 AlertComponent 가 없어 준비 시간의 경계도가 남습니다."));
 		}
 
-		// 여기서 탈출 판정을 부르지 않는다. 본 작업이 시작되는 순간은 전원이 아직 밴
-		// 근처에 있는 시점이라, 스폰 위치가 승차 볼륨과 조금이라도 겹치면 그 자리에서
-		// $0 으로 판이 끝난다. 레벨 배치에 따라 되기도 하고 안 되기도 하는 사고다.
-		//
-		// 대신 판정은 '변화' 로만 성립하게 둔다 — 승차 · 하차 · 다운 · 접속 종료.
-		// 준비 시간에 밴에 서 있던 사람도 명단에는 이미 올라와 있으므로,
-		// 마지막 한 명이 타는 순간 그들까지 포함해 판정된다. 잃는 경우가 없다.
+		// 여기서 탈출 판정을 부르지 않는다. 전원이 아직 밴 근처라 스폰 위치가 승차 볼륨과
+		// 겹치면 그 자리에서 $0 으로 판이 끝난다. 판정은 '변화' 로만 성립하게 둔다
 	}
 
 	if (Phase == HHTags::Phase_Result)
@@ -682,11 +672,9 @@ void AHeistGameMode::WatchDownedState(APlayerState* Player)
 
 void AHeistGameMode::HandleDownedTagChanged(const FGameplayTag /*Tag*/, int32 /*NewCount*/)
 {
-	// 다운으로 생존자가 줄면, 이미 밴에 타 있던 사람들만으로 전원 승차가 성립할 수 있다.
-	// 복구로 생존자가 늘면 반대로 성립이 풀리는데, 그때는 아무 일도 일어나지 않는다.
-	//
-	// 여기는 특히 즉시 판정하면 안 된다 — ASC 의 태그 변경 콜백 안이라,
-	// 그 자리에서 페이즈를 넘기면 태그를 바꾸던 GameplayEffect 처리 도중에 판이 끝난다
+	// 다운으로 생존자가 줄면 이미 타 있던 사람들만으로 전원 승차가 성립할 수 있다.
+	// 여기는 특히 즉시 판정하면 안 된다 — ASC 태그 콜백 안이라, 그 자리에서 페이즈를
+	// 넘기면 태그를 바꾸던 GameplayEffect 처리 도중에 판이 끝난다
 	RequestEscapeCheck();
 }
 
@@ -948,11 +936,8 @@ void AHeistGameMode::FinishMatch_Implementation()
 	bFinished = true;
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 
-	// 은신처로 돌려보낸다. 이걸 안 하면 한 판이 끝나도 결과 화면에서 영영 나오지 못한다 —
-	// 사이클이 닫히지 않으므로 상점 · 구출 · 다음 목표 선택이 전부 도달 불가능해진다.
-	//
-	// [BP 재정의 자리는 그대로다] BlueprintNativeEvent 라서 BP_HeistGameMode 가 이 함수를
-	//   재정의하면 여기는 실행되지 않는다. 엔딩 크레딧 같은 분기가 정해지면 그쪽에서 가른다.
+	// 은신처로 돌려보낸다. 안 하면 사이클이 닫히지 않아 상점 · 구출 · 목표 선택에 도달할 수 없다.
+	// BlueprintNativeEvent 라 BP 가 재정의하면 여기는 실행되지 않는다
 	const FSoftObjectPath HideoutPath = UHeistSettings::Get()->GetHideoutLevel();
 
 	// 지정돼 있지 않으면 떠나지 않는다. TryDepartToSite 와 같은 판단이다 —

@@ -13,18 +13,8 @@ class AVanZone;
 
 /**
  * 작업 레벨의 상태머신 구동부. Prep → Heist → Escape → Result.
- *
- * [무엇을 갖고 무엇을 안 갖는가]
- *   - 전이 규칙(다음이 무엇인가)  → HeistPhase 네임스페이스. GameMode 없이도 물어볼 수 있어야 한다
- *   - 접속 대기 판정(시작해도 되나) → HeistStartGate. 순수 함수라 테스트로 검증한다
- *   - 현재 상태와 복제              → AHeistGameState
- *   - 여기 남는 것                  → 타이머 · 로그 · 다른 시스템 호출 같은 부수효과뿐이다
- *
- *   규칙을 밖으로 뺀 이유는 재사용이 아니라 검증 가능성이다. 페이즈 전이와 접속 대기는
- *   틀려도 크래시가 나지 않고 "가끔 이상하더라" 로만 드러나서, 사람이 눈으로 잡을 수 없다.
- *
- * [로비 · 은신처는 여기 없다] Phase.Lobby / Phase.Hideout 은 레벨 자체가 다르고
- *   전환 수단이 ServerTravel 이다 (세션 파트). 이 GameMode 는 저택에 도착한 뒤부터 돈다.
+ * 전이 규칙은 HeistPhase, 접속 대기 판정은 HeistStartGate, 상태와 복제는 AHeistGameState 가 갖는다.
+ * 여기 남는 것은 타이머 · 로그 · 다른 시스템 호출 같은 부수효과뿐이다.
  */
 UCLASS()
 class HEAVYHANDED_API AHeistGameMode : public AGameMode
@@ -39,36 +29,22 @@ public:
 
 	/**
 	 * 접속한 사람의 PlayerState 가 만들어진 직후. **체포자를 관전자로 표시하는 자리다.**
-	 *
-	 * [왜 PostLogin 이 아닌가] AGameModeBase::PostLogin 은 Super 안에서 이미
-	 *   HandleStartingNewPlayer → RestartPlayer 까지 밟아 폰을 스폰한다. 거기서 표시하면
-	 *   한 프레임 폰이 생겼다 사라지고, AGameMode::PostLogin 의 인원 집계도 플레이어로 세어진다.
-	 *   InitNewPlayer 는 Login 단계라 그 전이고, 신원(FUniqueNetIdRepl)을 인자로 받는다 —
-	 *   레벨을 건너 살아남는 체포 명단의 키가 정확히 그것이다.
-	 *
-	 * 표시만 하면 폰 스폰은 엔진이 알아서 건너뛴다 (AGameModeBase::MustSpectate).
+	 * PostLogin 은 Super 안에서 이미 폰을 스폰해 버려서 늦다. 여기는 Login 단계라 그 전이고,
+	 * 체포 명단의 키인 FUniqueNetIdRepl 을 인자로 받는다.
 	 */
 	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
 		const FString& Options, const FString& Portal = TEXT("")) override;
 	virtual void Logout(AController* Exiting) override;
 
 	/**
-	 * 스폰 위치를 고른다. **전원이 같은 진입점에서 시작한다.**
-	 *
-	 * 엔진 기본 구현은 빈 PlayerStart 중 하나를 무작위로 고른다 — 넷이 흩어져서 시작한다.
-	 * 이 게임은 밴에서 같이 내리는 것이 전제라 그러면 안 된다.
-	 *
-	 * 어느 진입점인가는 은신처에서 팀이 고른 값(URunProgressSubsystem::GetSelectedEntry)이고,
-	 * 그것이 이 레벨에 실제로 있는지는 HeistEntryGate 가 판정한다.
-	 * 진입점이 하나도 없는 레벨(테스트 맵 등)에서는 엔진 기본 동작으로 돌아간다.
+	 * 스폰 위치를 고른다. **전원이 같은 진입점에서 시작한다** — 밴에서 같이 내리는 것이 전제다.
+	 * 진입점이 하나도 없는 레벨에서는 엔진 기본 동작으로 돌아간다.
 	 */
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
 	/**
 	 * 페이즈를 즉시 다음으로 넘긴다. 접속 대기 중이면 기다리지 않고 준비 시간을 시작한다.
-	 *
-	 * 치트(hh.Phase.Next)의 진입점이다. 사유가 Cheat 로 기록되므로 결과 화면 집계에서
-	 * "정상적으로 끝난 판" 과 구분할 수 있다.
+	 * 치트(hh.Phase.Next)의 진입점이라 사유가 Cheat 로 기록된다.
 	 */
 	void AdvancePhase(EHeistPhaseReason Reason);
 
@@ -77,18 +53,13 @@ protected:
 
 	/**
 	 * 페이즈에 들어간 직후, 다른 시스템에 걸어야 하는 것들.
-	 *
-	 * 페이즈 진입 부수효과는 앞으로 늘어난다 (Escape 진입 시 경비 증원, Result 진입 시 집계 확정).
-	 * EnterPhase 본문에 조건문으로 쌓지 않고 여기 한 곳에 모은다.
+	 * 진입 부수효과는 앞으로 늘어난다 — EnterPhase 에 조건문으로 쌓지 말고 여기 모을 것.
 	 */
 	virtual void OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason);
 
 	/**
 	 * 경계 단계가 바뀌었다. 경보(래치)면 본 작업을 즉시 끝내고 도주로 넘긴다.
-	 *
-	 * [본 작업 중일 때만이다] 준비 시간의 경보는 무시한다 — 어차피 Heist 진입에서
-	 *   ResetAlert 로 지워지므로, 그것 때문에 도주로 넘기면 작업을 시작도 못 하고 끝난다.
-	 *   이미 도주 · 결과라면 늦었다.
+	 * 준비 시간의 경보는 무시한다 — Heist 진입에서 어차피 지워지므로 작업을 시작도 못 하고 끝난다.
 	 */
 	UFUNCTION()
 	void HandleAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel OldLevel);
@@ -103,70 +74,34 @@ protected:
 
 	/**
 	 * 매치를 끝낸다. 결과 화면에서 나가는 유일한 출구다. (서버 전용, 한 번만)
-	 *
-	 * [여기서 레벨을 옮기지 않는다] 기본 구현은 로그만 남긴다. ServerTravel 은 세션 파트
-	 *   소관이고, 어디로 돌아갈지(로비 · 은신처)는 그쪽 흐름이 정한다.
-	 *   `BP_HeistGameMode` 에서 이 함수를 재정의해 실제 전환을 붙이면 된다 —
-	 *   AVanZone::HandleConfirmedLoot 과 같은 방식이다.
-	 *
-	 * [언제 불리는가] 둘 중 먼저 오는 쪽이다.
-	 *   - 남아 있는 전원이 결과를 확인했다
-	 *   - 결과 체류 시간(UHeistSettings::ResultSeconds)이 다 됐다
-	 *
-	 *   시간 쪽이 안전망이다. 한 명이 자리를 비웠다고 나머지가 영영 갇혀 있으면 안 된다.
+	 * 기본 구현은 로그만 남긴다 — ServerTravel 은 세션 파트 소관이라 BP 에서 재정의해 붙인다.
+	 * 전원 확인과 결과 체류 시간 중 먼저 오는 쪽에 불린다.
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Heist")
 	void FinishMatch();
 	virtual void FinishMatch_Implementation();
 
 	/**
-	 * 밴을 진입점으로 옮긴다. (서버 전용, 레벨당 한 번)
+	 * 밴을 진입점으로 옮긴다. (서버 전용, 레벨당 한 번, 준비 시간보다 먼저)
 	 *
-	 * [연출을 갈아 끼우는 자리다] 기본 구현은 **즉시 순간이동**시킨다.
-	 *   "밴이 달려 들어와 서고 그때 시작" 같은 연출을 넣으려면 `BP_HeistGameMode` 에서
-	 *   이 함수만 재정의하면 된다 — 어디에 서는가는 이미 정해져 있고, 어떻게 가는가만 바뀐다.
-	 *   AVanZone::HandleConfirmedLoot · FinishMatch 와 같은 방식이다.
-	 *
-	 *   재정의할 때 지켜야 할 것은 하나다 — **끝나는 자리가 EntryTransform 이어야 한다.**
-	 *   플레이어는 그 자리를 기준으로 이미 스폰돼 있고, 탈출 판정도 밴 볼륨으로 한다.
-	 *
-	 * [이 함수는 서버에서만 돈다] 클라이언트에는 AVanZone 의 이동 복제로 결과만 전달된다
-	 *   (`SetReplicateMovement(true)`). 그래서 여기서 밴을 움직이면 클라이언트에서는
-	 *   **보간된 이동**으로 보인다 — 순간이동은 문제없지만, 달려 들어오는 연출을 넣을 때는
-	 *   그 보간이 연출 품질을 좌우한다. 화면에 맞추려면 이동 복제 대신 연출을 각 머신에서
-	 *   재생하는 방식(GameplayCue · Multicast)을 검토할 것.
-	 *
-	 * [언제 불리는가] 진입점이 정해지는 순간, 레벨당 한 번. 준비 시간(Prep)보다 먼저다.
-	 *   판정 시점은 첫 스폰과 매치 시작 중 **먼저 오는 쪽**이다 — 리슨 서버에서는
-	 *   호스트의 PostLogin 이 HandleMatchHasStarted 보다 먼저 올 수 있기 때문이다.
-	 *
-	 * @param Van             이 레벨의 밴. 없으면 이 함수는 아예 불리지 않는다
-	 * @param EntryTransform  밴이 서야 하는 자리 (AHeistEntryPoint 의 VanAnchor)
+	 * 기본 구현은 순간이동이다. 달려 들어오는 연출은 BP 에서 이 함수만 재정의하면 된다 —
+	 * 단 **끝나는 자리가 EntryTransform 이어야 한다.** 플레이어가 이미 그 기준으로 스폰돼 있다.
+	 * 서버에서만 돌고 클라이언트에는 이동 복제로 결과만 간다 (연출은 보간되어 보인다).
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Heist|Entry")
 	void PlaceVan(AVanZone* Van, const FTransform& EntryTransform);
 	virtual void PlaceVan_Implementation(AVanZone* Van, const FTransform& EntryTransform);
 
-	/**
-	 * 이 장소의 목표 금액($). 기획서 2장 — 저택 $50,000 / 박물관 $120,000 / 은행 $250,000.
-	 * 장소마다 다르므로 UHeistSettings 가 아니라 여기 있다.
-	 */
+	/** 이 장소의 목표 금액($). 장소마다 다르므로 UHeistSettings 가 아니라 여기 있다 */
 	UPROPERTY(EditDefaultsOnly, Category = "Heist", meta = (ClampMin = "0"))
 	int32 TargetValue = 50000;
 
-	/**
-	 * 본 작업(Phase.Heist) 제한 시간. 기획서 2장 — 저택 7분 / 박물관 8분 / 은행 9분.
-	 * 준비 시간은 여기 포함되지 않는다.
-	 */
+	/** 본 작업(Phase.Heist) 제한 시간. 준비 시간은 포함되지 않는다 */
 	UPROPERTY(EditDefaultsOnly, Category = "Heist", meta = (ClampMin = "1.0", Units = "s"))
 	float HeistSeconds = 420.f;
 
 	/**
-	 * 이 작업 레벨이 어느 장소인가 (Site.*). 기획서 2장 — 저택 · 박물관 · 은행.
-	 *
-	 * 캠페인 진행(3개 장소 통과 = 최종 성공)을 기록하는 키다. 비워 두면 이 판을 성공해도
-	 * 진행이 올라가지 않으므로, 결과 확정에서 경고를 남긴다.
-	 *
+	 * 이 작업 레벨이 어느 장소인가 (Site.*). 캠페인 진행을 기록하는 키다.
 	 * 기본값을 주지 않는다 — 저택 값을 박아 두면 박물관 BP 가 지정을 잊었을 때
 	 * 조용히 저택을 두 번 통과한 것으로 기록된다.
 	 */
@@ -174,44 +109,31 @@ protected:
 	FGameplayTag SiteTag;
 
 private:
-	/**
-	 * 이 판에 몇 명이 올 예정인지 알아낸다. 모르면 0.
-	 *
-	 * 값의 출처가 바뀌어도(URL → GameInstance) 나머지 코드가 흔들리지 않게 여기 하나로 모은다.
-	 * 우선순위와 각 경로의 한계는 구현부 주석에 있다.
-	 */
+	/** 이 판에 몇 명이 올 예정인지 알아낸다. 모르면 0. 우선순위는 구현부 참고 */
 	int32 ResolveExpectedPlayers(const FString& Options) const;
 
 	/**
-	 * 지금 상황을 판정용 값으로 옮긴다. 시각을 경과·잔여로 바꾸는 곳이 여기다.
-	 * (const 가 아닌 이유는 AGameMode::GetNumPlayers() 가 non-const 이기 때문이다)
+	 * 지금 상황을 판정용 값으로 옮긴다.
+	 * (const 가 아닌 것은 AGameMode::GetNumPlayers() 가 non-const 이기 때문이다)
 	 */
 	FHeistStartConditions MakeStartConditions();
 
 	/**
 	 * 이 판의 진입점을 정하고 캐시한다. 레벨당 한 번, 첫 스폰보다 먼저.
-	 *
-	 * [왜 캐시하는가] ChoosePlayerStart 는 사람마다 불린다. 매번 다시 판정하면
-	 *   그사이에 은신처 값이 바뀌었을 때(치트 · 재접속) **사람마다 다른 곳에서 시작한다.**
-	 *   한 판의 진입점은 한 번 정해지면 끝까지 같아야 한다.
-	 *
-	 * 진입점이 없는 레벨에서는 캐시가 비고, 스폰은 엔진 기본 동작으로 돌아간다.
+	 * ChoosePlayerStart 는 사람마다 불리므로 매번 판정하면 **사람마다 다른 곳에서 시작한다.**
 	 */
 	void ResolveEntryPoint();
 
 	/**
 	 * 밴을 진입점으로 보낸다. 진입점이나 밴이 없으면 아무것도 하지 않는다.
-	 *
-	 * **밴 배치가 실패해도 스폰은 살아 있어야 한다.** 예전에 앵커가 없을 때 밴을 스폰 지점에
-	 * 세웠고, 폰 스폰이 콜리전에 막혀 아무도 움직이지 못했다. 밴은 못 옮기면 그냥 두는 것이 낫다.
+	 * **밴 배치가 실패해도 스폰은 살아 있어야 한다** — 예전에 밴을 스폰 지점에 세워
+	 * 폰이 콜리전에 막혀 아무도 움직이지 못했다.
 	 */
 	void MoveVanToEntry();
 
 	/**
 	 * 밴이 스폰 지점을 덮고 있으면 경고한다.
-	 *
-	 * 앵커가 멀쩡해도 배치자가 화살표를 진입점 위에 겹쳐 놓으면 폰이 스폰되지 않는다.
-	 * 그때 증상은 "이동도 회전도 안 된다" 뿐이라 원인을 짐작할 수 없다 — 로그로 알려 준다.
+	 * 그때 증상은 "이동도 회전도 안 된다" 뿐이라 원인을 짐작할 수 없다.
 	 */
 	void WarnIfVanBlocksEntry() const;
 
@@ -220,6 +142,12 @@ private:
 
 	/** 접속 대기를 끝내고 Phase.Prep 으로 들어간다 */
 	void StartPrep();
+
+	/**
+	 * 접속 대기 상태를 GameState 로 옮긴다. 클라이언트의 로딩 표시와 입력 차단이 여기 매달린다.
+	 * 서버가 할 수 있는 것은 사실을 복제하는 것까지고, 무엇을 할지는 PlayerController 가 정한다.
+	 */
+	void PublishStartWait(const FHeistStartConditions& Conditions, bool bWaiting);
 
 	/** 페이즈를 바꾸고 다음 전환을 예약한다 */
 	void EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Reason);
@@ -233,83 +161,46 @@ private:
 	/**
 	 * 탈출 판정을 다음 틱에 예약한다.
 	 *
-	 * [왜 그 자리에서 판정하지 않는가] 판정 계기가 전부 '명단이 바뀌는 순간' 이라,
-	 *   즉시 판정하면 명단을 바꾸던 코드가 아직 안 끝난 상태에서 결과 화면이 열린다.
-	 *   실제로 그랬다 — 마지막에 탄 사람의 Event.Player.BoardedVan 이 Result 진입 뒤에
-	 *   발송되고, 승차 로그도 결과 로그 뒤에 찍혔다.
-	 *
-	 *   한 틱 미루면 계기를 만든 코드가 전부 끝난 뒤에 판정한다. 접속 종료 경로가 원래
-	 *   이렇게 하고 있었는데(PlayerArray 가 아직 안 줄어서), 나머지 둘도 같은 이유가 있었다.
-	 *
-	 * 같은 틱에 여러 번 불려도 예약은 하나다.
+	 * 그 자리에서 판정하면 명단을 바꾸던 코드가 끝나기 전에 결과 화면이 열린다 —
+	 * 마지막에 탄 사람의 이벤트가 Result 진입 뒤에 발송된 적이 있다. 예약은 한 틱에 하나다.
 	 */
 	void RequestEscapeCheck();
 
 	/**
 	 * 생존자가 전부 밴에 탔으면 결과로 넘긴다. 직접 부르지 말고 RequestEscapeCheck() 를 쓸 것.
-	 *
-	 * [언제 성립하는가] 계기가 셋이다 — 누가 타거나, 누가 다운되거나
-	 *   (남은 생존자가 줄어 이미 탄 사람들만 남는다), 누가 접속을 끊거나.
-	 *   조건이 아니라 계기가 셋인 것이므로 판정은 한 곳이어야 한다.
-	 *
-	 * [준비 시간은 제외한다] 플레이어는 밴 근처에서 시작한다. Prep 부터 세면 스폰 직후
-	 *   전원이 볼륨 안에 있어서 $0 으로 판이 끝난다. 본 작업에 들어가야 승차를 센다.
+	 * 계기가 셋이라(승차 · 다운 · 접속 종료) 판정은 한 곳이어야 한다.
+	 * 준비 시간은 제외한다 — 스폰 직후 전원이 볼륨 안이라 $0 으로 판이 끝난다.
 	 */
 	void TryFinishByEscape();
 
 	/** 결과 진입 시 체포를 확정한다. 미승차자와 다운자가 대상이다 */
 	void ResolveArrests();
 
-	/**
-	 * 적재 금액을 팀 공용 골드로 넘긴다. (결과 등급이 확정된 뒤)
-	 *
-	 * 지급 기준은 `UHeistSettings::MinOutcomeForPayout` — 기본값은 부분 성공 이상이다.
-	 * 여기서 넘긴 값이 은신처 정산과 장비 구매의 입력이 된다.
-	 */
+	/** 적재 금액을 팀 공용 골드로 넘긴다. 기준은 UHeistSettings::MinOutcomeForPayout */
 	void PayoutTeamGold();
 
 	/**
-	 * 이 장소를 통과했으면 런 진행에 기록한다. (결과 등급이 확정된 뒤)
-	 *
-	 * 통과 기준은 등급 `Success` 뿐이다 — 기획서 2장의 작업 성공(목표 금액 달성 + 최소 1인
-	 * 승차)과 같은 선이고, 그 아래는 "실패한 장소를 처음부터 재시작" 대상이다.
-	 * 목표를 못 채운 판(Partial)은 실어 온 돈은 받아 가지만 장소는 다시 해야 한다.
-	 *
-	 * [여기서 하지 않는 것] 통과 뒤에 어디로 가는가(은신처 · 최종 성공 연출)는 정하지 않는다.
-	 *   사실만 남기고 이동은 FinishMatch 재정의(세션 파트)가 정한다.
+	 * 이 장소를 통과했으면 런 진행에 기록한다. 통과 기준은 등급 `Success` 뿐이다.
+	 * 통과 뒤에 어디로 가는가는 여기서 정하지 않는다 — 사실만 남기고 이동은 FinishMatch 가 정한다.
 	 */
 	void RecordSiteProgress();
 
 	/**
-	 * 체포된 사람을 런 진행으로 넘긴다. (체포가 확정된 뒤)
-	 *
-	 * 이걸 안 하면 잡힌 사람이 결과 화면과 함께 사라진다 — 레벨이 바뀌면 GameState 도
-	 * PlayerState 도 전부 새로 생기기 때문이다. 은신처의 '팀원 구출' 이 돌아가려면
-	 * 그 사실이 레벨을 건너야 한다.
-	 *
-	 * 등급이나 지급 여부와 무관하게 항상 넘긴다. 잡힌 것은 잡힌 것이다.
+	 * 체포된 사람을 런 진행으로 넘긴다. 등급이나 지급 여부와 무관하게 항상 넘긴다.
+	 * 안 넘기면 레벨이 바뀔 때 GameState 도 PlayerState 도 새로 생겨 잡힌 사실이 사라진다.
 	 */
 	void CarryOverArrests();
 
 	/**
-	 * 이 판을 관전으로 보낸 사람들의 체포를 푼다. (결과 확정 시)
-	 *
-	 * 체포의 대가는 "다음 작업 관전" 이므로, 한 판을 관전했으면 형기가 끝난 것이다.
-	 * 여기서 풀지 않으면 한 번 잡힌 사람이 은신처에서 돈을 낼 때까지 영영 관전만 한다.
-	 *
-	 * CarryOverArrests 와 겹치지 않는다 — 관전자는 IsCountedPlayer 에서 걸러지므로
-	 * 이번 판의 체포 명단에 애초에 들어가지 않는다. 그래서 순서를 신경 쓸 필요가 없다.
+	 * 이 판을 관전으로 보낸 사람들의 체포를 푼다. 한 판 관전이 곧 형기다.
+	 * 관전자는 IsCountedPlayer 에서 걸러지므로 CarryOverArrests 와 겹치지 않는다.
 	 */
 	void ReleaseServedSpectators();
 
 	/**
-	 * 이 플레이어의 다운 상태 변화를 구독한다.
-	 *
-	 * 다운은 승차만큼이나 확실한 종료 계기다 — 마지막 한 명이 밖에서 쓰러지면 그 순간
-	 * 생존자가 이미 밴에 다 타 있는 상태가 된다. 구독이 없으면 그때 판이 안 끝나고
-	 * 도주 시간을 끝까지 기다리게 된다.
-	 *
-	 * 다운 시스템(전영배)이 아직 태그를 붙이지 않아 지금은 한 번도 불리지 않는다.
+	 * 이 플레이어의 다운 상태 변화를 구독한다. 다운도 종료 계기다 —
+	 * 마지막 한 명이 밖에서 쓰러지면 그 순간 생존자가 이미 밴에 다 타 있는 상태가 된다.
+	 * 다운 시스템(전영배)이 아직 태그를 붙이지 않아 지금은 불리지 않는다.
 	 */
 	void WatchDownedState(APlayerState* Player);
 
@@ -318,9 +209,7 @@ private:
 
 	/**
 	 * 이 판의 진입점. 한 번 정해지면 판이 끝날 때까지 바뀌지 않는다.
-	 *
-	 * nullptr 이면 이 레벨에 진입점이 없다는 뜻이고, 스폰은 엔진 기본 동작을 쓴다.
-	 * (아직 정하지 않은 상태와 구분하는 것은 bEntryResolved 다)
+	 * nullptr 이면 진입점이 없는 레벨이다 (아직 안 정한 상태와의 구분은 bEntryResolved).
 	 */
 	UPROPERTY()
 	TObjectPtr<AHeistEntryPoint> ResolvedEntry = nullptr;
@@ -328,12 +217,7 @@ private:
 	/** 진입점 판정을 이미 했는가. 진입점이 없는 레벨에서 매 스폰마다 다시 훑지 않게 한다 */
 	bool bEntryResolved = false;
 
-	/**
-	 * 밴을 이미 보냈는가.
-	 *
-	 * PlaceVan 은 재정의되면 연출이 될 수 있다. 두 번 불리면 밴이 두 번 달려 들어온다 —
-	 * 진입점 판정이 첫 스폰과 매치 시작 양쪽에서 불릴 수 있어서 이 가드가 필요하다.
-	 */
+	/** 밴을 이미 보냈는가. 재정의된 PlaceVan 이 연출이면 두 번 불릴 때 밴이 두 번 달려 들어온다 */
 	bool bVanPlaced = false;
 
 	FTimerHandle PhaseTimerHandle;
@@ -344,9 +228,7 @@ private:
 
 	/**
 	 * 이 판에 올 인원. 0 이면 모른다는 뜻이다.
-	 *
-	 * 서버가 스스로 알아낼 방법이 없다. 비-심리스 ServerTravel 은 클라이언트를 끊었다가
-	 * 다시 붙이기 때문에, 새 레벨의 GameMode 는 이전 로비에 몇 명이 있었는지 기억하지 못한다.
+	 * 비-심리스 ServerTravel 은 클라이언트를 끊었다 다시 붙이므로 서버가 스스로 알 방법이 없다.
 	 */
 	int32 ExpectedPlayers = 0;
 
@@ -355,9 +237,8 @@ private:
 
 	/**
 	 * 접속 대기 창이 열렸는가.
-	 *
-	 * PostLogin 은 HandleMatchHasStarted 보다 먼저 올 수 있다 (호스트가 그렇다).
-	 * 이 플래그가 없으면 그 첫 PostLogin 이 아직 0 인 StartDeadline 을 이미 지났다고 본다.
+	 * PostLogin 은 HandleMatchHasStarted 보다 먼저 올 수 있어(호스트), 이게 없으면
+	 * 첫 PostLogin 이 아직 0 인 StartDeadline 을 이미 지났다고 본다.
 	 */
 	bool bStartWindowOpen = false;
 
@@ -366,17 +247,11 @@ private:
 
 	/**
 	 * 매치를 이미 끝냈는가.
-	 *
 	 * 전원 확인과 시간 만료가 같은 프레임에 겹칠 수 있고, 재정의된 FinishMatch 가
-	 * ServerTravel 을 부르는데 그것이 두 번 불리면 전환이 꼬인다.
+	 * ServerTravel 을 두 번 부르면 전환이 꼬인다.
 	 */
 	bool bFinished = false;
 
-	/**
-	 * 탈출 판정이 다음 틱에 예약돼 있는가.
-	 *
-	 * 한 틱에 둘이 동시에 타면 계기가 두 번 오는데, 판정은 한 번이면 된다.
-	 * (두 번 돌아도 결과는 같지만, 예약이 쌓이는 구조를 남겨 둘 이유가 없다)
-	 */
+	/** 탈출 판정이 다음 틱에 예약돼 있는가. 한 틱에 계기가 둘이어도 판정은 한 번이면 된다 */
 	bool bEscapeCheckQueued = false;
 };
