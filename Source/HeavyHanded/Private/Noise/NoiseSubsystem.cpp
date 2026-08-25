@@ -29,15 +29,8 @@ namespace
 
 	/**
 	 * 값싼 1차 거리 컬링에 쓰는 여유 (cm).
-	 *
-	 * 1차 컬링은 소유 액터 위치로 하고, 정확한 귀 위치는 통과한 청취자에게만 묻는다
-	 * (GetListenerLocation 은 BlueprintNativeEvent 라 ProcessEvent 를 탄다).
-	 * 그래서 이 값은 "액터 위치와 실제 귀 위치의 최대 차이" 보다 반드시 커야 한다 —
-	 * 작게 잡으면 반경 경계에 선 경비가 소리를 못 듣는데, 그건 로그에도 안 남는다.
-	 *
-	 * 실제 차이는 폰의 시점 높이(BaseEyeHeight 기본 64)와
-	 * UPerceptionMeterComponent::EarHeight(기본 60, ClampMax 300)다. 500 이면 충분히 넉넉하다.
-	 * EarHeight 의 ClampMax 를 올린다면 이 값도 같이 올릴 것.
+	 * "액터 위치와 실제 귀 위치의 최대 차이" 보다 반드시 커야 한다 — 작게 잡으면
+	 * 반경 경계의 경비가 소리를 못 듣고 로그에도 안 남는다. EarHeight 의 ClampMax 와 짝이다.
 	 */
 	constexpr float ListenerCullMargin = 500.f;
 
@@ -61,10 +54,7 @@ namespace
 
 // ──────────────────────────────────────────────────────────────
 // [디버그 전용] 시각화 스위치
-//
-// ECVF_Cheat 라 쉬핑 빌드에서는 콘솔로 켤 수 없고,
-// ENABLE_DRAW_DEBUG 가 0이면 그리기 코드 자체가 컴파일에서 빠진다.
-// 게임 로직이 이 값을 읽어서는 안 된다 — 빌드 구성에 따라 동작이 달라진다.
+// 게임 로직이 이 값을 읽어서는 안 된다 — 빌드 구성에 따라 동작이 달라진다
 // ──────────────────────────────────────────────────────────────
 static TAutoConsoleVariable<int32> CVarNoiseDebug(
 	  TEXT("hh.Noise.Debug"),
@@ -243,26 +233,12 @@ void UNoiseSubsystem::ReportNoise(FGameplayTag Tag, FVector Location, float Loud
 
 	Propagate(Event, *Row);
 
-	// 엔진 내장 AIPerception 의 Hearing 센스에도 같은 이벤트를 흘려준다.
+	// 엔진 AIPerception 의 Hearing 센스에도 같은 이벤트를 흘려준다.
+	// **이 호출이 이 프로젝트에서 유일하다** — 빠지면 GuardAIController 의 Hearing 분기가 죽는다.
 	//
-	// GuardAIController 는 생성자에서 UAISenseConfig_Hearing 을 등록해 두었지만,
-	// 그 센스는 누군가 UAISense_Hearing::ReportNoiseEvent 를 불러줘야만 반응한다
-	// (등록만 해두고 아무도 이벤트를 안 쏘면 청각 감지가 영원히 발동하지 않는다).
-	// 이 프로젝트에서 그걸 불러주는 곳이 여기 한 곳뿐이라, 이 호출이 빠지면
-	// OnTargetPerceptionUpdated 의 Hearing 분기(GuardAIController.cpp)가 죽은 코드가 된다.
-	//
-	// 인자는 위에서 이미 검증 · 클램프까지 끝난 값을 그대로 재사용한다:
-	//  - Loudness 는 1.f 로 고정한다. Event.Radius 에 이미 Loudness 감쇄가
-	//    Lerp(0.6, 1.0) 곡선으로 반영돼 있어서, 여기서 또 곱하면(엔진이 MaxRange*Loudness
-	//    로 계산한다) 같은 감쇄가 두 번 적용돼 실제보다 훨씬 좁은 반경이 나간다.
-	//  - MaxRange 는 Event.Radius. 우리 쪽 반경 공식을 그대로 신뢰하는 것이다.
-	//  - Tag 는 FGameplayTag 가 아니라 FName 을 받으므로 GetTagName() 으로 변환한다.
-	//
-	// 주의: 이 경로는 Propagate() 의 ComputeAttenuation 과 달리 벽 오클루전을 계산하지
-	// 않는다 (엔진 Hearing 센스는 순수 거리 판정이다). 그래서 벽 뒤에 있는 경비가
-	// INoiseListener 쪽에서는 소리를 못 듣는데 AIPerception 쪽에서는 듣는 것처럼
-	// 엇갈릴 수 있다 — 오클루전까지 맞추려면 청취자별로 따로 불러야 하는데, 그건
-	// 이 함수의 "위치 없는 이벤트 1건 발행"이라는 시그니처를 벗어나는 작업이라 남겨둔다.
+	// Loudness 를 1.f 로 고정하는 것은 Event.Radius 에 이미 감쇄가 반영돼 있어서다.
+	// 엔진이 MaxRange*Loudness 로 계산하므로 여기서 또 곱하면 같은 감쇄가 두 번 걸린다.
+	// 이 경로는 벽 오클루전을 계산하지 않는다 — INoiseListener 쪽과 엇갈릴 수 있다
 	UAISense_Hearing::ReportNoiseEvent(GetWorld(), Location, 1.f, Instigator, Event.Radius, Tag.GetTagName());
 }
 
@@ -353,17 +329,9 @@ void UNoiseSubsystem::Propagate(const FNoiseEvent& Event, const FNoiseProfileRow
 	Listeners.RemoveAllSwap([](const FNoiseListenerEntry& Entry) { return !Entry.Listener.IsValid(); },
 							EAllowShrinking::No);
 
-	// 스냅샷을 떠서 순회한다.
-	//
-	// OnNoiseHeard 는 게임플레이 콜백이라 무슨 일이든 할 수 있다 — 인지 100% 로 경비가
-	// 조사에 들어가고, 그 과정에서 액터가 파괴되면 EndPlay -> UnregisterListener 로
-	// Listeners 가 그 자리에서 줄어든다.
-	//
-	// 예전에는 Listeners 를 역순 인덱스로 직접 돌았는데, Num() 이 루프 시작 시 한 번만
-	// 평가되므로 한 콜백에서 둘 이상이 빠지면 인덱스가 배열 밖으로 나간다.
-	// TArray::RangeCheck 는 checkf 라 Shipping(DO_CHECK=0)에서 컴파일에서 빠진다 —
-	// 개발 빌드는 죽고 Shipping 은 조용히 남의 메모리를 읽는다.
-	// RemoveAllSwap 이 뒤 원소를 앞으로 당기는 탓에 같은 청취자가 두 번 불리기도 했다.
+	// 스냅샷을 떠서 순회한다. OnNoiseHeard 는 게임플레이 콜백이라 그 안에서 액터가 파괴되면
+	// Listeners 가 그 자리에서 줄어든다. 직접 인덱스로 돌면 한 콜백에서 둘 이상 빠질 때
+	// 배열 밖으로 나가는데, Shipping 에서는 RangeCheck 가 빠져 조용히 남의 메모리를 읽는다
 	TArray<FNoiseListenerEntry, TInlineAllocator<16>> Snapshot(Listeners.GetData(), Listeners.Num());
 
 	for (const FNoiseListenerEntry& Entry : Snapshot)
@@ -466,14 +434,9 @@ float UNoiseSubsystem::ComputeAttenuation(const FVector& From, const FVector& To
 	// 게임 스레드 전용이다 — 다른 스레드에서 부르면 이 버퍼가 깨진다
 	World->LineTraceMultiByChannel(OcclusionHitsScratch, From, To, NoiseOcclusionChannel, Params);
 
-	// 히트는 거리순으로 정렬돼 있다 (CollisionConversions.cpp - ConvertTraceResults 끝의
-	// OutHits.Sort(FCompareFHitResultTime)). 그래서 앞에서부터 MaxOccluders 개만 세는 것이
-	// "가장 가까운 차폐물 N개" 와 같다.
-	//
-	// 전제: NoiseOcclusion 채널은 Overlap 응답이어야 한다 (DefaultEngine.ini).
-	// Block 으로 바꾸는 순간 LineTraceMulti 가 첫 벽에서 광선을 끊고 그보다 먼 히트를
-	// 전부 버리므로(Chaos SQTypes.h - FinishQueryHelper) 이 루프는 영원히 1 회만 돈다.
-	// 컴파일 에러도 로그도 없이 MaxOccluders 세팅만 조용히 죽는다
+	// 히트는 거리순으로 정렬돼 있어서 앞에서부터 세는 것이 "가장 가까운 차폐물 N개" 와 같다.
+	// **전제 — NoiseOcclusion 채널은 Overlap 응답이어야 한다.** Block 으로 바꾸면 트레이스가
+	// 첫 벽에서 끊겨 이 루프가 영원히 1회만 돌고, MaxOccluders 세팅이 조용히 죽는다
 	int32 Counted = 0;
 	for (const FHitResult& Hit : OcclusionHitsScratch)
 	{
@@ -559,13 +522,8 @@ void UNoiseSubsystem::Tick(float DeltaTime)
 }
 
 // ──────────────────────────────────────────────────────────────
-// [디버그 전용] 콘솔 명령
-//
-// DT_NoiseProfiles 없이도 발행 → 조회 → 감쇄 경로를 검증하려고 만든 것이다.
-// 게임 코드에서 호출하지 말 것. 7단계 NoiseEmitterComponent 가 붙으면
-// 실제 소음은 전부 물리 충돌에서 나온다.
-//
-// 쉬핑 빌드에서는 코드째 빠진다 — 위 CVarNoiseDebug 와 같은 규칙이다.
+// [디버그 전용] 콘솔 명령. 게임 코드에서 호출하지 말 것.
+// 쉬핑 빌드에서는 코드째 빠진다
 // ──────────────────────────────────────────────────────────────
 #if !UE_BUILD_SHIPPING
 
@@ -604,14 +562,8 @@ static void NoiseTestCommand(const TArray<FString>& Args, UWorld* World)
 		}
 	}
 
-	// Instigator 로 nullptr 을 넘기면 안 된다.
-	// UAISense_Hearing::ReportNoiseEvent (엔진 AIPerception 청각 센스) 는 소리를
-	// 낸 액터를 "인지 대상"으로 등록해서 OnTargetPerceptionUpdated 를 호출한다
-	// (엔진 소스 AISense_Hearing.cpp 의 RegisterDelayedStimulus 가 Event.Instigator 를
-	// 그대로 대상 액터로 쓴다). Instigator 가 없으면 등록할 대상이 없어 그 콜백 자체가
-	// 안 불린다 — 즉 nullptr 로는 청각 인지 경로를 이 명령으로 테스트할 수 없었다.
-	// 실제 게임에서는 항상 소음을 낸 실제 액터(경비가 넘어뜨린 물건 등)가 넘어오므로
-	// 이 문제는 디버그 명령에만 있었다.
+	// **Instigator 로 nullptr 을 넘기면 안 된다.** 엔진 Hearing 센스는 소리를 낸 액터를
+	// 인지 대상으로 등록하므로, 없으면 OnTargetPerceptionUpdated 자체가 안 불린다
 	Subsystem->ReportNoise(Tag, Location, Loudness, Pawn);
 	UE_LOG(LogNoise, Log, TEXT("테스트 발행: %s @ %s (Loudness %.2f, Instigator %s)"),
 			*Tag.ToString(), *Location.ToString(), Loudness, *GetNameSafe(Pawn));

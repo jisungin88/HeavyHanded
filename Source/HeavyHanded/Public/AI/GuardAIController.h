@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "AI/GuardTypes.h"
+#include "GameplayTagContainer.h"        // FGameplayTag — 델리게이트 시그니처라 전방 선언 불가
+#include "Core/HeistPhase.h"             // EHeistPhaseReason — 같은 이유
 #include "GuardAIController.generated.h"
 
 class UBehaviorTree;
@@ -12,7 +14,9 @@ class UAISenseConfig_Sight;
 class UAISenseConfig_Hearing;
 class UPerceptionMeterComponent;
 class AActor;
+class AGameStateBase;
 class AGuardCharacter;
+class AHeistGameState;
 
 UCLASS()
 class AGuardAIController : public AAIController
@@ -94,7 +98,16 @@ public:
 	bool IsTargeting(const AActor* InActor) const;
 
 protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnPossess(APawn* InPawn) override;
+
+	// 페이즈가 바뀌었다. 판이 끝나면(Phase.Result) 순찰·조사·추격을 멈춘다.
+	//
+	// 서버에서만 의미가 있다 — AIController 는 애초에 서버에만 존재한다.
+	// 여기서 판정은 하지 않는다. 무엇이 끝인지는 코어 루프가 이미 정했고 여기서는 그 결과만 받는다.
+	UFUNCTION()
+	void HandleHeistPhaseChanged(FGameplayTag NewPhase, FGameplayTag OldPhase, EHeistPhaseReason Reason);
 
 	// 로컬 플레이어를 타겟하고 있을 때만 GetDetectionGaugePercent()를 폰의 머리 위
 	// 위젯 컴포넌트(UDetectionGaugeWidget)로 밀어넣는다. BTService_UpdateDetectionGauge와
@@ -169,4 +182,26 @@ private:
 	float HandledSearchStartTime = TNumericLimits<float>::Lowest();
 
 	FTimerHandle HeadGaugeUpdateTimerHandle;
+
+	// ── 판 종료 감지 ──
+	//
+	// [왜 GameState 를 구독하는가] 순찰을 멈춰야 할 시점은 AI 가 알 수 있는 사실이 아니다.
+	//   경보가 울렸는지, 도주 시간이 끝났는지는 코어 루프가 정한다. AHeistGameState 에는
+	//   이미 그 전환을 알리는 OnPhaseChanged 가 있으므로 새 API 를 만들지 않고 그것을 받는다.
+	//
+	// [왜 BeginPlay 에서 바로 못 붙는가] GameState 가 아직 없을 수 있다. 그때 놓치면
+	//   그 경비만 판이 끝나도 계속 순찰한다 — 크래시도 경고도 없다.
+	//   AHeistPlayerController 와 UNoiseSubsystem 이 쓰는 것과 같은 패턴이다.
+
+	void BindToGameState(AGameStateBase* GameState);
+	void UnbindFromGameState();
+
+	// BT 정지 · 이동 정지 · 지각 정지. 되돌리는 경로는 두지 않는다 —
+	// 판이 끝난 뒤 다시 순찰할 일은 없고, 다음 판은 레벨을 새로 연다.
+	void StopForMatchEnd();
+
+	FDelegateHandle GameStateSetHandle;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AHeistGameState> BoundGameState;
 };

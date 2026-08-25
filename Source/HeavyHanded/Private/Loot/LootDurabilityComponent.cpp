@@ -6,9 +6,12 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Loot/LootBase.h"
 #include "Loot/LootLog.h"
 #include "Loot/LootSettings.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -238,8 +241,124 @@ void ULootDurabilityComponent::ApplyBrokenState()
 
 	OwnerLoot->SetActorHiddenInGame(true);
 
-	// 파편·사운드는 BP 껍데기가 담당한다. 판정은 이미 끝났다.
+	// 메시를 숨긴 뒤에 뿌린다. 순서가 반대면 한 프레임 동안 멀쩡한 물건과 파편이 겹쳐 보인다.
+	PlayBreakEffects();
+
+	// 위 둘로 부족할 때를 위한 확장점. 판정은 이미 끝났다.
 	OnBroken();
+}
+
+void ULootDurabilityComponent::PlayBreakEffects()
+{
+	// 데디케이티드 서버는 화면도 스피커도 없다. 리슨 서버의 호스트는 클라이언트이기도 하므로
+	// 여기 걸리지 않는다 — 호스트 화면에서도 파편이 정상적으로 보인다.
+	const UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 액터는 곧 사라지므로 붙이지 않고 월드에 스폰한다.
+	// 붙였다가는 BreakDestroyDelay 뒤에 파편이 부모와 함께 사라진다.
+	const FTransform Where = OwnerLoot->GetActorTransform();
+
+	if (IsValid(BreakEffect))
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World, BreakEffect, Where.GetLocation(), Where.Rotator(),
+			FVector(BreakEffectScale), /*bAutoDestroy*/ true);
+	}
+
+	if (IsValid(BreakSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(World, BreakSound, Where.GetLocation());
+	}
+}
+
+float ULootDurabilityComponent::GetDamageRatio01() const
+{
+	// 표를 못 읽었거나 값이 이상하면 0 을 준다. 나눗셈을 막는 것보다
+	// "멀쩡해 보인다" 가 "다 갈라져 보인다" 보다 오해가 적다.
+	if (Data.MaxImpactCount <= 0)
+	{
+		return 0.f;
+	}
+
+	// 한 방에 깨지는 물건은 '깨지기 직전' 이라는 상태 자체가 없다. 0 을 준다.
+	// (아래 식의 분모가 0 이 되는 경우이기도 하다)
+	if (Data.MaxImpactCount == 1)
+	{
+		return 0.f;
+	}
+
+	/**
+	 * 분모가 MaxImpactCount 가 아니라 그보다 하나 적다.
+	 *
+	 * 마지막 충격에서는 ++ImpactCount 직후 Break() 가 같은 프레임에 메시를 숨긴다.
+	 * 그래서 ImpactCount / MaxImpactCount 로 두면 1.0 이 화면에 한 번도 안 나오고,
+	 * 3회짜리 물건의 경우 시각 범위의 위쪽 3분의 1이 통째로 죽는다.
+	 *
+	 * 하나 적게 나누면 '파괴 직전' 이 정확히 1.0 이 되어, 잡아 둔 연출이 전부 쓰이고
+	 * "한 번만 더 부딪히면 깨진다" 가 가장 강한 모습으로 나온다.
+	 * 물건을 안고 뛰는 게임이라 이 신호는 셀수록 좋다.
+	 */
+	const float Ratio = static_cast<float>(ImpactCount) / static_cast<float>(Data.MaxImpactCount - 1);
+	return FMath::Clamp(Ratio, 0.f, 1.f);
+}
+
+void ULootDurabilityComponent::ApplyCrackVisual()
+{
+	if (CrackParameterName.IsNone() || !IsValid(OwnerLoot))
+	{
+		return;
+	}
+
+	UPrimitiveComponent* Mesh = OwnerLoot->GetPhysicsRoot();
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
+	const int32 SlotCount = Mesh->GetNumMaterials();
+
+	// 첫 충격에서만 만든다. 안 부딪힌 노획물은 MID 를 하나도 들지 않는다.
+	if (CrackMaterials.Num() != SlotCount)
+	{
+		CrackMaterials.Reset(SlotCount);
+
+		bool bAnySlotHasParameter = false;
+		for (int32 Slot = 0; Slot < SlotCount; ++Slot)
+		{
+			UMaterialInstanceDynamic* MID = Mesh->CreateDynamicMaterialInstance(Slot);
+			CrackMaterials.Add(MID);
+
+			float Unused = 0.f;
+			if (IsValid(MID) && MID->GetScalarParameterValue(FMaterialParameterInfo(CrackParameterName), Unused))
+			{
+				bAnySlotHasParameter = true;
+			}
+		}
+
+		// 파라미터가 없으면 SetScalarParameterValue 는 조용히 아무 일도 안 한다.
+		// 경고가 없으면 "머티리얼을 만들었는데 왜 안 갈라지지" 로 한참 헤맨다.
+		if (!bAnySlotHasParameter && !bWarnedMissingCrackParameter)
+		{
+			bWarnedMissingCrackParameter = true;
+			UE_LOG(LogLoot, Warning,
+				TEXT("[Loot:%s] 머티리얼에 스칼라 파라미터 '%s' 가 없다. 균열 연출이 나오지 않는다 ")
+				TEXT("(머티리얼에 파라미터를 추가하거나 CrackParameterName 을 None 으로 둘 것)"),
+				*GetNameSafe(OwnerLoot), *CrackParameterName.ToString());
+		}
+	}
+
+	const float Ratio = GetDamageRatio01();
+	for (UMaterialInstanceDynamic* MID : CrackMaterials)
+	{
+		if (IsValid(MID))
+		{
+			MID->SetScalarParameterValue(CrackParameterName, Ratio);
+		}
+	}
 }
 
 void ULootDurabilityComponent::DestroyOwnerLoot()
@@ -256,6 +375,10 @@ void ULootDurabilityComponent::OnRep_ImpactCount()
 	// 초기 복제는 BeginPlay 보다 먼저 도착할 수 있다. 그때는 여기서 해결한다.
 	// ResolveData 가 OwnerLoot 확보까지 같이 하고, 두 번째부터는 즉시 반환한다.
 	ResolveData();
+
+	// 머티리얼 균열이 먼저다. BP 가 OnDamageAccumulated 에서 파티클을 붙일 때
+	// 이미 갈라진 상태를 보고 있어야 연출이 어긋나지 않는다.
+	ApplyCrackVisual();
 
 	OnDamageAccumulated(ImpactCount, Data.MaxImpactCount);
 }

@@ -85,6 +85,11 @@ void AHeistPlayerController::BindToGameState(AGameStateBase* GameState)
 
 	BoundGameState = HeistState;
 	HeistState->OnPhaseChanged.AddDynamic(this, &AHeistPlayerController::HandlePhaseChanged);
+	HeistState->OnStartWaitChanged.AddDynamic(this, &AHeistPlayerController::HandleStartWaitChanged);
+
+	// 접속 대기는 페이즈보다 먼저 시작되므로, 늦게 붙은 컨트롤러는 이미 지나간 알림을 못 받는다.
+	// 지금 값으로 한 번 맞추지 않으면 **입력이 막히지 않은 채** 대기 구간을 보낸다
+	HandleStartWaitChanged(HeistState->GetStartWaitState());
 
 	// 이미 페이즈가 진행 중일 수 있다. 늦게 들어온 클라이언트는 지나간 전환 알림을 못 받으므로
 	// 지금 값으로 한 번 맞춰 두지 않으면 **다음 전환이 올 때까지** 화면이 어긋난 채로 있다.
@@ -104,7 +109,26 @@ void AHeistPlayerController::UnbindFromGameState()
 	}
 
 	BoundGameState->OnPhaseChanged.RemoveDynamic(this, &AHeistPlayerController::HandlePhaseChanged);
+	BoundGameState->OnStartWaitChanged.RemoveDynamic(this, &AHeistPlayerController::HandleStartWaitChanged);
 	BoundGameState = nullptr;
+}
+
+void AHeistPlayerController::HandleStartWaitChanged(FHeistStartWaitState State)
+{
+	if (State.bWaiting)
+	{
+		// 결과 화면과 같은 차단이다 — 판이 아직 시작되지 않았으므로 게임 입력이 들어가면 안 된다.
+		//
+		// 소유자로 this 를 넘기는 이유는 HandlePhaseChanged 와 같다. 대기 해제와 Phase.Prep 은
+		// 둘 다 ExitUIFocus(this) 로 끝나므로 어느 쪽이 먼저 와도 결과가 같다
+		EnterUIFocus(this, EHHUIFocusMode::UIOnly);
+	}
+	else
+	{
+		ExitUIFocus(this);
+	}
+
+	OnStartWaitChanged(State.bWaiting, State.NumConnected, State.NumExpected);
 }
 
 void AHeistPlayerController::HandlePhaseChanged(

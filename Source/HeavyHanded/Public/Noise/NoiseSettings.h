@@ -42,11 +42,8 @@ public:
 	}
 	
 	/**
-	 * CDO 라 절대 null 이 아니다 — 호출부에서 null 검사를 하지 말 것.
-	 * (GetDefault<T>() 는 T::StaticClass()->GetDefaultObject<T>() 이고 모듈 로드 시점에 이미 존재한다)
-	 *
-	 * `Settings ? Settings->X : 리터럴` 을 쓰면 죽은 분기가 생길 뿐 아니라,
-	 * 그 리터럴이 아래 기본값과 따로 놀아서 나중에 기본값을 바꿔도 조용히 옛 값으로 남는다.
+	 * CDO 라 절대 null 이 아니다 — **null 검사를 하지 말 것.**
+	 * `Settings ? Settings->X : 리터럴` 은 죽은 분기를 만들고, 그 리터럴이 기본값과 따로 논다.
 	 */
 	static const UNoiseSettings* Get() { return GetDefault<UNoiseSettings>(); }
 

@@ -37,4 +37,6 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Event_Player_BoardedVan, "Event.Player.BoardedVan");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Loaded,       "Event.Loot.Loaded");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Dropped,      "Event.Loot.Dropped");
+
+	UE_DEFINE_GAMEPLAY_TAG(Equipment_StickyBomb, "Equipment.StickyBomb");
 }

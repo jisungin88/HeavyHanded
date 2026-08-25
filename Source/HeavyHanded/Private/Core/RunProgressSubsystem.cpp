@@ -399,11 +399,8 @@ bool URunProgressSubsystem::TryDepartToSite(const FGameplayTag& SiteTag)
 		return false;
 	}
 
-	// 몇 명을 기다릴지 알려 준다. 이걸 빠뜨리면 저택 쪽이 인원을 모른 채로 조용 시간 폴백에
-	// 떨어져서 "가끔 한 명 두고 출발" 이 된다 (HeistStartGate).
-	//
-	// 명단이 확정돼 있으면 그것이 답이다. 아직 세션 파트가 채우지 않았으면 지금 접속해 있는
-	// 인원으로 대신한다 — 은신처에 있는 사람이 곧 갈 사람이라 이 시점에는 같은 수다
+	// 몇 명을 기다릴지 알려 준다. 빠뜨리면 저택 쪽이 조용 시간 폴백으로 떨어져
+	// "가끔 한 명 두고 출발" 이 된다. 명단이 없으면 지금 접속 인원으로 대신한다
 	int32 ExpectedPlayers = GetRosterNum();
 	if (ExpectedPlayers <= 0)
 	{
@@ -524,11 +521,7 @@ void URunProgressSubsystem::ResetCampaign()
 }
 
 // ──────────────────────────────────────────────────────────────
-// 치트
-//
-// 이 데이터를 채우는 것은 은신처 상점과 로비인데 둘 다 아직 없다.
-// 그때까지 이 명령들이 유일한 입력 수단이고, 상점이 붙은 뒤에도
-// "골드가 모자란 상황" 처럼 손으로 만들기 번거로운 상태를 만드는 데 쓴다.
+// 치트 — 은신처 상점과 로비가 붙기 전까지 이 데이터를 채우는 유일한 입력 수단이다
 // ──────────────────────────────────────────────────────────────
 
 namespace
@@ -553,9 +546,7 @@ namespace
 
 	/**
 	 * 0번 로컬 플레이어의 신원. 역할 치트가 "누구" 인지 정하는 데 쓴다.
-	 *
-	 * PIE 와 OnlineSubsystemNull 은 가짜 식별자를 만들어 주므로 대개 유효하다.
-	 * 유효하지 않으면 TrySelectRole 이 거부하는데, 그때 원인을 알 수 있게 여기서 먼저 찍는다.
+	 * 유효하지 않으면 TrySelectRole 이 거부하므로 원인을 알 수 있게 여기서 먼저 찍는다.
 	 */
 	FUniqueNetIdRepl GetLocalPlayerId(UWorld* World)
 	{
@@ -769,10 +760,7 @@ static FAutoConsoleCommandWithWorldAndArgs GRunEntryCommand(
 	  ECVF_Cheat);
 
 // 은신처 목표 선택 UI 가 붙기 전까지 출발하는 유일한 수단이다.
-//
-// [기본값을 두지 않는다] 인자를 생략하면 등록된 장소를 찍어 주고 떠나지 않는다.
-//   "생략하면 저택" 으로 두면 그것이 코드 안의 하드코딩이 되고, 장소가 늘어난 뒤에도
-//   아무도 그 기본값을 고치지 않는다. 목록을 보여 주는 편이 실제로 더 빠르다
+// 인자를 생략하면 등록된 장소를 찍어 주고 떠나지 않는다 — 기본값을 두면 그것이 하드코딩이 된다
 static void RunDepartCommand(const TArray<FString>& Args, UWorld* World)
 {
 	URunProgressSubsystem* Run = GetRunForCheat(World);
@@ -820,11 +808,8 @@ static FAutoConsoleCommandWithWorldAndArgs GRunDepartCommand(
 	  ECVF_Cheat);
 
 // 은신처 구출 UI 가 없어서 이것이 유일한 확인 수단이다.
-//
-// [로컬 플레이어가 아니라 명단의 앞에서부터 구출한다] 이 명령은 서버 전용인데
-//   (TryRescue 가 권위를 요구한다), 서버 창의 로컬 플레이어는 호스트다.
-//   보통 잡히는 쪽은 클라이언트라 "내 것을 구출" 로는 영영 대상이 안 맞는다.
-//   반복해서 치면 명단이 앞에서부터 빈다.
+// 로컬 플레이어가 아니라 명단 앞에서부터 구출한다 — 서버 창의 로컬 플레이어는 호스트인데
+// 보통 잡히는 쪽은 클라이언트라 "내 것을 구출" 로는 대상이 안 맞는다
 static void RunRescueCommand(const TArray<FString>& Args, UWorld* World)
 {
 	URunProgressSubsystem* Run = GetRunForCheat(World);
@@ -887,12 +872,8 @@ static FAutoConsoleCommandWithWorld GRunResetCampaignCommand(
 	  ECVF_Cheat);
 
 /**
- * 관전을 손으로 확인하려면 체포자가 한 명 있어야 한다. 그것을 정상 경로로 만들려면
- * 한 판을 일부러 지고, 누군가는 밴을 못 타고, 결과 화면까지 봐야 한다 —
- * 관전 화면 한 줄을 고칠 때마다 그것을 반복할 수는 없다.
- *
- * 인덱스는 AGameStateBase::PlayerArray 순서다. 2인 PIE 에서 0 은 호스트, 1 은 클라이언트다.
- * 클라이언트를 관전으로 보내야 "남을 보고 있는" 화면을 볼 수 있으니 보통 1 을 쓴다.
+ * 관전을 손으로 확인하려면 체포자가 한 명 있어야 하는데, 정상 경로로는 한 판을 다 져야 한다.
+ * 인덱스는 PlayerArray 순서다 — 2인 PIE 에서 0 이 호스트, 1 이 클라이언트라 보통 1 을 쓴다.
  */
 static void RunArrestCommand(const TArray<FString>& Args, UWorld* World)
 {

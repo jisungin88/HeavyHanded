@@ -9,6 +9,8 @@
 #include "Loot/LootSettings.h"
 #include "Loot/LootTypes.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
 
 void ULootStabilityComponent::ResolveData()
 {
@@ -69,6 +71,7 @@ void ULootStabilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 
 	DOREPLIFETIME(ULootStabilityComponent, ReplicatedTilt01);
 	DOREPLIFETIME(ULootStabilityComponent, SpillCount);
+	DOREPLIFETIME(ULootStabilityComponent, bIsSpilling);
 }
 
 void ULootStabilityComponent::BeginPlay()
@@ -173,6 +176,7 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 	if (TiltDegrees < Data.SpillTiltAngle)
 	{
 		TiltedSeconds = 0.f;
+		SetSpilling(false);
 		return;
 	}
 
@@ -182,8 +186,21 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 	// 넘어져 있거나 굴러가는 중이면 계속 누적돼 통과한다.
 	if (bUseGrace && TiltedSeconds < Data.TiltGraceSeconds)
 	{
+		SetSpilling(false);
 		return;
 	}
+
+	// 바닥까지 다 샜으면 더 기울여도 잃을 것이 없다. 이펙트도 멎어야 한다.
+	// 계속 흘리면 "아직 손해 보는 중" 이라고 거짓말을 하게 된다.
+	if (IsValueDrained())
+	{
+		SetSpilling(false);
+		return;
+	}
+
+	// 여기까지 왔으면 새고 있다. 아래 간격 검사는 '가치를 언제 깎을까' 일 뿐이고,
+	// 그림은 깎이는 순간이 아니라 새는 내내 나와야 한다.
+	SetSpilling(true);
 
 	const UWorld* World = GetWorld();
 	if (!World)
@@ -201,17 +218,28 @@ void ULootStabilityComponent::UpdateSpill(float TiltDegrees, float DeltaTime, bo
 	Spill(TiltDegrees);
 }
 
+bool ULootStabilityComponent::IsValueDrained() const
+{
+	if (!IsValid(OwnerLoot))
+	{
+		return true;
+	}
+
+	const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * Data.MinValueRatio);
+	return OwnerLoot->GetCurrentValue() <= FloorValue;
+}
+
 void ULootStabilityComponent::Spill(float TiltDegrees)
 {
-
-	const int32 CurrentValue = OwnerLoot->GetCurrentValue();
-	const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * Data.MinValueRatio);
-
 	// 바닥까지 샜으면 더 깎지 않는다. 가치 0 은 파손형의 몫이다.
-	if (CurrentValue <= FloorValue)
+	// UpdateSpill 이 이미 걸러 주지만, 이 함수만 따로 불릴 여지를 남기지 않는다.
+	if (IsValueDrained())
 	{
 		return;
 	}
+
+	const int32 CurrentValue = OwnerLoot->GetCurrentValue();
+	const int32 FloorValue = FMath::RoundToInt(OwnerLoot->GetBaseValue() * Data.MinValueRatio);
 
 	const int32 TargetValue = FMath::Max(
 		FMath::RoundToInt(CurrentValue * (1.f - Data.SpillValueLossRatio)), FloorValue);
@@ -234,6 +262,89 @@ void ULootStabilityComponent::Spill(float TiltDegrees)
 			FString::Printf(TEXT("[%s] 유출 %d회 — 기울기 %.0f도, 가치 %d"),
 				*OwnerLoot->GetName(), SpillCount, TiltDegrees, OwnerLoot->GetCurrentValue()));
 	}
+}
+
+void ULootStabilityComponent::SetSpilling(bool bNewSpilling)
+{
+	if (bIsSpilling == bNewSpilling)
+	{
+		return;
+	}
+
+	bIsSpilling = bNewSpilling;
+
+	// 서버에서 값을 직접 바꾸면 RepNotify 가 불리지 않는다. 서버 몫은 손으로 부른다.
+	OnRep_IsSpilling();
+}
+
+void ULootStabilityComponent::OnRep_IsSpilling()
+{
+	ApplySpillEffect();
+}
+
+void ULootStabilityComponent::ApplySpillEffect()
+{
+	// 데디케이티드 서버는 화면이 없다. 리슨 서버의 호스트는 클라이언트이기도 하므로
+	// 여기 걸리지 않는다 — 호스트 화면에서도 정상적으로 보인다.
+	const UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_DedicatedServer || !IsValid(SpillEffect))
+	{
+		return;
+	}
+
+	if (!IsValid(OwnerLoot))
+	{
+		// 초기 복제는 BeginPlay 보다 먼저 도착할 수 있다. 그때는 여기서 해결한다.
+		OwnerLoot = Cast<ALootBase>(GetOwner());
+		if (!IsValid(OwnerLoot))
+		{
+			return;
+		}
+	}
+
+	if (!bIsSpilling)
+	{
+		// 파괴하지 않고 끈다. 이미 나와 있는 입자는 자연스럽게 사라지고,
+		// 다시 기울면 같은 컴포넌트를 켜서 쓴다 — 굴러가는 동안 껐다 켜기를 반복한다.
+		if (IsValid(SpillEffectComponent))
+		{
+			SpillEffectComponent->Deactivate();
+		}
+		return;
+	}
+
+	if (IsValid(SpillEffectComponent))
+	{
+		SpillEffectComponent->Activate(/*bReset=*/true);
+		return;
+	}
+
+	USceneComponent* Mesh = OwnerLoot->GetPhysicsRoot();
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
+	// 소켓이 없으면 붙일 자리를 원점으로 떨어뜨린다. 조용히 넘어가면
+	// "이펙트가 물건 한가운데서 나온다" 는 증상으로만 드러나 원인까지 오래 걸린다.
+	FName Socket = SpillSocketName;
+	if (!Socket.IsNone() && !Mesh->DoesSocketExist(Socket))
+	{
+		if (!bWarnedMissingSpillSocket)
+		{
+			bWarnedMissingSpillSocket = true;
+			UE_LOG(LogLoot, Warning,
+				TEXT("[Loot:%s] 메시에 '%s' 소켓이 없다. 유출 이펙트가 물건 한가운데서 나온다 ")
+				TEXT("(메시에 소켓을 추가하거나 SpillSocketName 을 고칠 것)"),
+				*GetNameSafe(OwnerLoot), *Socket.ToString());
+		}
+		Socket = NAME_None;
+	}
+
+	// 붙여야 한다. 월드에 스폰하면 물건이 구르는 동안 이펙트만 제자리에 남는다.
+	SpillEffectComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+		SpillEffect, Mesh, Socket, FVector::ZeroVector, FRotator::ZeroRotator,
+		EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
 }
 
 void ULootStabilityComponent::UpdateTiltDirection(const APawn* Carrier, float DeltaTime)

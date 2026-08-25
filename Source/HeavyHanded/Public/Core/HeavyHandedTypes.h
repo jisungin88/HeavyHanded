@@ -9,23 +9,9 @@
 class AActor;
 class APawn;
 
-// [삭제됨] EWeightClass (Light / Normal / Heavy)
-//
-// 무게 등급은 원래 "중량형인가" 를 나타내는 수단이었다. 그 역할을
-// ULootHeavyComponent 가 가져가면서 껍데기만 남았다.
-//
-// Light / Normal 구분은 끝까지 아무도 읽지 않았다. 실제 페널티는 연속값인
-// CarrySpeedMultiplier 가 정하고, 금괴가 Normal 인데 0.75 로 느린 것이 그 증거다.
-// 등급과 배율이 같은 것을 두 번 말하다 보니 어긋날 수 있었고, 그걸 막으려고
-// 불일치 경고를 두 개 넣었다가 — 경고가 이 값의 유일한 소비자가 됐다.
-//
-// 지금은 이렇게 나뉜다:
-//   중량형인가        → Loot.Type.Heavy 태그 (ULootHeavyComponent 가 단다)
-//   얼마나 느려지는가 → FLootPhysicsData::CarrySpeedMultiplier
-//   점프 가능한가     → FLootPhysicsData::bAllowJumpWhileCarried
-//
-// 애니메이션 선택처럼 이산 등급이 필요해지면 Loot.Type.Light 태그를 추가한다.
-// 값을 되살리지 않는다 — 특성을 알리는 경로는 태그 하나로 유지한다.
+// [삭제됨] EWeightClass — 등급과 배율이 같은 것을 두 번 말해서 어긋날 수 있었다.
+// 지금은 셋으로 나뉜다: Loot.Type.Heavy 태그 · CarrySpeedMultiplier · bAllowJumpWhileCarried.
+// 이산 등급이 다시 필요하면 값이 아니라 태그를 추가한다
 
 /**
  * 충돌 원인 구분 — FLootImpactEvent 에 실려 소음 파트로 전달된다.
@@ -74,12 +60,8 @@ struct FLootPhysicsData
 	bool bAllowJumpWhileCarried = true;
 
 	/**
-	 * 놓을 때 앞으로 살짝 던지는 속도(cm/s).
-	 *
-	 * 제자리에서 툭 떨어뜨리면 물건이 발밑에 박혀 다시 집기도 번거롭고,
-	 * 버렸다는 느낌도 안 난다. 보는 방향으로 약하게 밀어 준다.
-	 * 던지기(ThrowSpeed)와는 자릿수가 다르다 — 이건 '버리기'지 '던지기'가 아니다.
-	 * 0 이면 제자리에서 떨어진다.
+	 * 놓을 때 앞으로 살짝 미는 속도(cm/s). 0 이면 제자리에서 떨어진다.
+	 * 제자리에 떨어뜨리면 발밑에 박혀 다시 집기 번거롭다. ThrowSpeed 와는 자릿수가 다르다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Drop",
 		meta = (ClampMin = "0.0"))
@@ -117,15 +99,9 @@ struct FLootPhysicsData
 	float ThrowUpwardRatio = 0.25f;
 
 	/**
-	 * 던질 때 운반자의 이동 속도를 얼마나 더할지 (0 = 안 더함, 1 = 그대로 더함).
-	 *
-	 * 물리적으로는 1 이 맞다. 손에 든 물건은 나와 같이 움직이고 있으니까.
-	 * 그런데 1 로 두면 조준이 불가능해진다. 이동 속도가 ThrowSpeed 와 비슷하면
-	 * 뒷걸음질만 쳐도 물건이 뒤로 날아가고, 좌우로 한 발짝에 궤적이 크게 꺾인다.
-	 * 밴에 던져 넣기처럼 정확도가 필요한 동작이 운에 좌우된다.
-	 *
-	 * 그래서 기본은 0 이다. 던지는 순간의 발밑 상태와 무관하게 조준한 대로 나간다.
-	 * 플레이 테스트에서 밋밋하면 0.2~0.3 정도로 조금씩 올린다.
+	 * 던질 때 운반자의 이동 속도를 얼마나 더할지. **물리적으로는 1 이 맞지만 기본은 0 이다** —
+	 * 1 이면 뒷걸음질만 쳐도 물건이 뒤로 날아가 밴에 던져 넣기가 운에 좌우된다.
+	 * 밋밋하면 0.2~0.3 정도로 조금씩 올린다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Throw",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -196,12 +172,8 @@ struct FLootImpactEvent
 	TWeakObjectPtr<AActor> LootActor = nullptr;
 
 	/**
-	 * 부딪힌 상대. 바닥·벽·다른 노획물·플레이어 등.
-	 *
-	 * '무엇에 부딪혔는가'는 재질만으로는 부족하다. 같은 콘크리트라도 바닥에 떨어진 것과
-	 * 사람이 밀친 것은 다른 사건이다. 파손 컴포넌트는 이 값으로 사람 몸과의 접촉을 걸러내고,
-	 * 소음 파트도 필요하면 여기서 상대를 확인할 수 있다.
-	 * 파괴(Break)처럼 부딪힌 상대가 없는 사건에서는 비어 있다.
+	 * 부딪힌 상대. 재질만으로는 부족하다 — 같은 콘크리트라도 바닥에 떨어진 것과
+	 * 사람이 밀친 것은 다른 사건이다. 상대가 없는 사건(파괴)에서는 비어 있다.
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Loot|Impact")
 	TWeakObjectPtr<AActor> HitActor = nullptr;
@@ -216,11 +188,7 @@ struct FLootImpactEvent
 };
 
 /**
- * 노획물 충돌 방송용 델리게이트.
- *
- * 다이내믹(BP)이 아닌 C++ 전용 멀티캐스트로 둔다.
- *   - 소음 파트는 서버에서 AddUObject 로 구독해 FLootImpactEvent 를 받는다.
- *   - BP로 열지 않아 누군가 BP에 소음 판정 로직을 짜는 것을 원천 차단한다. (컨벤션)
- * 실제 인스턴스는 방송 주체인 ALootBase 가 소유한다. (작업 순서 5단계)
+ * 노획물 충돌 방송용 델리게이트. C++ 전용 멀티캐스트로 둬서
+ * BP 에 소음 판정 로직을 짜는 것을 원천 차단한다. 인스턴스는 ALootBase 가 소유한다.
  */
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLootImpactSignature, const FLootImpactEvent&);

@@ -1,4 +1,4 @@
-#include "Core/VanZone.h"
+﻿#include "Core/VanZone.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/BoxComponent.h"
@@ -38,55 +38,43 @@ namespace
 	/** 뒷문 개구부 높이(cm). 조준 판의 크기와 하차 지점 기준이 된다 */
 	constexpr float DoorHeight = 200.f;
 
+	/**
+	 * 테두리 데칼의 투영 깊이에 더하는 여유(cm).
+	 * 볼륨 높이에 딱 맞추면 밴이 지면에서 몇 cm만 떠도 테두리가 통째로 사라진다.
+	 */
+	constexpr float BorderDepthMargin = 50.f;
+
+	/** 테두리 폴백을 다시 그리는 주기(초) */
+	constexpr float BorderDebugRedrawSeconds = 0.5f;
+
+	/** 그려진 선이 남아 있는 시간(초). 재그리기 주기보다 길어야 깜빡이지 않는다 */
+	constexpr float BorderDebugLifetimeSeconds = BorderDebugRedrawSeconds * 1.2f;
+
 	/** 하차 지점을 문짝에서 얼마나 더 바깥에 둘 것인가(cm) */
 	constexpr float ExitOffsetBeyondDoor = 80.f;
 
-	/**
-	 * 좌석 수. 기획서 2~4인이라 넷이면 충분하다.
-	 *
-	 * 모자랄 때 승차를 거부하지 않고 마지막 좌석에 겹쳐 앉히므로, 이 값이 틀려도
-	 * 누가 못 타는 일은 없다. 파티 인원이 늘면 여기 하나만 고친다.
-	 */
+	/** 좌석 수. 모자라면 겹쳐 앉히므로 이 값이 틀려도 누가 못 타지는 않는다 */
 	constexpr int32 MaxSeats = 4;
 
 	/**
 	 * PendingLoot 의 값이 이것이면 아직 누가 들고 있다는 뜻이다.
-	 *
-	 * 별도 bool 을 두지 않는 이유는 두 값이 어긋날 수 없게 하기 위해서다 —
-	 * "들려 있는데 체류 시각이 찍혀 있는" 상태가 아예 표현되지 않는다.
+	 * 별도 bool 을 두지 않는 것은 "들려 있는데 체류 시각이 찍힌" 상태를 표현 불가능하게 하려는 것.
 	 */
 	constexpr float CarriedMarker = -1.f;
 }
 
 AVanZone::AVanZone()
 {
-	// 판정은 오버랩과 타이머로 돈다. 매 프레임 할 일이 없다.
 	PrimaryActorTick.bCanEverTick = false;
 
-	// 복제 프로퍼티는 하나도 없다. 그런데도 켜 두는 것은 확정 이펙트 멀티캐스트 때문이다 —
-	// 복제하지 않는 액터는 RPC 를 보낼 수 없다.
+	// 복제 프로퍼티는 하나도 없다. 그런데도 켜는 것은 확정 이펙트 멀티캐스트 때문이다 —
+	// 복제하지 않는 액터는 RPC 를 보낼 수 없다
 	bReplicates = true;
 
-	// 밴은 매치 시작마다 진입점으로 옮겨진다 (AHeistGameMode::PlaceVan).
-	//
-	// [레벨 배치 액터라 반드시 켜야 한다] 클라이언트는 이 액터를 레벨 파일에서 이미 갖고 있고,
-	//   그 안에 저장된 위치를 쓴다. 스폰되는 액터와 달리 트랜스폼이 따로 오지 않는다.
-	//   꺼 두면 서버만 밴을 옮기고 클라이언트는 원래 배치 자리에 남아서,
-	//   **호스트에서는 멀쩡한데 클라이언트에서만 밴이 없는** 상태가 된다. 실제로 그랬다.
-	//
-	// [비용] 정지한 액터는 트랜스폼이 dirty 되지 않아 아무것도 보내지 않는다.
-	//   실제로 나가는 것은 진입점으로 옮기는 순간과, 나중에 도주 연출로 움직일 때뿐이다.
+	// 레벨 배치 액터라 반드시 켜야 한다. 클라이언트는 레벨 파일에 저장된 위치를 쓰므로,
+	// 꺼 두면 서버만 밴을 옮기고 **클라이언트에서만 밴이 제자리에 남는다**
 	SetReplicateMovement(true);
 
-	// 루트는 판정 볼륨이 아니라 빈 기준점이다 — 밴 바닥 중앙, 로컬 +X 가 뒷문 방향.
-	//
-	// 볼륨을 루트로 두면 액터 원점이 화물칸 한가운데 공중에 뜬다. 그러면 바닥에 놓이는 것들
-	// (좌석 · 하차 지점)의 Z 가 전부 화물칸 크기에 묶여서, 볼륨을 늘리는 순간 좌석이 공중에 뜬다.
-	// 레벨에 배치할 때도 바닥 기준이 맞다 — 밴을 놓는 사람은 바닥에 스냅하지 화물칸 중심
-	// 높이를 계산하지 않는다.
-	//
-	// 아래 컴포넌트들의 위치 · 크기 · 회전은 전부 **기본값일 뿐이고 뷰포트에서 정한다.**
-	// 코드가 다시 덮어쓰지 않는다.
 	VanRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VanRoot"));
 	SetRootComponent(VanRoot);
 
@@ -99,8 +87,6 @@ AVanZone::AVanZone()
 	LoadVolume->SetRelativeLocation(FVector(0.f, 0.f, DefaultZoneExtent));
 	LoadVolume->SetCollisionProfileName(VanLoadZoneProfile);
 	LoadVolume->SetGenerateOverlapEvents(true);
-
-	// 판정 볼륨이지 화물칸 벽이 아니다. 게임 화면에는 보이지 않아야 한다.
 	LoadVolume->SetHiddenInGame(true);
 
 	BoardVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardVolume"));
@@ -117,25 +103,16 @@ AVanZone::AVanZone()
 	BoardAimTarget = CreateDefaultSubobject<UBoxComponent>(TEXT("BoardAimTarget"));
 	BoardAimTarget->SetupAttachment(VanRoot);
 
-	// 뒷문 개구부를 덮는 판. 두께 10cm · 폭 140cm · 높이 200cm 로 시작하고,
-	// 실제 밴 메시가 들어오면 그 개구부에 맞춰 뷰포트에서 조정한다.
 	// 박스는 중심 기준이라 높이의 절반만큼 올려야 바닥에 선다
 	BoardAimTarget->SetRelativeLocation(FVector(DefaultZoneExtent, 0.f, DoorHeight * 0.5f));
 	BoardAimTarget->SetBoxExtent(FVector(5.f, 70.f, DoorHeight * 0.5f));
 
-	// 조준되는 것 하나가 이 컴포넌트의 전부다. 헤더 주석 참고 —
-	// 시야만 막고 나머지는 전부 통과시킨다
 	BoardAimTarget->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	BoardAimTarget->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BoardAimTarget->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-
-	// 게임 화면에는 보이지 않는다. 보이는 문짝은 BP 가 실제 메시로 따로 갖고,
-	// 그것들은 열리고 닫히며 움직인다 — 이 판은 그 자리에 고정돼 조준만 받는다
 	BoardAimTarget->SetHiddenInGame(true);
 
-	// 좌석. 화물칸 바닥에 둘씩 마주 보게 흩어 두고, 실제 배치는 뷰포트에서 한다.
-	// Z 가 0 인 이유는 앵커가 '발이 닿는 지점' 이고 VanRoot 가 바닥이기 때문이다 —
-	// 볼륨 크기를 바꿔도 좌석은 그대로 바닥에 남는다
+	// Z 가 0 인 것은 앵커가 '발이 닿는 지점' 이고 VanRoot 가 바닥이기 때문이다
 	static const FVector DefaultSeatOffsets[] = {
 		FVector(-60.f, -60.f, 0.f), FVector(-60.f,  60.f, 0.f),
 		FVector( 30.f, -60.f, 0.f), FVector( 30.f,  60.f, 0.f)
@@ -152,22 +129,17 @@ AVanZone::AVanZone()
 		Seats.Add(Seat);
 	}
 
-	// 하차 지점. 기본값은 문짝 바깥쪽 바닥이다 — 문을 열고 뒤로 내리는 그림
 	ExitAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("ExitAnchor"));
 	ExitAnchor->SetupAttachment(VanRoot);
 	ExitAnchor->SetRelativeLocation(
 		FVector(DefaultZoneExtent + ExitOffsetBeyondDoor, 0.f, 0.f));
 
-	// 데칼만 VanRoot 가 아니라 볼륨에 붙는다. SyncBorderDecal 이 크기를 '스케일 전' 값으로
-	// 맞추고 나머지는 부모 스케일에 맡기는 구조라, 부모가 볼륨이어야 스케일이 맞아떨어진다.
-	// VanRoot 에 붙이면 볼륨 컴포넌트를 스케일했을 때 테두리만 옛 크기로 남는다
+	// 볼륨에 붙이지 않는다 — 회전이 딸려 와서 투영 축이 같이 돌아간다
 	BorderDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("BorderDecal"));
-	BorderDecal->SetupAttachment(LoadVolume);
+	BorderDecal->SetupAttachment(VanRoot);
 
-	// 데칼은 자기 로컬 X 축 방향으로 투영한다. 바닥에 그리려면 그 축이 아래를 봐야 한다.
+	// 에디터에서 잠깐 보이는 기본값일 뿐이다. 실제 값은 SyncBorderDecal 이 정한다
 	BorderDecal->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
-
-	// 크기는 볼륨에서 따라간다. 머티리얼이 없으면 OnConstruction 이 꺼 버린다.
 	BorderDecal->SetVisibility(false);
 }
 
@@ -175,8 +147,7 @@ void AVanZone::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// 에디터에서 볼륨을 늘리는 즉시 테두리도 같이 늘어나야 한다.
-	// 배치 담당이 크기를 맞춰 놓고 게임을 켰더니 테두리만 옛 크기인 상황을 만들지 않는다.
+	// 에디터에서 볼륨을 늘리는 즉시 테두리도 같이 늘어나야 한다
 	SyncBorderDecal();
 }
 
@@ -184,13 +155,24 @@ void AVanZone::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 표시는 서버 · 클라이언트 모두 해야 한다. 권위 검사보다 위에 있는 이유다.
+	// 표시는 서버 · 클라이언트 모두 해야 한다. 권위 검사보다 위에 있는 이유다
 	if (!BorderMaterial)
 	{
+		// 경고는 여기서 한 번만 낸다. 아래 재그리기는 반복 호출이라 같이 두면 로그가 잠긴다
+		UE_LOG(LogHeist, Warning,
+			TEXT("[VanZone:%s] BorderMaterial 이 없어 존 테두리를 디버그 선으로 그립니다. "
+				 "머티리얼이 나오면 지정하세요."),
+			*GetName());
+
+#if ENABLE_DRAW_DEBUG
 		DrawBorderFallback();
+
+		GetWorldTimerManager().SetTimer(BorderDebugTimerHandle, this,
+			&AVanZone::DrawBorderFallback, BorderDebugRedrawSeconds, /*bLoop=*/true);
+#endif
 	}
 
-	// 적재 판정은 서버 전용이다. 클라이언트에서 오버랩을 세면 사람마다 다른 금액이 나온다.
+	// 적재 판정은 서버 전용이다. 클라이언트에서 세면 사람마다 다른 금액이 나온다
 	if (!HasAuthority())
 	{
 		return;
@@ -201,11 +183,8 @@ void AVanZone::BeginPlay()
 	LoadVolume->OnComponentBeginOverlap.AddDynamic(this, &AVanZone::HandleBeginOverlap);
 	LoadVolume->OnComponentEndOverlap.AddDynamic(this, &AVanZone::HandleEndOverlap);
 
-	// BoardVolume 에는 콜백을 걸지 않는다. 승차는 드나드는 것이 아니라 상호작용이다
-
-	// 레벨에 처음부터 존 안에 놓여 있는 노획물은 오버랩 이벤트를 만들지 않는다.
-	// (엔진이 BeginPlay 전에 겹침을 갱신해 버려서 콜백을 받을 시점이 지나 있다)
-	// 배치 실수로 밴 안에 놓인 노획물이 조용히 무시되면 원인을 찾기 어려우므로 한 번 훑는다.
+	// 레벨에 처음부터 존 안에 놓인 노획물은 오버랩 이벤트를 만들지 않는다
+	// (엔진이 BeginPlay 전에 겹침을 갱신해 콜백 시점이 이미 지나 있다). 한 번 훑는다
 	TArray<AActor*> AlreadyInside;
 	LoadVolume->GetOverlappingActors(AlreadyInside, ALootBase::StaticClass());
 	for (AActor* Actor : AlreadyInside)
@@ -216,7 +195,7 @@ void AVanZone::BeginPlay()
 
 void AVanZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// 레벨 전환 중에 재검사가 돌면 이미 정리되기 시작한 월드를 건드린다.
+	// 레벨 전환 중에 재검사가 돌면 이미 정리되기 시작한 월드를 건드린다
 	if (const UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RecheckTimerHandle);
@@ -249,7 +228,7 @@ void AVanZone::WarnIfDuplicateZone() const
 }
 
 // ──────────────────────────────────────────────────────────────
-// 오버랩 — 존 안에 들어왔는가
+// 오버랩
 // ──────────────────────────────────────────────────────────────
 
 void AVanZone::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
@@ -269,24 +248,22 @@ void AVanZone::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/, 
 		return;
 	}
 
-	// 확정 조건은 여기서 보지 않는다. 들려 있든 아니든 일단 추적을 시작하고,
-	// 손을 떠난 시점부터 체류 시간을 재는 것은 재검사 쪽 일이다.
+	// 들려 있든 아니든 일단 추적을 시작한다. 체류 시간은 재검사 쪽 일이다
 	TrackPending(Loot);
 }
 
 void AVanZone::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,
 	UPrimitiveComponent* /*OtherComp*/, int32 /*OtherBodyIndex*/)
 {
-	// IsValid 로 거르지 않는다. 확정 직후 파괴되는 노획물도 이 콜백을 한 번 만들고,
-	// 그때는 이미 파괴 중이라 IsValid 가 false 다 — 목록에서 빼는 데는 포인터면 충분하다.
+	// IsValid 로 거르지 않는다. 확정 직후 파괴되는 노획물도 이 콜백을 한 번 만드는데,
+	// 그때는 이미 파괴 중이라 IsValid 가 false 다 — 목록에서 빼는 데는 포인터면 충분하다
 	ALootBase* Loot = Cast<ALootBase>(OtherActor);
 	if (!Loot)
 	{
 		return;
 	}
 
-	// 들고 나갔거나, 튕겨 나갔거나, 확정돼서 사라졌다.
-	// 다시 들어오면 체류 시간을 처음부터 다시 센다 — 굴러 나갔다 들어온 것은 새 사건이다.
+	// 다시 들어오면 체류 시간을 처음부터 다시 센다 — 굴러 나갔다 들어온 것은 새 사건이다
 	if (PendingLoot.Remove(Loot) > 0)
 	{
 		ShowLoadDebug(FString::Printf(TEXT("추적 해제 — %s 가 존 밖으로 나감"), *Loot->GetName()),
@@ -297,7 +274,7 @@ void AVanZone::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AA
 }
 
 // ──────────────────────────────────────────────────────────────
-// 승차 — 상태이지 사건이 아니다
+// 승차
 // ──────────────────────────────────────────────────────────────
 
 AVanZone* AVanZone::Get(const UObject* WorldContext)
@@ -313,8 +290,7 @@ AVanZone* AVanZone::Get(const UObject* WorldContext)
 		return nullptr;
 	}
 
-	// 레벨당 하나라는 계약에 기대어 첫 번째를 돌려준다.
-	// 둘 이상이면 BeginPlay 가 이미 경고를 남겼으므로 여기서 다시 따지지 않는다.
+	// 둘 이상이면 BeginPlay 가 이미 경고했으므로 여기서 다시 따지지 않는다
 	for (TActorIterator<AVanZone> It(World); It; ++It)
 	{
 		return *It;
@@ -336,8 +312,7 @@ bool AVanZone::TryDisembarkIfBoarded(APawn* Player)
 		return false;
 	}
 
-	// 명단이 진리원이다. 밴을 먼저 찾아 물어보지 않는 이유는, 타고 있지 않은 경우가
-	// 압도적으로 흔한데 그때마다 액터를 훑을 이유가 없기 때문이다
+	// 명단을 먼저 본다. 타고 있지 않은 경우가 압도적으로 흔한데 그때마다 액터를 훑을 이유가 없다
 	const AHeistGameState* HeistState = AHeistGameState::Get(Player);
 	if (!HeistState || !HeistState->IsBoarded(PlayerState))
 	{
@@ -350,14 +325,13 @@ bool AVanZone::TryDisembarkIfBoarded(APawn* Player)
 
 bool AVanZone::TryToggleBoarding(APawn* Player)
 {
-	// 상호작용 판정은 서버에서만 돈다 (UGAB_Interact 도 서버에서만 부른다).
 	// 클라이언트가 자기 명단을 고칠 수 있으면 탈출 판정이 곧 치트가 된다
 	if (!HasAuthority() || !IsValid(Player))
 	{
 		return false;
 	}
 
-	// 조종자가 없는 폰은 명단에 오를 수 없다. 그것을 사람으로 세면 인원이 맞지 않는다
+	// 조종자가 없는 폰은 명단에 오를 수 없다. 사람으로 세면 인원이 맞지 않는다
 	APlayerState* PlayerState = Player->GetPlayerState();
 	if (!PlayerState)
 	{
@@ -371,11 +345,8 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 		return false;
 	}
 
-	// 결과 화면이 뜬 뒤에는 타지도 내리지도 못한다.
-	//
-	// 명단은 이미 얼어 있으므로(AHeistGameState::SetBoarded) 여기를 안 막아도 집계는
-	// 안전하다. 그런데도 막는 것은 몸 때문이다 — 명단에는 탈출로 남은 사람이 밴에서
-	// 걸어 나오면 결과 화면과 눈앞의 장면이 어긋난다.
+	// 명단은 이미 얼어 있어 집계는 안전하다. 그런데도 막는 것은 몸 때문이다 —
+	// 탈출로 남은 사람이 밴에서 걸어 나오면 결과 화면과 눈앞의 장면이 어긋난다
 	if (HeistState->IsPhase(HHTags::Phase_Result))
 	{
 		ShowLoadDebug(TEXT("거부 — 결과 화면에서는 타고 내릴 수 없다"),
@@ -385,8 +356,7 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 
 	const bool bWasBoarded = HeistState->IsBoarded(PlayerState);
 
-	// 내리는 것은 (결과 화면을 빼면) 언제나 된다. 탈 때만 조건을 본다 —
-	// 페이즈가 넘어갔다고 탄 사람을 밴에 가둬 둘 이유가 없다
+	// 내리는 것은 (결과 화면을 빼면) 언제나 된다. 탈 때만 조건을 본다
 	if (!bWasBoarded && !CanBoardNow(Player))
 	{
 		return false;
@@ -404,8 +374,7 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 		*PlayerState->GetPlayerName(), HeistState->GetBoardedNum()),
 		bBoarded ? FColor::Cyan : FColor::Silver, Player->GetActorLocation());
 
-	// 이벤트는 "일어난 일" 이라 탈 때만 보낸다.
-	// 내리는 것은 별도 이벤트가 아니라 State.InVan 이 떨어지는 것으로 표현된다
+	// 이벤트는 "일어난 일" 이라 탈 때만 보낸다. 하차는 State.InVan 이 떨어지는 것으로 표현된다
 	if (bBoarded)
 	{
 		SendBoardedEvent(Player, HeistState->GetBoardedNum());
@@ -416,8 +385,7 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 
 bool AVanZone::CanBoardNow(const APawn* Player) const
 {
-	// 뒷칸 밖에서 멀리 조준해 타는 것을 막는다. 어빌리티의 사거리(기본 300cm)만으로는
-	// 밴 옆이나 지붕 위에서도 닿기 때문에, "안에 들어와 있는가" 를 여기서 다시 본다
+	// 어빌리티 사거리(기본 300cm)만으로는 밴 옆이나 지붕 위에서도 닿는다
 	if (!BoardVolume->IsOverlappingActor(Player))
 	{
 		ShowLoadDebug(FString::Printf(TEXT("승차 거부 — %s 가 뒷칸 밖에 있다"),
@@ -431,8 +399,7 @@ bool AVanZone::CanBoardNow(const APawn* Player) const
 		return true;   // 페이즈가 없는 테스트 맵. 판정할 근거가 없으면 막지 않는다
 	}
 
-	// 준비 시간에 타 봐야 할 일이 없고, 그때 이동이 묶이면 준비 시간을 통째로 날린다.
-	// 결과 화면이 뜬 뒤도 마찬가지다 — 이미 끝난 판이다
+	// 준비 시간에 이동이 묶이면 그 시간을 통째로 날린다
 	if (!HeistState->IsPhase(HHTags::Phase_Heist) && !HeistState->IsPhase(HHTags::Phase_Escape))
 	{
 		ShowLoadDebug(TEXT("승차 거부 — 본 작업이 시작되기 전이다"),
@@ -458,20 +425,15 @@ void AVanZone::ApplyBoardedPawnState(APawn* Player, bool bBoarded)
 	{
 		if (USceneComponent* Seat = TakeSeat(PlayerState))
 		{
-			// 자리로 옮긴 뒤 붙인다. 회전은 건드리지 않는다 — 시점 회전은 컨트롤러가
-			// 매 프레임 덮어쓰므로, 여기서 돌려 놔도 다음 프레임에 되돌아간다
+			// 회전은 건드리지 않는다 — 컨트롤러가 매 프레임 덮어쓴다
 			PlaceAtAnchor(Character, Seat);
 
 			Character->AttachToComponent(Seat, FAttachmentTransformRules::KeepWorldTransform);
 		}
 		else
 		{
-			// 좌석이 하나도 없다. 서 있던 자리에 고정한다 — 자리가 없다고 못 타게 하면
-			// 그 사람은 영영 탈출하지 못한다.
-			//
-			// 루트가 아니라 볼륨에 붙인다. 루트는 밴 바닥 기준점일 뿐이라 "화물칸에 실려 간다"
-			// 는 뜻이 되지 않는다 — KeepWorldTransform 이라 지금 위치는 같지만, 붙는 대상이
-			// 무엇인지가 밴이 움직이게 될 때 갈린다
+			// 좌석이 없으면 서 있던 자리에 고정한다. 루트가 아니라 볼륨에 붙이는 것은
+			// 밴이 움직이게 될 때 "화물칸에 실려 간다" 가 되어야 하기 때문이다
 			Character->AttachToComponent(LoadVolume,
 				FAttachmentTransformRules::KeepWorldTransform);
 		}
@@ -487,8 +449,7 @@ void AVanZone::ApplyBoardedPawnState(APawn* Player, bool bBoarded)
 	{
 		ReleaseSeat(PlayerState);
 
-		// 떼어낸 뒤에 옮긴다. 붙어 있는 채로 위치를 바꾸면 어태치가 그 값을 상대 좌표로
-		// 다시 해석해서 엉뚱한 곳으로 간다
+		// 떼어낸 뒤에 옮긴다. 붙어 있는 채로 위치를 바꾸면 어태치가 상대 좌표로 다시 해석한다
 		Character->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 		PlaceAtAnchor(Character, ExitAnchor);
 
@@ -510,7 +471,7 @@ USceneComponent* AVanZone::TakeSeat(APlayerState* Player)
 		return nullptr;
 	}
 
-	// 좌석 수가 바뀌어도(파티 인원 조정) 장부가 따라오게 매번 맞춘다
+	// 좌석 수가 바뀌어도 장부가 따라오게 매번 맞춘다
 	SeatOccupants.SetNum(Seats.Num());
 
 	const AHeistGameState* HeistState = AHeistGameState::Get(this);
@@ -531,8 +492,7 @@ USceneComponent* AVanZone::TakeSeat(APlayerState* Player)
 			continue;
 		}
 
-		// 비었는가를 '상태' 가 아니라 '사실' 로 본다. 접속이 끊긴 사람의 자리가 영영 잠기면
-		// 나중에 들어온 사람이 앉을 곳이 없어지는데, 그건 하차 처리를 놓치는 순간 바로 생긴다
+		// 비었는가를 '상태' 가 아니라 '사실' 로 본다 — 하차 처리를 놓치면 자리가 영영 잠긴다
 		const bool bStale = !IsValid(Occupant)
 			|| (HeistState && !HeistState->IsBoarded(Occupant));
 
@@ -542,8 +502,7 @@ USceneComponent* AVanZone::TakeSeat(APlayerState* Player)
 		}
 	}
 
-	// 자리가 없으면 마지막 좌석에 겹쳐 앉힌다. 장부는 덮어쓰지 않는다 —
-	// 원래 앉아 있던 사람이 내릴 때 그 자리가 정상적으로 비어야 한다
+	// 장부는 덮어쓰지 않는다 — 원래 앉아 있던 사람이 내릴 때 그 자리가 정상적으로 비어야 한다
 	if (FirstFree == INDEX_NONE)
 	{
 		UE_LOG(LogHeist, Warning,
@@ -566,8 +525,7 @@ void AVanZone::PlaceAtAnchor(ACharacter* Character, const USceneComponent* Ancho
 
 	FVector Location = Anchor->GetComponentLocation();
 
-	// 캡슐 원점은 가운데다. 앵커 좌표를 그대로 넣으면 절반이 바닥에 파묻히고,
-	// 하차 직후 물리가 캐릭터를 위로 밀어내면서 튀어 오른다
+	// 캡슐 원점은 가운데다. 그대로 넣으면 절반이 바닥에 파묻히고 하차 직후 튀어 오른다
 	if (const UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
 	{
 		Location.Z += Capsule->GetScaledCapsuleHalfHeight();
@@ -604,17 +562,14 @@ void AVanZone::SendBoardedEvent(APawn* Player, int32 NumBoarded) const
 }
 
 // ──────────────────────────────────────────────────────────────
-// 체류 시간 — 놓기와 던지기는 오버랩 이벤트를 만들지 않는다
+// 체류 시간
 // ──────────────────────────────────────────────────────────────
 
 bool AVanZone::IsLoadAllowedNow() const
 {
-	// 결과 화면이 뜬 뒤에 굴러 들어온 물건까지 금액에 반영되면, 화면에 이미 표시된 정산액과
-	// GameState 의 값이 달라진다. Prep · Heist · Escape 는 전부 받는다 —
-	// 준비 시간에 미리 실어 두는 것도 플레이어의 선택이다.
-	//
-	// 작업 레벨이 아닌 테스트 맵에는 AHeistGameState 가 없다. 그때는 막지 않는다 —
-	// 페이즈가 없다는 것은 "결과 화면이 떴다" 가 아니라 "판정할 근거가 없다" 는 뜻이다.
+	// Prep · Heist · Escape 는 전부 받는다. 결과 화면 뒤에 굴러 들어온 것만 막는다 —
+	// 이미 표시된 정산액과 GameState 의 값이 달라지기 때문이다.
+	// 테스트 맵에는 GameState 가 없다. 그때는 "결과 화면이 떴다" 가 아니므로 막지 않는다
 	const AHeistGameState* HeistState = AHeistGameState::Get(this);
 
 	return !HeistState || !HeistState->IsPhase(HHTags::Phase_Result);
@@ -622,16 +577,15 @@ bool AVanZone::IsLoadAllowedNow() const
 
 void AVanZone::TrackPending(ALootBase* Loot)
 {
-	// 이미 추적 중이면 손대지 않는다. 액터 하나가 여러 바디로 겹치면 BeginOverlap 이
-	// 여러 번 오는데, 그때마다 시작 시각을 새로 찍으면 체류 시간이 영영 안 찬다.
+	// 액터 하나가 여러 바디로 겹치면 BeginOverlap 이 여러 번 온다.
+	// 그때마다 시작 시각을 새로 찍으면 체류 시간이 영영 안 찬다
 	if (PendingLoot.Contains(Loot))
 	{
 		return;
 	}
 
-	// 이미 확정된 것이다. 기본 연출에서는 노획물이 곧 파괴되므로 여기 올 일이 없지만,
-	// 연출을 NPC 로 바꿔 노획물을 살려 두면 그것이 존을 드나들 수 있다.
 	// 금액을 두 번 세는 것이 이 시스템에서 낼 수 있는 최악의 결과라 상태로 막는다.
+	// 기본 연출에서는 곧 파괴되지만, NPC 연출로 바꾸면 살아남아 존을 드나들 수 있다
 	if (Loot->HasMatchingGameplayTag(HHTags::Loot_State_Loaded))
 	{
 		ShowLoadDebug(FString::Printf(TEXT("거부 — %s 는 이미 실은 것이다"), *Loot->GetName()),
@@ -668,29 +622,29 @@ void AVanZone::RecheckPending()
 	const float Now = World->GetTimeSeconds();
 	const float DwellSeconds = UHeistSettings::Get()->LoadDwellSeconds;
 
-	// 확정 처리가 PendingLoot 와 오버랩 상태를 건드리므로(파괴 → EndOverlap),
-	// 순회 중에 바로 확정하면 반복자 아래에서 컨테이너가 바뀐다. 먼저 고르고 나중에 확정한다.
+	// 확정이 PendingLoot 와 오버랩 상태를 건드리므로(파괴 → EndOverlap), 순회 중에 바로
+	// 확정하면 반복자 아래에서 컨테이너가 바뀐다. 먼저 고르고 나중에 확정한다
 	TArray<ALootBase*> ToConfirm;
 
 	for (auto It = PendingLoot.CreateIterator(); It; ++It)
 	{
 		ALootBase* Loot = It->Key.Get();
 
-		// 추적 중에 파괴됐다 (파손형). 조용히 뺀다 — 없어진 물건은 실을 수 없다.
+		// 추적 중에 파괴됐다 (파손형). 없어진 물건은 실을 수 없다
 		if (!IsValid(Loot))
 		{
 			It.RemoveCurrent();
 			continue;
 		}
 
-		// 다시 집어 들었다. 체류 시간은 손에서 떠난 순간부터 다시 센다.
+		// 다시 집어 들었다. 체류 시간은 손에서 떠난 순간부터 다시 센다
 		if (IsValid(Loot->GetPrimaryCarrier()))
 		{
 			It->Value = CarriedMarker;
 			continue;
 		}
 
-		// 방금 손을 떠났다. 여기서부터가 시작이다.
+		// 방금 손을 떠났다. 여기서부터가 시작이다
 		if (It->Value < 0.f)
 		{
 			It->Value = Now;
@@ -708,7 +662,7 @@ void AVanZone::RecheckPending()
 
 	for (ALootBase* Loot : ToConfirm)
 	{
-		// 체류하는 사이에 페이즈가 넘어갔을 수 있다. 페이즈 조건은 이 시점 기준으로 다시 본다.
+		// 체류하는 사이에 페이즈가 넘어갔을 수 있다. 이 시점 기준으로 다시 본다
 		if (IsLoadAllowedNow())
 		{
 			ConfirmLoad(Loot);
@@ -728,7 +682,7 @@ void AVanZone::UpdateRecheckTimer()
 
 	FTimerManager& Timers = World->GetTimerManager();
 
-	// 존 안에 아무것도 없으면 타이머를 멈춘다. 미션 대부분의 시간이 이 상태다.
+	// 존 안에 아무것도 없으면 멈춘다. 미션 대부분의 시간이 이 상태다
 	if (PendingLoot.IsEmpty())
 	{
 		Timers.ClearTimer(RecheckTimerHandle);
@@ -753,15 +707,13 @@ void AVanZone::ConfirmLoad(ALootBase* Loot)
 		return;
 	}
 
-	// 액터가 사라져도 남아야 하는 것들을 먼저 값으로 뽑는다.
+	// 액터가 사라져도 남아야 하는 것들을 먼저 값으로 뽑는다
 	const FHeistLoadEntry Entry = MakeLoadEntry(Loot);
 
 	// 손에서 떠난 뒤에 확정되므로 PrimaryCarrier 는 이미 비어 있다.
-	// 던져 넣기까지 포함해 "누가 실었는가" 를 아는 것은 이 값뿐이다.
+	// 던져 넣기까지 포함해 "누가 실었는가" 를 아는 것은 이 값뿐이다
 	APawn* Loader = Loot->GetLastCarrier();
 
-	// 정산 대상 표시. 확정 즉시 파괴하는 기본 연출에서는 수명이 짧지만,
-	// 연출을 NPC 로 바꿔 노획물이 살아남게 되면 압력판 · 상호작용이 이 태그로 걸러낸다.
 	Loot->SetLootStateTag(HHTags::Loot_State_Loaded);
 
 	if (AHeistGameState* HeistState = AHeistGameState::Get(this))
@@ -770,7 +722,6 @@ void AVanZone::ConfirmLoad(ALootBase* Loot)
 	}
 	else
 	{
-		// 작업 레벨이 아닌 곳(테스트 맵)에 존만 놓은 경우다. 적재 자체는 되지만 집계가 없다.
 		UE_LOG(LogHeist, Warning,
 			TEXT("[VanZone:%s] AHeistGameState 가 없어 금액을 집계하지 못했다 — %s ($%d)"),
 			*GetName(), *Loot->GetName(), Entry.Value);
@@ -785,7 +736,7 @@ void AVanZone::ConfirmLoad(ALootBase* Loot)
 	ShowLoadDebug(FString::Printf(TEXT("적재 확정 — %s ($%d)"), *Loot->GetName(), Entry.Value),
 		FColor::Green, Loot->GetActorLocation());
 
-	// 마지막이다. 기본 구현이 노획물을 파괴하므로 이 줄 아래에서 Loot 을 만지면 안 된다.
+	// 마지막이다. 기본 구현이 노획물을 파괴하므로 이 줄 아래에서 Loot 을 만지면 안 된다
 	HandleConfirmedLoot(Loot);
 }
 
@@ -802,13 +753,12 @@ FHeistLoadEntry AVanZone::MakeLoadEntry(const ALootBase* Loot) const
 	Entry.Value = Loot->GetCurrentValue();
 	Entry.BaseValue = Loot->GetBaseValue();
 
-	// 특성만 남기고 상태(Loot.State.*)는 뺀다. 결과 화면이 알아야 하는 것은
-	// "무거운 것이었나 · 깨지는 것이었나" 이지 실리기 직전의 상태가 아니다.
+	// 특성만 남기고 상태(Loot.State.*)는 뺀다. 결과 화면이 알아야 하는 것은 특성뿐이다
 	FGameplayTagContainer Owned;
 	Loot->GetOwnedGameplayTags(Owned);
 	Entry.TypeTags = Owned.Filter(FGameplayTagContainer(HHTags::Loot_Type.GetTag()));
 
-	// 폰이 아니라 PlayerState 다. 폰은 체포 · 다운으로 파괴되지만 결과 화면은 그 뒤에 뜬다.
+	// 폰이 아니라 PlayerState 다. 폰은 체포 · 다운으로 파괴되지만 결과 화면은 그 뒤에 뜬다
 	if (const APawn* Loader = Loot->GetLastCarrier())
 	{
 		Entry.Loader = Loader->GetPlayerState();
@@ -821,11 +771,11 @@ void AVanZone::SendLoadedEvent(APawn* Loader, ALootBase* Loot, int32 LoadedValue
 {
 	if (!IsValid(Loader))
 	{
-		// 아무도 든 적 없이 굴러 들어온 경우다. 금액은 이미 들어갔고 기여도만 주인이 없다.
+		// 아무도 든 적 없이 굴러 들어온 경우다. 금액은 이미 들어갔고 기여도만 주인이 없다
 		return;
 	}
 
-	// 페이로드 규약은 HHTags::Event_Loot_Loaded 주석에 있다. 받는 쪽이 그 약속에 기대므로 맞출 것.
+	// 페이로드 규약은 HHTags::Event_Loot_Loaded 주석에 있다. 받는 쪽이 그 약속에 기댄다
 	FGameplayEventData Payload;
 	Payload.EventTag = HHTags::Event_Loot_Loaded;
 	Payload.Instigator = Loot;
@@ -833,15 +783,13 @@ void AVanZone::SendLoadedEvent(APawn* Loader, ALootBase* Loot, int32 LoadedValue
 	Payload.OptionalObject = Loot;
 	Payload.EventMagnitude = static_cast<float>(LoadedValue);
 
-	// 대상이 IAbilitySystemInterface 가 아니면 이 함수가 조용히 빠진다.
-	// 폰이 아니라 PlayerState 가 ASC 를 들고 있어도(APlayerSessionState) ABaseCharacter 가
-	// 인터페이스로 넘겨주므로 여기서 그 구조를 알 필요가 없다.
+	// 대상이 IAbilitySystemInterface 가 아니면 이 함수가 조용히 빠진다
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Loader, HHTags::Event_Loot_Loaded, Payload);
 }
 
 // ──────────────────────────────────────────────────────────────
-// 연출 — 여기만 갈아 끼우면 NPC 적재가 된다
+// 연출
 // ──────────────────────────────────────────────────────────────
 
 void AVanZone::HandleConfirmedLoot_Implementation(ALootBase* Loot)
@@ -851,11 +799,9 @@ void AVanZone::HandleConfirmedLoot_Implementation(ALootBase* Loot)
 		return;
 	}
 
-	// 위치를 먼저 뽑는다. 파괴한 뒤에는 물어볼 대상이 없다.
+	// 위치를 먼저 뽑는다. 파괴한 뒤에는 물어볼 대상이 없다
 	Multicast_PlayLoadedEffect(Loot->GetActorLocation());
 
-	// 물리를 끄고 화물칸에 붙여 두지 않는다. 사라지는 것이 곧 "실렸다" 의 표현이고,
-	// 남겨 두면 밴이 움직일 때 흘러내리는 것부터 클라이언트 물리까지 전부 우리 문제가 된다.
 	Loot->Destroy();
 }
 
@@ -883,33 +829,66 @@ void AVanZone::SyncBorderDecal()
 	BorderDecal->SetDecalMaterial(BorderMaterial);
 	BorderDecal->SetVisibility(BorderMaterial != nullptr);
 
-	// 스케일은 컴포넌트가 부모에게서 함께 받으므로 여기서는 스케일 전 크기로 맞춘다.
-	//
-	// 데칼의 로컬 X 가 투영 방향(아래), Y 가 월드 Y, Z 가 월드 X 다 — 위 회전(Pitch -90) 때문이다.
-	// X 에 볼륨 높이를 그대로 주면 존의 위아래를 전부 덮어, 밴 바닥이 어디에 있든 그려진다.
-	const FVector Extent = LoadVolume->GetUnscaledBoxExtent();
-	BorderDecal->DecalSize = FVector(Extent.Z, Extent.Y, Extent.X);
+	// 액터의 yaw 만 따르는 기준 프레임. 밴이 돌아가면 테두리도 같이 돌지만, 기울지는 않는다
+	const FTransform YawFrame(
+		FRotator(0.f, GetActorRotation().Yaw, 0.f),
+		GetActorLocation(),
+		FVector::OneVector);
+
+	// 볼륨의 여덟 모서리를 그 프레임으로 옮겨 정렬된 상자로 다시 잰다.
+	// 볼륨이 회전돼 있어도 스케일이 걸려 있어도 여기서 흡수된다
+	const FVector VolumeExtent = LoadVolume->GetUnscaledBoxExtent();
+	const FTransform VolumeToWorld = LoadVolume->GetComponentTransform();
+
+	FBox Aligned(ForceInit);
+
+	for (int32 Corner = 0; Corner < 8; ++Corner)
+	{
+		const FVector Offset(
+			(Corner & 1) ? VolumeExtent.X : -VolumeExtent.X,
+			(Corner & 2) ? VolumeExtent.Y : -VolumeExtent.Y,
+			(Corner & 4) ? VolumeExtent.Z : -VolumeExtent.Z);
+
+		Aligned += YawFrame.InverseTransformPosition(VolumeToWorld.TransformPosition(Offset));
+	}
+
+	const FVector Extent = Aligned.GetExtent();
+
+	BorderDecal->SetWorldLocation(YawFrame.TransformPosition(Aligned.GetCenter()));
+
+	// Pitch -90 이면 로컬 X 가 아래를 본다. +90 은 위를 봐서 텍스처 V 축이 뒤집힌다
+	BorderDecal->SetWorldRotation(FRotator(-90.f, GetActorRotation().Yaw, 0.f));
+
+	// DecalSize 에 컴포넌트 스케일이 곱해진다. 위에서 이미 월드 크기로 쟀으므로 1 로 고정한다
+	BorderDecal->SetWorldScale3D(FVector::OneVector);
+
+	// 로컬 X = 아래(투영 깊이), Y = 액터 오른쪽, Z = 액터 앞쪽
+	BorderDecal->DecalSize = FVector(Extent.Z + BorderDepthMargin, Extent.Y, Extent.X);
+
+	// 직접 대입이라 렌더 상태가 자동으로 갱신되지 않는다
+	BorderDecal->MarkRenderStateDirty();
 }
 
 void AVanZone::DrawBorderFallback() const
 {
-	UE_LOG(LogHeist, Warning,
-		TEXT("[VanZone:%s] BorderMaterial 이 없어 존 테두리를 디버그 선으로 그립니다. "
-			 "머티리얼이 나오면 지정하세요."),
-		*GetName());
-
 #if ENABLE_DRAW_DEBUG
-	if (const UWorld* World = GetWorld())
+	const UWorld* World = GetWorld();
+
+	if (!World || !LoadVolume)
 	{
-		// 영구 선으로 한 번만 그린다. 존은 움직이지 않으므로 매 프레임 다시 그릴 이유가 없다.
-		//
-		// 중심을 액터가 아니라 볼륨에서 읽는다 — 루트는 밴 바닥이고 볼륨은 그 위에 떠 있어서,
-		// 액터 위치로 그리면 상자가 실제 판정 범위보다 한 칸 아래에 그려진다
-		DrawDebugBox(World, LoadVolume->GetComponentLocation(), LoadVolume->GetScaledBoxExtent(),
-			LoadVolume->GetComponentQuat(),
-			FColor::Yellow, /*bPersistentLines=*/true, /*LifeTime=*/-1.f, /*DepthPriority=*/0,
-			/*Thickness=*/3.f);
+		return;
 	}
+
+	// 영구 선으로 그리지 않는다. 밴은 진입점으로 옮겨지는데 그 코드는 GameMode 라 서버에만 있고,
+	// 클라이언트에는 옮겨진 위치가 BeginPlay 뒤에 복제로 도착한다. 영구 선은 그때 갱신되지 않고
+	// 선택적으로 지울 수도 없다(FlushPersistentDebugLines 는 월드 전체를 날린다).
+	//
+	// 중심을 액터가 아니라 볼륨에서 읽는다 — 루트는 밴 바닥이라 한 칸 아래에 그려진다
+	DrawDebugBox(World, LoadVolume->GetComponentLocation(), LoadVolume->GetScaledBoxExtent(),
+		LoadVolume->GetComponentQuat(),
+		FColor::Yellow, /*bPersistentLines=*/false,
+		/*LifeTime=*/BorderDebugLifetimeSeconds, /*DepthPriority=*/0,
+		/*Thickness=*/3.f);
 #endif
 }
 

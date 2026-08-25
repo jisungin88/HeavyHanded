@@ -13,20 +13,9 @@ class ALootBase;
 class APlayerState;
 
 /**
- * 밴에 실린 노획물 한 건의 기록. 결과 화면의 '적재 목록'(기획서 8장)이 이것의 배열이다.
- *
- * [왜 액터 포인터가 아니라 값인가]
- *   적재가 확정되면 노획물 액터는 사라진다 (이펙트 후 파괴). 포인터로 들고 있으면
- *   결과 화면이 뜰 무렵에는 전부 null 이라 무엇을 실었는지 아무것도 남지 않는다.
- *   확정 순간의 사실만 복사해 두면 액터의 수명과 무관해진다.
- *
- * [적재자가 폰이 아니라 PlayerState 인 이유]
- *   폰은 체포 · 다운 · 관전 전환으로 파괴된다. 결과 화면까지 살아남는 것은 PlayerState 뿐이고,
- *   ASC 를 PlayerState 에 둔 것과 같은 이유다.
- *
- * [이름 · 아이콘이 없는 이유]
- *   ALootBase 에 표시용 이름 필드가 없다. 클래스만 들고 있으면 UI 가 거기서 이름과 아이콘을
- *   해결할 수 있고, 나중에 노획물 파트가 DisplayName 을 추가해도 이 구조체는 그대로다.
+ * 밴에 실린 노획물 한 건의 기록. 결과 화면의 '적재 목록' 이 이것의 배열이다.
+ * 액터 포인터가 아니라 값인 것은 확정 즉시 노획물이 파괴되기 때문이다 —
+ * 포인터로 들면 결과 화면이 뜰 무렵에는 전부 null 이다.
  */
 USTRUCT(BlueprintType)
 struct FHeistLoadEntry
@@ -49,23 +38,18 @@ struct FHeistLoadEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
 	int32 BaseValue = 0;
 
-	/** 누가 실었는가. 기여도 집계의 키. 굴러 들어온 물건은 비어 있다 */
+	/** 누가 실었는가. 폰이 아니라 PlayerState 다 — 폰은 체포 · 다운으로 파괴된다 */
 	UPROPERTY(BlueprintReadOnly, Category = "Heist|Value")
 	TObjectPtr<APlayerState> Loader = nullptr;
 
-	/**
-	 * 파손 · 유출로 가치가 깎였는가.
-	 *
-	 * 별도 bool 로 저장하지 않는다 — 두 값에서 유도되는 사실을 따로 들고 있으면
-	 * 둘이 어긋날 수 있고, 어긋난 쪽이 맞는지 아무도 모른다.
-	 */
+	/** 파손 · 유출로 가치가 깎였는가. 유도되는 사실이라 따로 저장하지 않는다 */
 	bool IsValueLost() const { return Value < BaseValue; }
 };
 
-/**
- * 페이즈 전환. HUD · 레벨 차단 볼륨 · 경비 증원이 여기에 붙는다.
- * 서버와 클라이언트 양쪽에서 호출된다.
- */
+/** 접속 대기 상태 변화. 로딩 표시와 입력 차단이 붙는다. 서버 · 클라 양쪽에서 호출된다 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHeistStartWaitChanged, FHeistStartWaitState, State);
+
+/** 페이즈 전환. HUD · 차단 볼륨 · 경비가 붙는다. 서버 · 클라 양쪽에서 호출된다 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnHeistPhaseChanged,
 	FGameplayTag, NewPhase, FGameplayTag, OldPhase, EHeistPhaseReason, Reason);
 
@@ -74,29 +58,19 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistLoadedValueChanged,
 	int32, LoadedValue, int32, TargetValue);
 
 /**
- * 승차 인원 변화. HUD 의 "3/4 탑승" 표시가 여기에 붙는다.
- *
- * 생존자 수를 같이 싣는 이유는 그것이 분모이기 때문이다. 승차 인원만 보내면 HUD 가
- * 분모를 따로 세야 하고, 세는 시점이 달라 화면에 "4/3 탑승" 이 뜰 수 있다.
+ * 승차 인원 변화. HUD 의 "3/4 탑승" 표시가 붙는다.
+ * 생존자 수를 같이 싣는 것은 그것이 분모라서다 — HUD 가 따로 세면 "4/3 탑승" 이 뜬다.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistBoardedChanged,
 	int32, NumBoarded, int32, NumSurvivors);
 
-/** 결과 화면 확인 인원 변화. HUD 의 "2/3 확인" 표시가 여기에 붙는다 */
+/** 결과 화면 확인 인원 변화. HUD 의 "2/3 확인" 표시가 붙는다 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHeistResultConfirmChanged,
 	int32, NumConfirmed, int32, NumPlayers);
 
 /**
- * 작업(저택 · 박물관 · 은행) 레벨의 GameState. 코어 루프의 진리원이다.
- *
- * [범위] Prep → Heist → Escape → Result 만 다룬다.
- *   Phase.Lobby / Phase.Hideout 은 여기 오지 않는다 — 그 둘은 레벨 자체가 다르고
- *   전환은 ServerTravel 이다 (세션 파트). 은신처는 AShelterGameState 가 따로 있다.
- *
- * [역할 분담] 이 클래스는 상태를 들고 복제할 뿐, 스스로 바꾸지 않는다.
- *   "언제 무엇으로 넘어가는가" 는 AHeistGameMode 가 정하고, 전이 규칙 자체는
- *   HeistPhase 네임스페이스에 있다. 상태 변경 함수를 friend 로 좁혀 둔 이유가 이것이다 —
- *   아무나 페이즈를 바꿀 수 있으면 전이 규칙이 여러 곳으로 새어 나간다.
+ * 작업 레벨의 GameState. 코어 루프의 진리원이다. Prep → Heist → Escape → Result 만 다룬다.
+ * 상태를 들고 복제할 뿐 스스로 바꾸지 않는다 — 무엇으로 넘어가는가는 AHeistGameMode 가 정한다.
  */
 UCLASS()
 class HEAVYHANDED_API AHeistGameState : public AGameState
@@ -131,35 +105,36 @@ public:
 
 	/**
 	 * 이 판에 실제로 쓰인 진입점(Entry.*). 진입점이 없는 레벨이면 무효 태그.
-	 *
 	 * 은신처에서 고른 것과 다를 수 있다 — 그 진입점이 이 레벨에 없으면 폴백하기 때문이다.
-	 * HUD 는 이 값을 그린다. 은신처 쪽(URunProgressSubsystem)은 복제되지 않으므로
-	 * 거기서 직접 읽으면 호스트 화면에만 맞는 값이 뜬다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Entry")
 	FGameplayTag GetEntryTag() const { return EntryTag; }
 
 	/**
-	 * 현재 페이즈가 끝나기까지 남은 초.
-	 *
-	 * @param OutSeconds  카운트다운이 있을 때만 채워진다
-	 * @return            카운트다운이 있으면 true. Result 와 접속 대기는 false
-	 *
-	 * [왜 float 하나로 안 돌려주는가] "카운트다운 없음" 을 -1 이나 0 으로 표현하면
-	 * 호출부가 그 약속을 알아야 하고, 모르면 화면에 -1초가 그대로 찍힌다.
-	 * 반환 타입이 그 구분을 강제하게 둔다.
-	 *
-	 * [왜 남은 시간을 복제하지 않는가] 남은 초를 복제하면 매 프레임 값이 달라져
-	 * GameState 의 넷 업데이트 레이트만큼 미션 내내 계속 전송된다.
-	 * 대신 '끝나는 시각' 하나만 복제하고 남은 시간은 각자 계산한다 — 페이즈당 1회면 끝난다.
-	 * 기준 시계인 AGameStateBase::GetServerWorldTimeSeconds() 는 엔진이 이미 복제하고 있어
-	 * 우리가 추가로 내는 비용이 없고, 클라이언트 프레임레이트와 무관하게 정확하다.
+	 * 현재 페이즈가 끝나기까지 남은 초. 카운트다운이 있을 때만 true 이고 OutSeconds 가 채워진다.
+	 * "없음" 을 -1 이나 0 으로 표현하지 않는 것은 그 약속을 모르는 호출부가 화면에 -1초를 찍기 때문이다.
+	 * 남은 초는 복제하지 않는다 — 끝나는 시각 하나만 복제하고 각자 계산한다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Phase")
 	bool TryGetPhaseRemainingSeconds(float& OutSeconds) const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Heist|Phase")
 	FOnHeistPhaseChanged OnPhaseChanged;
+
+	// ── 접속 대기 ──
+
+	/** 지금 전원 접속을 기다리는 중인가. 늦게 들어온 사람도 이 값으로 현재 상태를 안다 */
+	UFUNCTION(BlueprintPure, Category = "Heist|Start")
+	FHeistStartWaitState GetStartWaitState() const { return StartWaitState; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Heist|Start")
+	FOnHeistStartWaitChanged OnStartWaitChanged;
+
+	/**
+	 * 접속 대기 상태를 갱신한다. **서버 전용** — AHeistGameMode 의 대기 루프만 부른다.
+	 * 값이 그대로면 아무것도 하지 않는다. 0.25초마다 도는데 매번 대입하면 계속 복제된다.
+	 */
+	void SetStartWaitState(const FHeistStartWaitState& NewState);
 
 	// ── 목표 금액 ──
 
@@ -175,29 +150,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Heist|Value")
 	bool IsTargetReached() const { return TargetValue > 0 && LoadedValue >= TargetValue; }
 
-	/**
-	 * 적재 금액을 누적한다. (서버 전용)
-	 *
-	 * 페이즈와 달리 friend 로 좁히지 않는다. 부르는 쪽이 밴 적재존이고, 앞으로도
-	 * "노획물이 실렸다" 를 아는 액터가 여럿 생긴다. 규칙이 아니라 누적일 뿐이라 위험하지 않다.
-	 */
+	/** 적재 금액을 누적한다. (서버 전용) */
 	void AddLoadedValue(int32 DeltaValue);
 
 	/**
 	 * 적재 한 건을 기록하고 금액까지 누적한다. (서버 전용)
-	 *
-	 * 목록과 금액을 한 함수로 묶은 이유는 둘이 갈라지면 안 되기 때문이다. 호출부가
-	 * 따로 부르는 구조면 어느 한쪽만 부른 경로가 생기고, 그때 결과 화면의 항목 합계와
-	 * 상단의 적재액이 다르게 찍힌다 — 어느 쪽이 맞는지 코드를 봐야만 알 수 있다.
+	 * 목록과 금액을 한 함수로 묶은 것은 둘이 갈라지면 결과 화면의 합계와 상단 적재액이
+	 * 달라지고, 그때 어느 쪽이 맞는지 코드를 봐야만 알기 때문이다.
 	 */
 	void RecordLoadedLoot(const FHeistLoadEntry& Entry);
 
 	/**
-	 * 지금까지 실은 노획물 기록. 결과 화면의 '적재 목록'이 여기서 나온다.
-	 *
-	 * [복제한다 — FastArray 는 쓰지 않는다] 적재할 때마다 배열 전체가 다시 나간다.
-	 *   항목 하나가 30바이트 남짓이고 한 판에 수십 개라, 적재 한 번에 1KB 를 넘지 않는다.
-	 *   FFastArraySerializer 는 그 절약을 위해 지불하기엔 비싼 복잡도다.
+	 * 지금까지 실은 노획물 기록. 결과 화면의 '적재 목록' 이 여기서 나온다.
+	 * FastArray 를 쓰지 않는다 — 항목이 30바이트 남짓이라 적재 한 번에 1KB 를 넘지 않는다.
 	 */
 	const TArray<FHeistLoadEntry>& GetLoadedEntries() const { return LoadedEntries; }
 
@@ -206,10 +171,8 @@ public:
 
 	// ── 탈출 ──
 	//
-	// [진리원은 명단이다] 누가 탔는가는 아래 BoardedPlayers 배열 하나가 정한다.
-	//   State.InVan 태그도 같이 붙지만 그것은 남에게 보이기 위한 미러이지 판정 근거가 아니다.
-	//   태그를 진리원으로 삼으면 인원을 셀 때마다 전원을 순회해야 하고, 세는 시점에 따라
-	//   답이 달라진다. 그리고 태그를 붙이는 시스템(전영배 GE)이 아직 없어도 여기는 돌아야 한다.
+	// 진리원은 아래 BoardedPlayers 배열이다. State.InVan 태그는 남에게 보이기 위한 미러이지
+	// 판정 근거가 아니다 — 태그로는 인원을 셀 수 없고, 태그를 붙이는 GE 가 없어도 여기는 돌아야 한다.
 
 	/** 이 플레이어가 밴에 타 있는가 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
@@ -221,18 +184,15 @@ public:
 
 	/**
 	 * 다운되지 않고 남아 있는 인원. 탈출 판정의 분모다.
-	 *
-	 * 서버 · 클라이언트 양쪽에서 유효하다 — 명단은 복제되고, 다운 여부는 ASC 태그라
-	 * 그것도 복제된다. HUD 가 서버에 물어보지 않아도 같은 숫자를 얻는다.
+	 * 서버 · 클라 양쪽에서 유효하다 — 명단도 다운 태그도 복제된다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
 	int32 GetSurvivorNum() const;
 
 	/**
 	 * 지금 상황을 판정용 값으로 옮긴다.
-	 *
-	 * GameMode 의 종료 판정과 HUD 의 표시가 같은 함수를 거치게 하는 것이 목적이다.
-	 * 둘이 각자 세면 "전원 탑승" 이 뜬 화면에서 판이 안 끝나는 상황이 생긴다.
+	 * GameMode 의 종료 판정과 HUD 의 표시가 같은 함수를 거치게 하려는 것이다 —
+	 * 각자 세면 "전원 탑승" 이 뜬 화면에서 판이 안 끝난다.
 	 */
 	FHeistEscapeConditions MakeEscapeConditions() const;
 
@@ -248,18 +208,14 @@ public:
 
 	/**
 	 * 승차 상태를 갱신한다. (서버 전용 — AVanZone 이 부른다)
-	 *
-	 * State.InVan 태그도 여기서 같이 붙고 떨어진다. 명단과 태그를 한 함수에 묶어 둔 이유는
-	 * 둘이 갈라지면 안 되기 때문이다 — 따로 부르는 구조면 한쪽만 부른 경로가 반드시 생기고,
-	 * 그때 명단에는 있는데 태그는 없는 사람이 나와서 어느 쪽이 맞는지 코드를 봐야 알게 된다.
+	 * State.InVan 미러도 여기서 같이 붙고 떨어진다. 따로 부르는 구조면 한쪽만 부른 경로가
+	 * 반드시 생기고, 그때 명단에는 있는데 태그는 없는 사람이 나온다.
 	 */
 	void SetBoarded(APlayerState* Player, bool bBoarded);
 
 	/**
-	 * 체포를 확정한다. (서버 전용 — AHeistGameMode 가 Result 진입 시 한 번에 부른다)
-	 *
-	 * 도중에 부르지 말 것. 체포는 도주 시간이 끝나는 순간에만 성립하는 상태이고,
-	 * 그 전에 붙이면 아직 구조될 수 있는 사람이 체포로 찍힌다.
+	 * 체포를 확정한다. (서버 전용 — Result 진입 시 GameMode 가 한 번에 부른다)
+	 * 도중에 부르지 말 것 — 아직 구조될 수 있는 사람이 체포로 찍힌다.
 	 */
 	void MarkArrested(APlayerState* Player);
 
@@ -270,56 +226,37 @@ public:
 
 	/**
 	 * 이 판의 결과 등급. Result 진입 전에는 Failure 다.
-	 *
-	 * [왜 여기서 판정하는가] 성공 여부가 팀 골드 지급을 가른다. 표시만 하는 값이면
-	 *   UI 가 해석해도 되지만, 보상에 영향을 주는 순간 판정이 한 곳이어야 한다 —
-	 *   HUD 와 은신처 정산이 각자 세면 화면에는 성공인데 돈은 안 들어오는 판이 생긴다.
-	 *
-	 * 사유(`GetPhaseReason`)와는 다른 값이다. 경보로 나갔다고 실패가 아니고,
-	 * 시간이 다 됐다고 실패도 아니다 — 등급은 목표 달성과 '최소 1인 탈출' 로만 정해진다.
+	 * 사유(GetPhaseReason)와는 다른 값이다 — 등급은 목표 달성과 '최소 1인 탈출' 로만 정해진다.
+	 * UI 가 아니라 여기서 판정하는 것은 이 값이 팀 골드 지급을 가르기 때문이다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	EHeistOutcome GetOutcome() const { return Outcome; }
 
 	/**
-	 * 미션 소요 시간(초). 본 작업 진입부터 결과 확정까지.
-	 *
-	 * 준비 시간은 포함되지 않는다 (기획서 2장 — 미션 타이머는 Heist 진입부터 센다).
-	 * Result 진입 순간에 서버가 한 번 고정한다 — 흐르는 시각으로 매번 계산하면
-	 * 결과 화면이 떠 있는 동안 숫자가 계속 늘어난다.
+	 * 미션 소요 시간(초). 본 작업 진입부터 결과 확정까지 (준비 시간은 빠진다).
+	 * Result 진입 순간에 서버가 한 번 고정한다 — 매번 계산하면 결과 화면에서 숫자가 계속 늘어난다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	float GetElapsedSeconds() const { return ElapsedSeconds; }
 
 	/**
-	 * 이 플레이어가 실어 온 금액 합계.
-	 *
-	 * 별도 집계표를 두지 않고 적재 목록에서 매번 계산한다. 같은 사실의 진리원이 둘이 되면
-	 * 어긋났을 때 어느 쪽이 맞는지 알 수 없고, 인원과 항목 수가 결과 화면 한 번 그리는 데
-	 * 문제될 규모가 아니다.
+	 * 이 플레이어가 실어 온 금액 합계. 적재 목록에서 매번 계산한다.
+	 * 별도 집계표를 두면 같은 사실의 진리원이 둘이 되고, 어긋났을 때 어느 쪽이 맞는지 알 수 없다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	int32 GetContributionOf(const APlayerState* Player) const;
 
 	/**
-	 * 결과 화면 '최다 소음 유발자' (기획서 8장).
-	 *
-	 * 값의 주인은 UAlertComponent 다 — 여기서는 그대로 받아 넘기기만 한다.
-	 * 경계도 컴포넌트가 GameState 에 런타임 부착되는 구조라 UI 가 직접 찾기 번거롭고,
-	 * 결과 화면이 여덟 항목 중 일곱을 여기서 받는데 하나만 다른 곳에 물을 이유가 없다.
-	 *
-	 * @param OutContribution  그 플레이어의 누적 경계도 기여량. 아무도 없으면 0
-	 * @return                 최다 유발자. 집계가 비었거나 경계도 컴포넌트가 없으면 nullptr
+	 * 결과 화면 '최다 소음 유발자'. 값의 주인은 UAlertComponent 이고 여기서는 받아 넘기기만 한다.
+	 * 아무도 없거나 경계도 컴포넌트가 없으면 nullptr 이고 OutContribution 은 0 이다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	APlayerState* GetNoisiestPlayer(float& OutContribution) const;
 
 	/**
 	 * 결과 화면을 확인했다고 표시한다. (서버 전용)
-	 *
-	 * HUD 의 '확인' 버튼이 여기로 들어온다. 클라이언트 → 서버 경로(PlayerController 의
-	 * Server RPC)는 세션 · UI 파트가 붙인다 — GameState 는 소유자가 없어 클라이언트 RPC 를
-	 * 받을 수 없다. 여기는 서버 쪽 입구다.
+	 * 클라이언트 → 서버 경로는 PlayerController 의 Server RPC 다 —
+	 * GameState 는 소유자가 없어 클라이언트 RPC 를 받을 수 없다.
 	 */
 	void SetResultConfirmed(APlayerState* Player, bool bConfirmed);
 
@@ -331,12 +268,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	int32 GetResultConfirmedNum() const { return ResultConfirmedPlayers.Num(); }
 
-	/**
-	 * 남아 있는 사람이 전부 확인했는가.
-	 *
-	 * 아무도 없으면 false 다 — 빈 서버가 "전원 확인" 으로 넘어가면 안 된다.
-	 * HeistEscapeGate 의 전원 다운 경계와 같은 종류의 함정이다.
-	 */
+	/** 남아 있는 사람이 전부 확인했는가. **아무도 없으면 false 다** — 빈 서버가 넘어가면 안 된다 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Result")
 	bool AreAllResultsConfirmed() const;
 
@@ -345,24 +277,16 @@ public:
 	FOnHeistResultConfirmChanged OnResultConfirmChanged;
 
 	/**
-	 * 이 PlayerState 를 인원 계산에 넣을 것인가.
-	 *
-	 * 관전자와 접속이 끊긴 뒤 남아 있는 PlayerState 를 걸러낸다. 이걸 안 걸면
-	 * 나간 사람이 영영 안 탄 것으로 남아서 "생존자 전원 승차" 가 성립하지 않고,
-	 * 남은 사람들이 도주 시간을 끝까지 기다려야 한다.
-	 *
-	 * [왜 공개돼 있는가] 체포 확정(AHeistGameMode::ResolveArrests)이 같은 기준으로 돌아야 한다.
-	 *   전원 탈출 여부를 체포 명단으로 판정하기 때문에, 세는 모집단이 두 곳에서 갈라지면
-	 *   체포되지 않은 사람이 생기면서 등급이 조용히 한 칸 올라간다. 규칙은 여기 하나뿐이다.
+	 * 이 PlayerState 를 인원 계산에 넣을 것인가. 관전자와 끊긴 뒤 남은 PlayerState 를 걸러낸다.
+	 * 체포 확정도 같은 기준으로 돌아야 한다 — 모집단이 두 곳에서 갈라지면 체포되지 않은
+	 * 사람이 생기면서 등급이 조용히 한 칸 올라간다. 그래서 공개돼 있다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
 	static bool IsCountedPlayer(const APlayerState* Player);
 
 	/**
 	 * 이 플레이어가 다운 상태인가. ASC 가 없으면 false.
-	 *
-	 * 정적 함수인 이유는 판정에 GameState 가 필요 없기 때문이다 — PlayerState 의 ASC 만 본다.
-	 * 결과 집계처럼 GameState 밖에서도 같은 기준으로 물어봐야 하는 곳이 있어 공개한다.
+	 * 정적인 것은 판정에 GameState 가 필요 없어서다 — PlayerState 의 ASC 만 본다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Heist|Escape")
 	static bool IsPlayerDowned(const APlayerState* Player);
@@ -373,10 +297,7 @@ public:
 protected:
 	/**
 	 * 페이즈를 바꾼다. (서버 전용 — AHeistGameMode 만 부를 수 있다)
-	 *
-	 * @param NewPhase          Phase.* 태그
-	 * @param DurationSeconds   0 이하면 카운트다운 없이 머문다 (Result)
-	 * @param Reason            왜 넘어왔는가. 결과 화면까지 실려 간다
+	 * DurationSeconds 가 0 이하면 카운트다운 없이 머문다 (Result).
 	 */
 	void SetPhase(const FGameplayTag& NewPhase, float DurationSeconds, EHeistPhaseReason Reason);
 
@@ -385,30 +306,18 @@ protected:
 
 	/**
 	 * 이 판에 실제로 쓰인 진입점을 알린다. (서버 전용 — AHeistGameMode 만)
-	 *
-	 * 은신처에서 고른 값이 아니라 **판정을 통과한 결과**다. 고른 진입점이 이 레벨에 없어
-	 * 폴백했다면 폴백한 쪽이 들어온다 — 화면에 뜨는 것은 실제로 시작한 자리여야 한다.
+	 * 고른 값이 아니라 **판정을 통과한 결과**다 — 화면에 뜨는 것은 실제로 시작한 자리여야 한다.
 	 */
 	void SetEntryTag(const FGameplayTag& NewEntryTag);
 
 	/**
 	 * 결과 등급을 확정한다. (서버 전용 — AHeistGameMode 만)
-	 *
 	 * **체포를 확정한 뒤에 불러야 한다.** 탈출 여부를 체포 명단으로 보기 때문에,
 	 * 순서를 뒤집으면 아무도 체포되지 않은 것으로 보여 등급이 실제보다 높게 나온다.
-	 *
-	 * SetPhase 안에서 하지 않는 이유가 그것이다 — 체포 확정은 페이즈가 바뀐 *뒤*에
-	 * GameMode 가 한다.
 	 */
 	void FinalizeOutcome();
 
-	/**
-	 * RepNotify 에 이전 값을 받는다.
-	 *
-	 * UAlertComponent 는 이전 단계를 따로 들고 있어야 했지만(LastBroadcastLevel),
-	 * 그건 복제와 무관한 서버 측 방송까지 같은 함수로 처리했기 때문이다.
-	 * 페이즈는 파라미터 있는 RepNotify 로 엔진에서 이전 값을 받아 온다.
-	 */
+	/** RepNotify 에 이전 값을 받는다 — 엔진이 넘겨주므로 따로 들고 있지 않아도 된다 */
 	UFUNCTION()
 	void OnRep_CurrentPhase(FGameplayTag OldPhase);
 
@@ -416,11 +325,19 @@ protected:
 	UFUNCTION()
 	void OnRep_LoadedValue();
 
+	UFUNCTION()
+	void OnRep_StartWaitState();
+
+	/**
+	 * 접속 대기 상태. 대기가 끝나면 bWaiting = false 로 한 번 더 복제된다 —
+	 * 그 마지막 한 번이 클라이언트의 입력 차단을 푸는 신호다. 생략하면 영영 안 풀린다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_StartWaitState, BlueprintReadOnly, Category = "Heist|Start")
+	FHeistStartWaitState StartWaitState;
+
 	/**
 	 * 이 판에 쓰인 진입점(Entry.*). 진입점이 없는 레벨에서는 비어 있다.
-	 *
-	 * OnRep 이 없는 이유는 판이 시작될 때 한 번 정해지고 끝나는 값이기 때문이다.
-	 * HUD 는 페이즈 전환에서 같이 읽으면 되고, 늦게 들어온 사람에게도 복제 프로퍼티라 전달된다.
+	 * OnRep 이 없는 것은 판이 시작될 때 한 번 정해지고 끝나는 값이기 때문이다.
 	 */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Entry")
 	FGameplayTag EntryTag;
@@ -431,17 +348,15 @@ protected:
 
 	/**
 	 * 현재 페이즈가 끝나는 서버 시각(초). 0 이면 카운트다운이 없다.
-	 * TryGetPhaseRemainingSeconds() 로만 읽을 것 — 이 값 자체는 클라이언트 로컬 시계와 기준이 다르다.
+	 * TryGetPhaseRemainingSeconds() 로만 읽을 것 — 클라이언트 로컬 시계와 기준이 다르다.
 	 */
 	UPROPERTY(Replicated)
 	float PhaseEndServerTime = 0.f;
 
 	/**
 	 * 현재 페이즈로 넘어온 이유.
-	 *
-	 * CurrentPhase 와 짝이라 같은 RepNotify 를 걸고 싶지만, 복제는 프로퍼티 단위라
-	 * 둘이 다른 프레임에 도착할 수 있다. 순서를 보장할 수 없으므로 이유를 먼저 갱신하고
-	 * 페이즈를 나중에 갱신하는 식의 가정을 하지 않는다 — 구독자는 델리게이트 인자로 받는다.
+	 * CurrentPhase 와 같은 RepNotify 에 묶지 못한다 — 복제가 프로퍼티 단위라 둘이 다른
+	 * 프레임에 도착할 수 있다. 그래서 구독자는 델리게이트 인자로 받는다.
 	 */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Phase")
 	EHeistPhaseReason PhaseReason = EHeistPhaseReason::Scheduled;
@@ -451,10 +366,8 @@ protected:
 
 	/**
 	 * 매치 시작 시 한 번 설정되고 그 뒤로 바뀌지 않는다.
-	 *
-	 * 그런데도 RepNotify 를 다는 이유는 늦게 들어온 클라이언트 때문이다. 그때 LoadedValue 는
-	 * 아직 0(기본값과 같음)이라 RepNotify 가 불리지 않는데, 목표액은 0 이 아니라서 불린다.
-	 * 이것이 없으면 그 클라이언트의 HUD 는 목표 게이지를 한 번도 못 그린다.
+	 * 그런데도 RepNotify 를 다는 것은 늦게 들어온 클라이언트 때문이다 — 그때 LoadedValue 는
+	 * 아직 0 이라 알림이 안 오고, 그러면 그 사람 HUD 는 목표 게이지를 한 번도 못 그린다.
 	 */
 	UPROPERTY(ReplicatedUsing = OnRep_LoadedValue, BlueprintReadOnly, Category = "Heist|Value")
 	int32 TargetValue = 0;
@@ -465,10 +378,7 @@ protected:
 
 	/**
 	 * 본 작업이 시작된 서버 시각. 소요 시간의 기준점이다.
-	 *
-	 * 복제하지 않는다 — 이 값으로 무언가를 계산해야 하는 쪽은 서버뿐이고, 결과는
-	 * ElapsedSeconds 로 고정돼 나간다. 흐르는 기준점을 클라이언트에 주면
-	 * 각자 "지금까지 몇 초" 를 계산하다가 결과 화면에서 숫자가 계속 늘어난다.
+	 * 복제하지 않는다 — 흐르는 기준점을 주면 각자 계산하다가 결과 화면에서 숫자가 계속 늘어난다.
 	 */
 	float HeistStartServerTime = 0.f;
 
@@ -489,10 +399,6 @@ protected:
 
 	/**
 	 * 지금 밴에 타 있는 사람들. 탈출 판정의 진리원이다.
-	 *
-	 * 배열인 이유는 순서(누가 먼저 탔는가)가 결과 화면에 쓰일 수 있고, 인원이 최대 4명이라
-	 * TSet 의 이점이 없기 때문이다. 복제되는 값이 작을수록 좋다.
-	 *
 	 * 폰이 아니라 PlayerState 를 담는다 — 폰은 체포 · 관전 전환으로 파괴되지만
 	 * 판정과 결과 화면은 그 뒤까지 이어진다.
 	 */
@@ -501,9 +407,7 @@ protected:
 
 	/**
 	 * 체포된 사람들. Result 진입 시 한 번 채워지고 그 뒤로 바뀌지 않는다.
-	 *
-	 * RepNotify 가 없는 것은 의도다 — 이 값이 도착하는 시점에는 이미 Phase.Result 로
-	 * 넘어가 있고, 결과 화면은 페이즈 전환으로 열린다. 명단은 그때 읽으면 된다.
+	 * RepNotify 가 없는 것은 의도다 — 도착 시점에는 이미 결과 화면이 페이즈 전환으로 열려 있다.
 	 */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Escape")
 	TArray<TObjectPtr<APlayerState>> ArrestedPlayers;

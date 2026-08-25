@@ -22,11 +22,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnReinforcementTriggered, int32, Re
 
 /**
  * 저택 전체의 경계도. GameState 에 런타임 부착되며 서버가 계산하고 전원에게 복제된다.
- *
- * 소음 서브시스템의 OnNoiseReported(감쇄 전)를 구독한다. 청취자가 아닌 이유는
- * 경계도에 청취 위치 개념이 없기 때문이다 — 벽 너머에서 금고를 뜯어도 경계도는 똑같이 오른다.
- *
- * 히스테리시스가 있어서 단계는 게이지만으로 결정되지 않는다. 그래서 둘 다 복제한다.
+ * 청취자가 아니라 OnNoiseReported(감쇄 전)를 구독한다 — 경계도에는 청취 위치 개념이 없다.
+ * 히스테리시스가 있어 단계가 게이지만으로 결정되지 않으므로 둘 다 복제한다.
  */
 UCLASS(ClassGroup = (Alert))
 class HEAVYHANDED_API UAlertComponent : public UActorComponent
@@ -62,22 +59,15 @@ public:
 	bool IsAlarmed() const { return AlertLevel == EAlertLevel::Alarm; }
 
 	/**
-	 * 결과 화면 집계 원본. 값은 누적 경계도 기여량.
-	 *
-	 * 서버에만 있다 — 이 맵 자체는 복제하지 않는다. 클라에서는 항상 비어 있으므로
+	 * 결과 화면 집계 원본. **서버에만 있다** — 복제하지 않아 클라에서는 항상 비어 있다.
 	 * 결과 화면은 아래 GetNoisiestPlayer() 를 쓸 것.
-	 * UFUNCTION 파라미터·반환 타입에는 TObjectPtr 를 쓸 수 없어서 C++ 전용이다.
 	 */
 	const TMap<TObjectPtr<APlayerState>, float>& GetNoiseContribution() const { return NoiseContribution; }
 
 	/**
-	 * 결과 화면 "최다 소음 유발자" (기획서 8장). 서버·클라 양쪽에서 유효하다.
-	 *
-	 * 집계 맵 전체가 아니라 1위만 복제한다. 결과 화면이 필요한 것이 그것뿐이고,
-	 * 맵을 통째로 복제하려면 FFastArraySerializer 를 쓰거나 매치 종료 RPC 를 따로 만들어야 한다.
-	 *
-	 * @param OutContribution  그 플레이어의 누적 기여량. 아무도 없으면 0
-	 * @return                 최다 유발자. 집계가 비었으면 nullptr
+	 * 결과 화면 "최다 소음 유발자". 서버 · 클라 양쪽에서 유효하다.
+	 * 집계 맵 전체가 아니라 1위만 복제한다 — 결과 화면이 필요한 것이 그것뿐이다.
+	 * 집계가 비었으면 nullptr 이고 OutContribution 은 0 이다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Alert")
 	APlayerState* GetNoisiestPlayer(float& OutContribution) const;
@@ -91,21 +81,16 @@ public:
 	void ResetAlert();
 
 	/**
-	 * 경비 추격(Pursue 진입)이 시작될 때마다 부른다. 서버 전용.
-	 *
-	 * UAlertSettings::PursuitsPerReinforcement 번 누적될 때마다 OnReinforcementTriggered 를
-	 * 쏘고 카운트를 0으로 되돌린다 - 한 번만 터지고 끝나는 게 아니라, 계속 잡히면 계속 증원된다.
-	 * 아래 ReportNoiseDetected() 와는 별개 카운터라 서로 간섭하지 않는다.
+	 * 경비 추격이 시작될 때마다 부른다. 서버 전용.
+	 * PursuitsPerReinforcement 번마다 증원을 쏘고 카운트를 되돌린다 — 계속 잡히면 계속 증원된다.
+	 * ReportNoiseDetected() 와는 별개 카운터라 서로 간섭하지 않는다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Alert")
 	void ReportPursuitStarted();
 
 	/**
-	 * 경비가 소음 인지 게이지(PerceptionMeterComponent)를 가득 채울 때마다 부른다. 서버 전용.
-	 *
-	 * UAlertSettings::NoiseDetectionsPerReinforcement 번 누적될 때마다 OnReinforcementTriggered 를
-	 * 쏘고 카운트를 0으로 되돌린다. ReportPursuitStarted() 와는 별개 카운터다 - 추격 2번과
-	 * 소음 감지 2번은 서로 섞이지 않고 각자 자기 임계값에 도달했을 때만 증원을 발동한다.
+	 * 경비가 인지 게이지를 가득 채울 때마다 부른다. 서버 전용.
+	 * NoiseDetectionsPerReinforcement 번마다 증원을 쏜다. 추격 카운터와 섞이지 않는다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Alert")
 	void ReportNoiseDetected();
@@ -134,14 +119,9 @@ protected:
 	float AlertGauge = 0.f;
 
 	/**
-	 * AlertGauge 를 0~255 로 양자화한 복제본. 해상도 약 0.4%p — HUD 바로는 충분하다.
-	 *
-	 * float 를 그대로 복제하면 자연 감소 중에 매 프레임 값이 바뀌어
-	 * GameState 의 넷 업데이트 레이트(AActor 기본 100Hz) 만큼 계속 전송된다.
-	 * 감소가 30~60초씩 이어지므로 그동안 내내 나간다.
-	 * uint8 로 끊으면 1%/초 기준 초당 2~3번만 dirty 가 되어 나머지는 아예 전송되지 않는다.
-	 *
-	 * 단계 판정에는 절대 쓰지 말 것 — 판정은 항상 AlertGauge 원본으로 한다.
+	 * AlertGauge 를 0~255 로 양자화한 복제본. 해상도 약 0.4%p — HUD 바에는 충분하다.
+	 * float 를 그대로 복제하면 30~60초짜리 자연 감소 내내 매 프레임 전송된다.
+	 * **단계 판정에는 절대 쓰지 말 것** — 판정은 항상 AlertGauge 원본으로 한다.
 	 */
 	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedGauge)
 	uint8 ReplicatedGauge = 0;
@@ -152,9 +132,7 @@ protected:
 
 	/**
 	 * 현재 1위 소음 유발자. 결과 화면(클라)에서 읽으라고 복제한다.
-	 *
-	 * 기여량은 단조 증가라 1위 갱신이 O(1) 이다 — 새 기여량이 기존 1위를 넘을 때만 바뀐다.
-	 * 그래서 매 소음마다 맵 전체를 훑을 필요가 없고, dirty 도 순위가 실제로 뒤집힐 때만 생긴다.
+	 * 기여량이 단조 증가라 갱신이 O(1) 이고, dirty 도 순위가 실제로 뒤집힐 때만 생긴다.
 	 */
 	UPROPERTY(Replicated)
 	TObjectPtr<APlayerState> NoisiestPlayer = nullptr;

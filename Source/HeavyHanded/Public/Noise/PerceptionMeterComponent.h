@@ -13,11 +13,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerceptionFull, FVector, LastNois
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerceptionChanged, float, NewPerception01);
 
 /**
- * 경비 1명의 "소리를 들었다" 게이지.
- * 소음 자극을 누적하고, 무자극이 이어지면 감소한다. 100% 에서 래치되며
- * ResetPerception() 만이 래치를 푼다.
- *
- * 누적 계산은 여기(김지성), 100% 이후의 조사 행동과 BT 는 유정석.
+ * 경비 1명의 "소리를 들었다" 게이지. 자극을 누적하고 무자극이 이어지면 감소한다.
+ * 100% 에서 래치되며 ResetPerception() 만이 푼다. 그 뒤의 조사 행동과 BT 는 유정석.
  */
 UCLASS(ClassGroup = (Noise), meta = (BlueprintSpawnableComponent))
 class HEAVYHANDED_API UPerceptionMeterComponent : public UActorComponent, public INoiseListener
@@ -73,9 +70,7 @@ protected:
 
 	/**
 	 * Perception01 을 0~255 로 양자화한 복제본. 머리 위 게이지 위젯용.
-	 *
 	 * float 를 그대로 복제하면 감소 중 매 프레임 dirty 가 되어 경비 수만큼 곱해진다.
-	 * 경비 20명 × 클라 4명이면 그 자체로 무시할 양이 아니다.
 	 */
 	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedPerception)
 	uint8 ReplicatedPerception = 0;
@@ -95,10 +90,8 @@ protected:
 
 	/**
 	 * 귀 높이. Owner 가 폰이 아닐 때만 쓰는 오프셋.
-	 *
-	 * ClampMax 는 UNoiseSubsystem 의 ListenerCullMargin(500) 과 묶여 있다.
-	 * 그쪽 1차 거리 컬링이 "액터 위치와 귀 위치의 차이는 이 이하" 를 전제하므로,
-	 * 여기를 그보다 크게 열면 반경 경계의 청취자가 조용히 컬링된다.
+	 * ClampMax 는 UNoiseSubsystem 의 ListenerCullMargin 과 묶여 있다 — 그보다 크게 열면
+	 * 반경 경계의 청취자가 1차 거리 컬링에서 조용히 걸러진다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception",
 			  meta = (ClampMin = "0.0", ClampMax = "300.0", Units = "cm"))

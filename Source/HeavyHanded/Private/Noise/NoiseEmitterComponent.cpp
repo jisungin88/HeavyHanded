@@ -33,17 +33,9 @@ namespace
 	}
 
 	/**
-	 * 프리미티브의 물리 표면을 얻는다.
-	 *
-	 * 각 컴포넌트는 반드시 "자기" 바디에서 읽는다. 예전에는 FHitResult::PhysMaterial 을 먼저 봤는데,
-	 * 두 호출에 같은 Hit 을 넘기다 보니 그 값이 유효한 순간 두 컴포넌트가 같은 표면을 돌려주고
-	 * "두 재질 중 작은 쪽이 이긴다" 규칙이 아무 로그 없이 사라졌다.
-	 *
-	 * PreferredMaterial 은 "맞은 지점" 의 재질이라 복합 재질 메시에서는 바디 기본값보다 정확하다.
-	 * 그래서 폴백이 아니라 우선값이다. 다만 한쪽에만 줘야 한다.
-	 *
-	 * 시뮬레이션 히트 이벤트의 FHitResult 는 PhysMaterial 이 비어 있는 경우가 많다
-	 * (bReturnPhysicalMaterial 은 트레이스 쿼리 옵션이다). 그때 바디 인스턴스로 떨어진다.
+	 * 프리미티브의 물리 표면을 얻는다. 각 컴포넌트는 반드시 "자기" 바디에서 읽는다 —
+	 * 두 호출에 같은 Hit 을 넘기면 둘이 같은 표면을 돌려주고 "작은 쪽이 이긴다" 규칙이 사라진다.
+	 * PreferredMaterial 은 맞은 지점의 재질이라 우선값이고, **한쪽에만 줘야 한다.**
 	 */
 	EPhysicalSurface ResolveSurface(const UPrimitiveComponent* Component, const UPhysicalMaterial* PreferredMaterial)
 	{
@@ -344,14 +336,8 @@ void UNoiseEmitterComponent::EmitThroughFilter(FGameplayTag Tag, float Loudness,
 	}
 
 	// 2) 여기서 바로 발행하지 않고 필터에 접수만 한다. 실제 발행은 틱이 한다.
-	//
-	// 이 함수는 OnComponentHit 안에서 불린다. 그대로 발행하면
-	//   물리 히트 콜백 → ReportNoise → Propagate → 청취자 수만큼 라인 트레이스
-	// 가 전부 그 자리에서 동기로 돈다. 방 안에 노획물이 쏟아지는 프레임 —
-	// 즉 제일 바쁜 순간에 비용이 몰리고, 분산할 자리도 없다.
-	//
-	// 틱으로 미루면 한 프레임의 충돌이 태그별로 하나씩 묶이고, 예산을 걸 자리도 생긴다.
-	// 대가는 최대 1프레임 지연인데 경비 반응 기준으로는 체감되지 않는다.
+	// 그대로 발행하면 히트 콜백 안에서 청취자 수만큼 라인 트레이스가 동기로 돌아,
+	// 노획물이 쏟아지는 제일 바쁜 프레임에 비용이 몰린다. 대가는 최대 1프레임 지연이다
 	SpamFilter.Submit(FinalTag, Modified, Location);
 	SetComponentTickEnabled(true);
 }

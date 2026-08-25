@@ -66,11 +66,7 @@ namespace
 	/** 놓을 때 운반자 몸 밖으로 밀어내며 추가로 띄우는 여유(cm) */
 	constexpr float ReleaseDepenetrationMargin = 2.f;
 
-	/** [임시] 조준점을 찾는 트레이스 길이(cm). 아무것도 안 맞으면 이 거리의 허공을 조준점으로 본다 */
-	constexpr float DebugAimTraceDistance = 20000.f;
-
-	/** [임시] 조준점이 발사점에서 이보다 가까우면 방향이 불안정해지므로 시선 방향으로 대체한다 */
-	constexpr float DebugMinAimDistance = 150.f;
+	// 조준 트레이스 길이·최소 거리는 HHThrow 로 옮겼다 (장비와 공유).
 
 	/**
 	 * [임시] 디버그 키를 한 프레임에 한 번만 처리하기 위한 표식.
@@ -892,9 +888,6 @@ void ALootBase::OnThrown(APawn* Carrier, const FVector& AimDirection)
 		return;
 	}
 
-	// 운반자의 이동 속도를 더하기 때문에 PrimaryCarrier 를 비우기 전에 계산해야 한다.
-	const FVector LaunchVelocity = ComputeThrowVelocity(AimDirection);
-
 	PrimaryCarrier = nullptr;
 
 	// 날아가서 처음 부딪히는 것이 던지기의 결과다. Drop 이 아니라 Throw 로 표시한다.
@@ -903,90 +896,33 @@ void ALootBase::OnThrown(APawn* Carrier, const FVector& AimDirection)
 	// 디태치 + 물리 ON + 프로파일 복구
 	ApplyCarryState();
 
-	// 손 소켓은 던진 사람 캡슐과 겹쳐 있다. 겹친 채로 물리를 켜면 물리 엔진이
-	// 침투를 해소하느라 자기가 던진 물건에 튕겨 나간다. 먼저 간격을 만든다.
-	const FVector LaunchDirection = AimDirection.GetSafeNormal();
-	if (PhysicsData.ThrowClearance > 0.f && !LaunchDirection.IsNearlyZero())
-	{
-		SetActorLocation(GetActorLocation() + LaunchDirection * PhysicsData.ThrowClearance,
-			/*bSweep=*/false);
-	}
+	// 간격 확보 · 임펄스 · 회전은 장비와 공유한다 (HHThrow).
+	// PrimaryCarrier 는 위에서 비웠으므로 속도 합산용으로 Carrier 를 그대로 넘긴다.
+	HHThrow::Launch(this, LootMesh, AimDirection, MakeThrowParams(), Carrier);
+}
 
-	// 임펄스 = 질량 x 목표 속도.
-	// 질량을 곱해야 무게와 무관하게 데이터에 적은 ThrowSpeed 그대로 나간다.
-	// 무거운 물건이 덜 날아가는 것은 ThrowSpeed 값으로 표현한다. (값은 데이터, 행동은 공통)
-	LootMesh->AddImpulse(LaunchVelocity * LootMesh->GetMass());
-
-	// 회전이 없으면 물건이 미끄러지듯 날아가 던진 느낌이 안 난다.
-	// 조준 방향 기준 오른쪽 축으로 굴린다. 위/아래로 똑바로 던지면 축이 0 이라 회전은 생략된다.
-	if (PhysicsData.ThrowSpinSpeed > 0.f)
-	{
-		const FVector SpinAxis =
-			FVector::CrossProduct(LaunchDirection, FVector::UpVector).GetSafeNormal();
-		if (!SpinAxis.IsNearlyZero())
-		{
-			LootMesh->SetPhysicsAngularVelocityInDegrees(SpinAxis * PhysicsData.ThrowSpinSpeed);
-		}
-	}
+FThrowParams ALootBase::MakeThrowParams() const
+{
+	// 저장은 표(FLootPhysicsData)에 그대로 두고 계산할 때만 모아서 넘긴다.
+	// 필드를 옮기면 DT_LootCatalog 의 기존 행이 값을 잃는다.
+	FThrowParams Params;
+	Params.Speed = PhysicsData.ThrowSpeed;
+	Params.UpwardRatio = PhysicsData.ThrowUpwardRatio;
+	Params.CarrierVelocityInfluence = PhysicsData.CarrierVelocityInfluence;
+	Params.SpinSpeed = PhysicsData.ThrowSpinSpeed;
+	Params.Clearance = PhysicsData.ThrowClearance;
+	return Params;
 }
 
 FVector ALootBase::ComputeThrowVelocity(const FVector& AimDirection) const
 {
-	const FVector Aim = AimDirection.GetSafeNormal();
-	if (Aim.IsNearlyZero())
-	{
-		return FVector::ZeroVector;
-	}
-
-	// 조준 방향에 위쪽 성분을 섞어 포물선을 만든다.
-	const FVector LaunchDirection =
-		(Aim + FVector::UpVector * PhysicsData.ThrowUpwardRatio).GetSafeNormal();
-
-	FVector Velocity = LaunchDirection * PhysicsData.ThrowSpeed;
-
-	// 운반자의 이동 속도를 얼마나 섞을지는 데이터가 정한다. 기본은 0 이다.
-	// 1:1 로 더하면 이동 속도가 ThrowSpeed 와 비슷할 때 조준이 무의미해진다.
-	if (PhysicsData.CarrierVelocityInfluence > 0.f)
-	{
-		if (const APawn* Carrier = PrimaryCarrier.Get())
-		{
-			Velocity += Carrier->GetVelocity() * PhysicsData.CarrierVelocityInfluence;
-		}
-	}
-
-	return Velocity;
+	return HHThrow::ComputeVelocity(AimDirection, MakeThrowParams(), PrimaryCarrier.Get());
 }
 
 bool ALootBase::PredictThrowPath(const FVector& AimDirection, FPredictProjectilePathResult& OutResult)
 {
-	const FVector LaunchDirection = AimDirection.GetSafeNormal();
-	if (LaunchDirection.IsNearlyZero())
-	{
-		return false;
-	}
-
-	FPredictProjectilePathParams Params;
-
-	// 실제 던지기와 같은 출발점·속도를 써야 미리 보이는 궤적이 맞는다.
-	Params.StartLocation = GetActorLocation() + LaunchDirection * PhysicsData.ThrowClearance;
-	Params.LaunchVelocity = ComputeThrowVelocity(AimDirection);
-	Params.ProjectileRadius = LootMesh->Bounds.SphereRadius;
-
-	Params.bTraceWithCollision = true;
-	Params.bTraceWithChannel = true;
-	Params.TraceChannel = ECollisionChannel::ECC_WorldStatic;
-
-	// 자기 자신과 던지는 사람은 궤적에서 빼야 조준선이 발밑에서 끊기지 않는다.
-	Params.ActorsToIgnore.Add(this);
-	if (APawn* Carrier = PrimaryCarrier.Get())
-	{
-		Params.ActorsToIgnore.Add(Carrier);
-	}
-
-	Params.MaxSimTime = 3.f;
-	Params.SimFrequency = 15.f;
-
-	return UGameplayStatics::PredictProjectilePath(this, Params, OutResult);
+	return HHThrow::PredictPath(this, PrimaryCarrier.Get(), AimDirection, MakeThrowParams(),
+		LootMesh->Bounds.SphereRadius, OutResult);
 }
 
 APawn* ALootBase::GetPrimaryCarrier() const
@@ -1676,50 +1612,7 @@ ALootBase* ALootBase::Debug_FindGrabTarget(const APawn* LocalPawn) const
 
 FVector ALootBase::ComputeThrowAimDirection() const
 {
-	const APawn* Carrier = PrimaryCarrier.Get();
-	const UWorld* World = GetWorld();
-	if (!IsValid(Carrier) || !World)
-	{
-		return FVector::ZeroVector;
-	}
-
-	// 카메라 시점. 컨트롤러가 있으면 실제 카메라를, 없으면 폰의 눈 위치를 쓴다.
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	if (const AController* CarrierController = Carrier->GetController())
-	{
-		CarrierController->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	}
-	else
-	{
-		Carrier->GetActorEyesViewPoint(ViewLocation, ViewRotation);
-	}
-
-	const FVector ViewDirection = ViewRotation.Vector();
-
-	// 화면 중앙이 가리키는 지점을 찾는다.
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(LootDebugAim), false, this);
-
-	// 들고 있는 노획물은 카메라 바로 앞에 있어서 반드시 먼저 걸린다. 던진 사람도 뺀다.
-	TraceParams.AddIgnoredActor(Carrier);
-
-	FVector AimPoint = ViewLocation + ViewDirection * DebugAimTraceDistance;
-
-	FHitResult AimHit;
-	if (World->LineTraceSingleByChannel(AimHit, ViewLocation, AimPoint, ECC_Visibility, TraceParams))
-	{
-		AimPoint = AimHit.ImpactPoint;
-	}
-
-	// 벽에 바짝 붙으면 조준점이 발사점보다 뒤에 놓여 엉뚱한 방향이 나온다.
-	// 그때는 시선 방향을 그대로 쓴다.
-	const FVector ToAimPoint = AimPoint - GetActorLocation();
-	if (ToAimPoint.SizeSquared() < FMath::Square(DebugMinAimDistance))
-	{
-		return ViewDirection;
-	}
-
-	return ToAimPoint.GetSafeNormal();
+	return HHThrow::ComputeAimDirection(this, PrimaryCarrier.Get());
 }
 
 void ALootBase::Debug_BeginThrowAim()
@@ -1783,32 +1676,8 @@ void ALootBase::Debug_ThrowForward()
 
 void ALootBase::ShowThrowTrajectory(const FVector& AimDirection, float Duration)
 {
-#if ENABLE_DRAW_DEBUG
-	FPredictProjectilePathResult Result;
-	if (!PredictThrowPath(AimDirection, Result))
-	{
-		// 아무데도 맞지 않아도 경로 자체는 그린다. 반환값은 충돌 여부일 뿐이다.
-	}
-
-	const UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	for (int32 Index = 1; Index < Result.PathData.Num(); ++Index)
-	{
-		DrawDebugLine(World,
-			Result.PathData[Index - 1].Location, Result.PathData[Index].Location,
-			FColor::Cyan, false, Duration, 0, 2.f);
-	}
-
-	// 예측한 착탄 지점. 실제로 여기 떨어지는지 보면 된다.
-	if (Result.HitResult.bBlockingHit)
-	{
-		DrawDebugSphere(World, Result.HitResult.ImpactPoint, 20.f, 12, FColor::Cyan, false, Duration);
-	}
-#endif
+	HHThrow::DrawTrajectory(this, PrimaryCarrier.Get(), AimDirection, MakeThrowParams(),
+		LootMesh->Bounds.SphereRadius, Duration);
 }
 
 void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location,
