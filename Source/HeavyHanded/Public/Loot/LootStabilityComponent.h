@@ -7,6 +7,8 @@
 
 class ALootBase;
 class APawn;
+class UNiagaraComponent;
+class UNiagaraSystem;
 
 /**
  * 불안정형 노획물. 기울어지면 내용물이 새고 가치가 깎인다. (기획서 5장 — 기울기 60도 초과)
@@ -50,6 +52,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Loot|Stability")
 	float GetTilt01() const { return ReplicatedTilt01 / 255.f; }
 
+	/**
+	 * 지금 내용물이 새고 있는가. 모든 머신에서 같은 답이 나온다.
+	 *
+	 * IsSpilled() 와 다르다 — 저쪽은 "한 번이라도 샜는가"(누적), 이쪽은 "지금 새는 중인가"(상태).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Loot|Stability")
+	bool IsSpilling() const { return bIsSpilling; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
@@ -70,6 +80,29 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability")
 	FLootStabilityData Data;
+
+	/**
+	 * 새는 동안 계속 나오는 이펙트. 메시의 SpillSocketName 소켓에 붙는다.
+	 *
+	 * [왜 지속 효과인가]
+	 *   유출은 사건이 아니라 상태다. 기울어져 있는 내내 SpillIntervalSeconds 마다
+	 *   가치가 깎인다. 깎일 때마다 한 번씩 터뜨리면 플레이어는 "지금 새는 중" 이 아니라
+	 *   "가끔 뭔가 나오네" 로 읽는다. 흐르는 그림이어야 세고 있다는 것이 전달된다.
+	 *
+	 * [BP 는 에셋만 고른다] 언제 켜고 끌지는 C++ 이 정한다. 파손형의 BreakEffect 와 같은 이유다.
+	 *
+	 * 비워 두면 아무 효과도 나오지 않는다 (경고하지 않는다 — 연출 없는 물건도 있을 수 있다).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Visual")
+	TObjectPtr<UNiagaraSystem> SpillEffect;
+
+	/**
+	 * 이펙트를 붙일 소켓. 내용물이 넘치는 자리 — 항아리라면 아가리다.
+	 * 소켓이 없으면 메시 원점에 붙고 경고를 낸다. 조용히 원점에 붙으면
+	 * "이펙트가 물건 한가운데서 나온다" 는 증상으로만 드러나 원인을 찾기 어렵다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Stability|Visual")
+	FName SpillSocketName = TEXT("Spill");
 
 	/**
 	 * 소지 중 기울기가 바뀔 때 호출된다. (모든 머신)
@@ -106,6 +139,23 @@ private:
 
 	/** 가치를 깎고 연출을 방송한다 (서버 전용) */
 	void Spill(float TiltDegrees);
+
+	/**
+	 * MinValueRatio 바닥까지 다 샜는가. 더 기울여도 잃을 것이 없는 상태다.
+	 *
+	 * 판정과 연출이 같은 답을 봐야 한다. Spill 만 바닥을 확인하고 이펙트는 계속 나오면,
+	 * 플레이어는 아직 손해를 보는 줄 알고 급히 세우려 하지만 실제로는 아무 일도 없다.
+	 */
+	bool IsValueDrained() const;
+
+	/** '지금 새는 중' 상태를 바꾼다. 값이 실제로 달라졌을 때만 일한다 (서버 전용) */
+	void SetSpilling(bool bNewSpilling);
+
+	/** bIsSpilling 에 맞춰 이펙트를 켜거나 끈다. 모든 머신에서 실행된다 */
+	void ApplySpillEffect();
+
+	UFUNCTION()
+	void OnRep_IsSpilling();
 
 	/** 소지 중 기울어진 모습을 실제로 보여준다. 안 보이면 플레이어가 배울 수 없다 */
 	void ApplyCarriedLean(float TiltDegrees);
@@ -159,4 +209,24 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_SpillCount, VisibleInstanceOnly, Category = "Loot|Stability")
 	int32 SpillCount = 0;
+
+	/**
+	 * 지금 새는 중인가. 판정은 서버가 하지만 이펙트는 모든 화면에 보여야 하므로 복제한다.
+	 *
+	 * 기울기(ReplicatedTilt01)로 클라이언트가 직접 계산하게 두지 않는다.
+	 * 그레이스 판정이 서버의 누적 시간(TiltedSeconds)에 달려 있어서
+	 * 클라이언트가 같은 답을 낼 수 없다 — 던진 물건이 공중에서 새는 것처럼 보이게 된다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_IsSpilling, VisibleInstanceOnly, Category = "Loot|Stability")
+	bool bIsSpilling = false;
+
+	/**
+	 * 붙여 둔 이펙트 인스턴스. 껐다 켰다 하며 재사용한다.
+	 * UPROPERTY 가 없으면 GC 가 회수한 뒤 다음 유출에서 크래시한다.
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> SpillEffectComponent;
+
+	/** 소켓이 없다는 경고를 이미 냈는가 */
+	bool bWarnedMissingSpillSocket = false;
 };
