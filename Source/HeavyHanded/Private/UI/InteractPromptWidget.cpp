@@ -80,18 +80,27 @@ void UInteractPromptWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
 
-	// PreConstruct 는 디자이너에서도 실행된다. 토큰을 여기서 적용해야 편집 중에도
-	// 실제 색 · 폰트가 보이고, UMG 에 색이 구워지는 것을 막는다
+	// PreConstruct 는 디자이너에서도 실행된다. 폰트를 여기서 적용해야 편집 중에도
+	// 실제 글꼴이 보인다.
+	//
+	// [색은 일부러 건드리지 않는다 — 이 위젯만의 예외다]
+	//   프롬프트는 배경 없이 월드 위에 바로 얹히는 유일한 HUD 요소라, 읽히는 색이
+	//   맵의 밝기에 따라 달라진다. 팔레트 토큰 하나로 정해 두면 어두운 실내에서
+	//   맞춘 색이 밝은 야외에서 안 보인다. 그래서 여기만 WBP 에서 직접 잡는다.
+	//
+	//   색을 다시 C++ 이 정하게 되돌리려면 SetColorAndOpacity 를 넣으면 되지만,
+	//   그 순간 WBP 에 찍힌 색은 전부 무시된다 — 되돌리기 전에 디자이너와 확인할 것.
+	//
+	// [폰트는 예외로 두지 않는다] 비어 있는 폰트 값을 위젯에 꽂으면 Slate 가
+	//   LastResort 로 떨어져 글자가 네모로 나온다. 폰트의 창구는 GetUIFont() 하나뿐이다.
 	if (Txt_Action)
 	{
 		Txt_Action->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
-		Txt_Action->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_Detail)
 	{
 		Txt_Detail->SetFont(UUISettings::GetUIFont(EUIFontToken::Label));
-		Txt_Detail->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
 	}
 }
 

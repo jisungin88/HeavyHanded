@@ -116,3 +116,7 @@ RawAssets/
 *.rar
 *.7z
 .claude/settings.local.json
+
+# Windows 에서 bash 의 `2>/dev/null` 리다이렉트가 실제 폴더로 만들어 버린 것.
+# 경로가 아니라 사고의 흔적이라 무시한다.
+dev/
