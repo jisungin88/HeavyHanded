@@ -6,6 +6,9 @@
 #include "LootDurabilityComponent.generated.h"
 
 class ALootBase;
+class UMaterialInstanceDynamic;
+class UNiagaraSystem;
+class USoundBase;
 struct FLootImpactEvent;
 
 /**
@@ -44,6 +47,16 @@ public:
 	/** 지금까지 누적된 충격 횟수 */
 	UFUNCTION(BlueprintPure, Category = "Loot|Durability")
 	int32 GetImpactCount() const { return ImpactCount; }
+
+	/**
+	 * 파손 진행도 (0~1). **1 은 '깨진 상태'가 아니라 '다음 충격에 깨진다'** 는 뜻이다.
+	 * 균열 머티리얼과 HUD 가 같은 값을 봐야 하므로 여기 하나로 둔다.
+	 *
+	 * 3회짜리 물건이면 1회 = 0.5, 2회 = 1.0 이다. 마지막 충격에서는 같은 프레임에
+	 * 메시가 숨겨지므로 그 값은 화면에 나오지 않는다 — 이유는 .cpp 에 적어 두었다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Loot|Durability")
+	float GetDamageRatio01() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -95,15 +108,52 @@ protected:
 	bool bIgnorePawnImpacts = true;
 
 	/**
+	 * 균열 머티리얼의 스칼라 파라미터 이름. 충격이 쌓일 때마다 0~1 로 설정된다.
+	 *
+	 * [왜 BP 그래프가 아니라 C++ 인가]
+	 *   파손형 메시가 6종(SM_maartifact1~5, SM_mavaseempty)이라 BP 에 짜면 같은 그래프가
+	 *   6벌 생긴다. BP 는 diff 도 병합도 안 되므로 나중에 한 벌만 고쳐놓고 잊으면
+	 *   그 물건만 균열이 안 도는데 찾을 방법이 없다.
+	 *
+	 *   BP 가 지정하는 것은 머티리얼과 이 이름뿐이고, 언제 얼마로 갈지는 C++ 이 정한다.
+	 *
+	 * None 으로 두면 균열 연출을 하지 않는다 (동적 인스턴스도 만들지 않는다).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability|Visual")
+	FName CrackParameterName = TEXT("CrackAmount");
+
+	/**
 	 * 충격이 하나 쌓였을 때 호출된다. 금 가는 단계 연출용.
-	 * BP 는 여기서 머티리얼·메시·사운드만 바꾼다. 판정은 이미 C++ 에서 끝났다.
+	 * BP 는 여기서 사운드·파티클만 붙인다 — 머티리얼 균열은 C++ 이 이미 적용했다.
 	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Loot|Durability")
 	void OnDamageAccumulated(int32 NewImpactCount, int32 MaxCount);
 
 	/**
-	 * 파괴됐을 때 호출된다. 파편·사운드 연출용.
-	 * 이 시점에 노획물 메시는 이미 숨겨져 있다. 파편은 별도 액터/나이아가라로 스폰할 것.
+	 * 깨질 때 뿌릴 파편. 노획물 위치에 스폰된다.
+	 *
+	 * [BP 는 에셋만 고른다] 언제·어디에 스폰할지는 C++ 이 정한다.
+	 *   BP 그래프에 스폰 로직을 두면 노획물마다 타이밍과 위치가 달라질 수 있고,
+	 *   uasset 이라 리뷰도 병합도 안 된다. 나중에 이 값을 DT_LootDurability 의
+	 *   열로 옮기고 싶어질 때도, 속성이면 옮길 수 있지만 BP 그래프는 못 옮긴다.
+	 *
+	 * 비워 두면 파편이 나오지 않는다 (경고도 내지 않는다 — 파편 없는 물건도 있을 수 있다).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability|Visual")
+	TObjectPtr<UNiagaraSystem> BreakEffect;
+
+	/** 파편의 크기 배율. 큰 물건은 파편도 크게 튀어야 한다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability|Visual",
+		meta = (ClampMin = "0.1"))
+	float BreakEffectScale = 1.f;
+
+	/** 깨지는 소리. 소음 시스템과 무관한 순수 연출이다 — 경계도는 ReportImpact 가 이미 알렸다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Durability|Visual")
+	TObjectPtr<USoundBase> BreakSound;
+
+	/**
+	 * 파괴됐을 때 호출된다. 위 파편·사운드로 부족할 때만 쓴다.
+	 * 이 시점에 노획물 메시는 이미 숨겨져 있고, BreakEffect / BreakSound 는 이미 나갔다.
 	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Loot|Durability")
 	void OnBroken();
@@ -127,6 +177,17 @@ private:
 	/** 숨김·충돌 차단·BP 연출. 모든 머신에서 실행된다 */
 	void ApplyBrokenState();
 
+	/**
+	 * 균열 정도를 머티리얼에 반영한다. 모든 머신에서 실행된다.
+	 *
+	 * 동적 인스턴스는 첫 충격 때 한 번만 만든다. 생성자나 BeginPlay 에서 만들면
+	 * 맵에 깔린 모든 파손형이 한 번도 안 부딪혀도 슬롯 수만큼 MID 를 들고 있게 된다.
+	 */
+	void ApplyCrackVisual();
+
+	/** 파편·소리를 낸다. 모든 머신에서 실행되고, 데디케이티드 서버에서만 건너뛴다 */
+	void PlayBreakEffects();
+
 	/** BreakDestroyDelay 뒤에 불린다 (서버 전용) */
 	void DestroyOwnerLoot();
 
@@ -149,6 +210,16 @@ private:
 
 	/** ResolveData 가 이미 돌았는가. 표 조회를 매번 반복하지 않기 위한 것이다 */
 	bool bDataResolved = false;
+
+	/**
+	 * 슬롯별 동적 머티리얼 인스턴스. 첫 충격 때 만들어 재사용한다.
+	 * UPROPERTY 가 없으면 GC 가 회수한 뒤 다음 충격에서 크래시한다.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> CrackMaterials;
+
+	/** 균열 파라미터를 가진 슬롯이 하나도 없다는 경고를 이미 냈는가 */
+	bool bWarnedMissingCrackParameter = false;
 
 	/** EndPlay 에서 구독을 해제하기 위한 핸들 */
 	FDelegateHandle ImpactDelegateHandle;
