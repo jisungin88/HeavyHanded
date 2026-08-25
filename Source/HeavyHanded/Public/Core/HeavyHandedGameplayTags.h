@@ -147,4 +147,12 @@ namespace HHTags
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Loot_Dropped);
 
 	// Guard.Type.* 은 선언하지 않는다 — EGuardType 열거형과 두 벌이 된다 (AI/GuardTypes.h).
+
+	// ── 장비 (김민준 / Config/Tags/Equipment.ini) ──
+	//
+	// 8종 전부를 옮겨오지 않는다. 상점(URunProgressSubsystem)은 FGameplayTag 로 일반화돼
+	// 있어서 태그 이름을 몰라도 되고, 여기 필요한 것은 C++ 이 실제로 이름을 아는 것뿐이다.
+
+	/** 점착 폭탄. 던져서 붙이고 몇 초 뒤 폭발해 대형 금고 문을 부순다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_StickyBomb);
 }

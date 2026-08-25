@@ -8,6 +8,7 @@
 #include "Engine/DataTable.h"            // FDataTableRowHandle 을 값으로 보유
 #include "Loot/LootTypes.h"              // FLootDefinitionRow 를 조회한다
 #include "Interfaces/Carryable.h"
+#include "Shared/ThrowMath.h"           // FThrowParams 를 값으로 반환 — 전방 선언 불가
 #include "LootBase.generated.h"
 
 class UStaticMeshComponent;
@@ -139,6 +140,14 @@ public:
 	 * 계산을 따로 두면 미리 보이는 궤적과 실제로 날아가는 경로가 어긋난다.
 	 */
 	FVector ComputeThrowVelocity(const FVector& AimDirection) const;
+
+	/**
+	 * 표에 흩어져 있는 던지기 수치를 공용 계산이 받는 형태로 모은다.
+	 *
+	 * 필드를 FThrowParams 로 옮기지 않고 여기서 옮겨 담는 이유는, 옮기면
+	 * DT_LootCatalog 의 기존 행이 중첩 구조로 바뀌면서 값을 잃기 때문이다.
+	 */
+	FThrowParams MakeThrowParams() const;
 
 	/**
 	 * 지금 이 노획물을 던진다면 어느 방향으로 나가야 하는가.
