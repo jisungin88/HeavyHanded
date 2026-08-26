@@ -24,6 +24,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 );
 
 
+
+
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerController : public APlayerController
 {
@@ -108,6 +110,13 @@ protected:
 
 	// Pawn을 실제로 생성하고 빙의
 	void SpawnJobPawn(FGameplayTag JobTag);
+
+
+
+
+
+
+
 
 
 };

@@ -3,7 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/PlayerState.h"
+//#include "GameFramework/PlayerState.h"
+#include "Character/PlayerSessionState.h"
+//#include "AbilitySystemInterface.h"
+
 #include "ShelterPlayerState.generated.h"
 
 /**
@@ -28,13 +31,27 @@ enum class EJobType : uint8
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSelectedJobChanged);
 
 
+// ---------------------------- 상호작용 테스트용 코드 : 해결되면 상속 형태로 반드시 수정할 것
+
+//class UAbilitySystemComponent;
+//class UBaseAttributeSet;
+
+// -----------------------------------------------------------------------------------------------
+
+
 UCLASS()
-class HEAVYHANDED_API AShelterPlayerState : public APlayerState
+class HEAVYHANDED_API AShelterPlayerState : public APlayerSessionState
+//class HEAVYHANDED_API AShelterPlayerState : public APlayerState
+	//public IAbilitySystemInterface // ----------------- 상호작용 테스트용 코드 : 해결되면 상속 형태로 반드시 수정할 것
 {
 	GENERATED_BODY()
 
 
 public:
+
+	//AShelterPlayerState();
+
+
 	// 현재 플레이어가 선택한 직업
 	// 서버에서 변경하면 클라이언트들에게 자동으로 복제됨
 	UPROPERTY(ReplicatedUsing = OnRep_SelectedJob, BlueprintReadOnly)
@@ -70,4 +87,48 @@ public:
 		(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 
+	// // ---------------------------- 상호작용 테스트용 코드 : 해결되면 상속 형태로 반드시 수정할 것
+	// 
+	// public:
+	// 	//APlayerSessionState();
+	// 
+	// 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+	// 
+	// 	FORCEINLINE UBaseAttributeSet* GetBaseAttributeSet() const
+	// 	{
+	// 		return BaseAttributeSet;
+	// 	}
+	// 
+	// 
+	// 	// [필수] 플레이어 세션 데이터 Getter / Setter
+	// 	UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
+	// 	int32 GetSelectedCharacterID() const { return SelectedCharacterID; }
+	// 
+	// 	UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
+	// 	void SetSelectedCharacterID(int32 NewCharacterID);
+	// 
+	// 
+	// 
+	// 
+	// protected:
+	// 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS",
+	// 		meta = (AllowPrivateAccess = "true"))
+	// 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComp;
+	// 
+	// 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS",
+	// 		meta = (AllowPrivateAccess = "true"))
+	// 	TObjectPtr<UBaseAttributeSet> BaseAttributeSet;
+	// 
+	// 
+	// 	// --- 핵심 세션 데이터 (멀티플레이 동기화 적용) ---
+	// 
+	// 	// 로비에서 선택한 캐릭터 고유 번호 (또는 타입)
+	// 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "PlayerSession|Data")
+	// 	int32 SelectedCharacterID;
+	// 
+
+	// -----------------------------------------------------------------------------------------------
+
+
 };
+
