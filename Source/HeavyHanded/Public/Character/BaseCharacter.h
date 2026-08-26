@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "AbilitySystemInterface.h"
 #include "InputActionValue.h"
+#include "GameplayTagContainer.h"   // FGameplayTag — OnSprintTagChanged 시그니처에 값으로 쓴다
 #include "BaseCharacter.generated.h"
 
 USTRUCT(BlueprintType)
@@ -38,6 +39,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UNoiseEmitterComponent;
 
 UCLASS()
 class HEAVYHANDED_API ABaseCharacter : public ACharacter, public IAbilitySystemInterface
@@ -86,6 +88,11 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+	// 소음 발행 — 노획물 충돌 소음과 같은 컴포넌트다. 캐릭터는 물리 충돌 경로(HandleHit)
+	// 대신 ReportTaggedNoise 를 직접 불러 쓴다 (걷기/뛰기는 물리 충돌이 아니라서).
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Noise")
+	TObjectPtr<UNoiseEmitterComponent> NoiseEmitter;
 
 	// --- Enhanced Input Actions ---
 	// 에디터에서 블루프린트로 생성한 Input Action 에셋을 할당할 수 있습니다.
@@ -196,6 +203,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Effects")
 	TSubclassOf<class UGameplayEffect> CrouchGameplayEffectClass;
 
+	// State.Sprinting 태그가 붙고 떨어질 때 호출된다 (ASC->RegisterGameplayTagEvent 구독).
+	// SprintGameplayEffectClass 가 이 태그를 부여하도록 만들어져 있어야 동작한다.
+	void OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount);
+
+	// SprintNoiseTimerHandle 이 반복 호출하는 함수. Noise.Player.Run 을 발행한다.
+	void EmitSprintNoise();
+
+	// Sprint 중 소음을 반복 발행하는 타이머. State.Sprinting 이 붙어 있는 동안만 돈다.
+	FTimerHandle SprintNoiseTimerHandle;
+
+	// Sprint 소음 발행 간격(초). 발소리 박자에 맞춰 디자이너가 튜닝할 수 있게 노출한다.
+	// 나중에 발소리 애님 노티파이로 옮기면 이 타이머 자체가 필요 없어진다.
+	UPROPERTY(EditDefaultsOnly, Category = "Noise", meta = (ClampMin = "0.05", Units = "s"))
+	float SprintNoiseInterval = 0.4f;
+
 public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
@@ -231,6 +253,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction")
 	FName CarrySocketName = TEXT("Hand_R_Socket");
 
+	/**
+	 * 중량형을 들고 있는 동안(솔로·협동 둘 다) 마우스 좌우 회전 입력에 곱하는 배율.
+	 *
+	 * 무빙아웃처럼 "마우스로 홱 돌리기보다 좌우 이동으로 방향을 맞춘다"를 유도하려는
+	 * 값이다. 0으로 완전히 막으면(하드 클램프) 답답해지고 조작감도 나빠지므로,
+	 * 대신 감도만 크게 죽인다 — 여전히 돌아는 가지만 느리다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float HeavyCarryYawInputScale = 0.15f;
+
 	// 방금 던진 물건을 이 시간 동안은 본인이 다시 잡을 수 없다.
 	//
 	// 던지고 곧바로 낚아채는 것을 반복하면 중량형의 "2인 필수" 규칙(Loot.ini)과
@@ -248,6 +281,20 @@ protected:
 
 	// 운반 가능한 상태인지 검사한다(루트 컴포넌트 존재, Mobility 가 Movable).
 	bool CanCarryActor(const AActor* Target) const;
+
+	/**
+	 * 중량형을 들고 있는 동안 매 틱, 물건의 강체 트랜스폼을 계산해 직접 옮긴다.
+	 *
+	 * [왜 여기 있나] ALootBase::ComputeHeavyCarryTransform 은 순수 함수다. 그 계산을
+	 * 언제·누가 돌리느냐가 LootHeavyComponent.h 의 2026-08-20 결정 사항이다 — 폰을 실제로
+	 * 옮기는 CharacterMovementComponent 의 예측 경로를 쥔 쪽(여기)이 계산해야, 서버·클라
+	 * 두 벌의 손 위치가 어긋나지 않는다.
+	 *
+	 * [누가 실행하나] HeldActor 가 채워진 주 운반자만 실행한다. 보조자는 자기 손 위치를
+	 * 제공하기만 할 뿐 물건을 직접 옮기지 않는다 — 둘 다 SetActorLocation 을 부르면
+	 * 서로 다른 프레임에 값을 덮어써 물건이 떨린다.
+	 */
+	void UpdateHeavyCarryTransform();
 
 public:
 	// HeldActor를 반환하는 함수

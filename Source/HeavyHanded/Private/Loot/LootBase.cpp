@@ -18,11 +18,13 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Math/RotationMatrix.h"          // ComputeHeavyCarryTransform 의 두 벡터 기저 계산에 쓴다
 #include "Net/UnrealNetwork.h"
 #include "Noise/NoiseEmitterComponent.h" // 충돌 소음 — 붙이기만 하고 발행은 저쪽이 한다
 #include "Noise/NoiseTypes.h"            // FNoiseModifier — 카트 적재 중 감쇄에 쓴다
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 
 // 노획물 액터와 하위 컴포넌트가 같은 카테고리로 찍는다. 선언은 Loot/LootLog.h.
 DEFINE_LOG_CATEGORY(LogLoot);
@@ -34,6 +36,9 @@ namespace LootCollisionProfiles
 
 	/** 소지 중 — 물리 OFF, 다른 캐릭터만 Block */
 	static const FName Carried(TEXT("CarriedLoot"));
+
+	/** 중량형 소지 중 — 물리 OFF(Kinematic), 채널 응답은 Carried 와 동일 */
+	static const FName CarriedHeavy(TEXT("CarriedHeavyLoot"));
 }
 
 /**
@@ -109,6 +114,15 @@ ALootBase::ALootBase()
 	// 충돌 소음. 붙이는 것 외에 해 줄 것이 없다 — 히트 바인딩도 서버 판정도 스스로 한다.
 	// ImpactComponentName 을 비워 두면 루트를 쓰는데, 루트가 곧 LootMesh 라 그대로 맞는다.
 	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
+
+	// 중량형 전용. 붙잡을 게 없으면 그냥 놀고 있는 컴포넌트라 일반 노획물에도 달아 둬도 무해하다.
+	HeavyCarryHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("HeavyCarryHandle"));
+
+	// 각도를 소프트 스프링으로 두면 운반자와의 접촉 등 외부 토크가 걸릴 때 목표 회전을
+	// 못 이기고 밀려서 물건이 팽이처럼 돈다. 하드 컨스트레인트로 바꿔 목표 회전을
+	// 그대로 따라가게 고정한다. 위치(Linear)는 그대로 소프트 스프링을 유지해
+	// 이동 자체는 부드럽게 따라오게 둔다.
+	HeavyCarryHandle->bSoftAngularConstraint = false;
 }
 
 void ALootBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -361,6 +375,10 @@ void ALootBase::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// 중량형 위치는 더 이상 여기서 갱신하지 않는다 — ABaseCharacter::UpdateHeavyCarryTransform
+	// 이 주 운반자의 Tick 에서 ComputeHeavyCarryTransform 결과로 직접 SetActorLocationAndRotation
+	// 한다. 물리 핸들(서버 전용, 클라이언트 예측과 어긋남)을 걷어낸 자리다.
+
 	if (bCarriedWithoutSocket && HasAuthority())
 	{
 		UpdateNoSocketCarryTransform(Carrier);
@@ -372,6 +390,7 @@ void ALootBase::Tick(float DeltaSeconds)
 	}
 	else if (!bCarriedWithoutSocket)
 	{
+		// 중량형은 더 이상 이 틱이 필요 없다 — 위치는 ABaseCharacter 가 옮긴다.
 		SetActorTickEnabled(false);
 	}
 }
@@ -554,6 +573,68 @@ float ALootBase::GetGripSeparation() const
 
 	// 메시 스케일이 1 이 아닐 수 있으므로 컴포넌트 스케일을 곱해 월드 길이로 바꾼다.
 	return (LocalB - LocalA).Size() * LootMesh->GetComponentScale().GetAbsMax();
+}
+
+FTransform ALootBase::ComputeHeavyCarryTransform(
+	const FVector& LocalGripA,
+	const FVector& LocalGripB,
+	const FVector& PrimaryHandWorld,
+	const FVector* SecondaryHandWorld,
+	const FVector& PrimaryCarrierForward,
+	float SoloDragPitchDegrees)
+{
+	// 두 그립 지점을 잇는 축이 물건의 '앞뒤' 기준이 된다. 두 지점이 겹쳐 있으면(그립
+	// 소켓이 하나뿐이거나 같은 위치면) 축을 정할 수 없으므로 회전 없이 위치만 맞춘다.
+	const FVector LocalAxis = (LocalGripB - LocalGripA).GetSafeNormal();
+	if (LocalAxis.IsNearlyZero())
+	{
+		return FTransform(FQuat::Identity, PrimaryHandWorld - LocalGripA);
+	}
+
+	FVector WorldAxis;
+	if (SecondaryHandWorld)
+	{
+		// 2인 캐리 — 그립 축이 두 손을 잇는 방향을 향한다. GripB 가 SecondaryHandWorld 에
+		// 정확히 맞는다는 보장은 없다(그립 간격이 고정 강체라서) — 방향만 맞춘다.
+		WorldAxis = (*SecondaryHandWorld - PrimaryHandWorld).GetSafeNormal();
+		if (WorldAxis.IsNearlyZero())
+		{
+			// 두 손이 순간적으로 같은 지점에 있는 특이 케이스. 로컬 축을 그대로 세계 축으로
+			// 삼아 물건이 갑자기 뒤집히는 것만은 막는다 — 다음 프레임에 정상 값으로 돌아온다.
+			WorldAxis = LocalAxis;
+		}
+	}
+	else
+	{
+		// 솔로 캐리 — 안 잡힌 쪽(Grip B)이 주 운반자 정면 기준 아래로 늘어진 것처럼
+		// 보이게, 정면 벡터를 아래쪽(DownVector)과 섞어 기울인 방향을 그립 축으로 삼는다.
+		// RotateAngleAxis 는 회전 부호 규칙을 축마다 외워야 해서 실수하기 쉽다 — 대신
+		// 코사인/사인으로 '정면에서 아래로' 를 직접 구성해 부호 문제 자체를 없앤다.
+		const FVector HorizontalForward = PrimaryCarrierForward.GetSafeNormal2D();
+		const float PitchRad = FMath::DegreesToRadians(SoloDragPitchDegrees);
+		WorldAxis = (HorizontalForward * FMath::Cos(PitchRad) + FVector::DownVector * FMath::Sin(PitchRad))
+			.GetSafeNormal();
+	}
+
+	// 그립 축 하나만으로는 롤(비틀림)이 안 잡힌다. Up 벡터에 최대한 맞춰 세우는 쪽으로
+	// 롤을 고정한다 — 축이 Up 과 거의 평행한 특이 케이스(물건을 거의 수직으로 든 경우)는
+	// 기준을 Forward 로 바꿔 짐벌락을 피한다.
+	auto PickUpReference = [](const FVector& Axis) -> FVector
+	{
+		return (FMath::Abs(Axis | FVector::UpVector) > 0.98f) ? FVector::ForwardVector : FVector::UpVector;
+	};
+
+	const FQuat WorldFrame = FRotationMatrix::MakeFromXZ(WorldAxis, PickUpReference(WorldAxis)).ToQuat();
+	const FQuat LocalFrame = FRotationMatrix::MakeFromXZ(LocalAxis, PickUpReference(LocalAxis)).ToQuat();
+
+	// 로컬 그립 기저를 월드 그립 기저로 보내는 회전. 이 회전을 액터에 그대로 적용하면
+	// LocalAxis 가 정확히 WorldAxis 를 향한다(따라서 GripA→GripB 방향이 손→손 방향과 일치).
+	const FQuat NewRotation = WorldFrame * LocalFrame.Inverse();
+
+	// GripA 가 PrimaryHandWorld 에 정확히 오도록 역산한 액터 위치.
+	const FVector NewLocation = PrimaryHandWorld - NewRotation.RotateVector(LocalGripA);
+
+	return FTransform(NewRotation, NewLocation);
 }
 
 bool ALootBase::HasEnoughCarriers() const
@@ -952,11 +1033,6 @@ void ALootBase::ApplyCarryState()
 
 	if (bCarried)
 	{
-		// PhysicsHandle 로 물리를 유지한 채 드는 방식은 멀티에서 깨진다.
-		// 물리를 끄고 Attach 한 뒤, 놓기/던지기 순간에만 다시 켠다.
-		LootMesh->SetSimulatePhysics(false);
-		LootMesh->SetCollisionProfileName(LootCollisionProfiles::Carried);
-
 		// 소지 중 프로파일은 다른 캐릭터를 Block 한다. 그대로 두면 운반자 본인도 막혀서
 		// 자기 물건에 걸려 움직이지 못한다. 이동 스윕은 각 머신에서 로컬로 돌기 때문에
 		// 서버·클라이언트 양쪽에서 무시를 걸어야 한다. (그래서 이 함수가 ApplyCarryState 안에 있다)
@@ -971,13 +1047,42 @@ void ALootBase::ApplyCarryState()
 			MoveIgnoredSecondary = Second;
 		}
 
-		AttachToCarrier(Carrier);
+		if (FindComponentByClass<ULootHeavyComponent>())
+		{
+			// Kinematic 캐리로 전환 — 물리 핸들(PhysicsHandleComponent) 스프링이 캐리어
+			// 본인과 충돌하고, 서버 전용이라 클라이언트 예측과 어긋나던 문제를 겪은 뒤
+			// 걷어냈다. 이제 위치는 ComputeHeavyCarryTransform 이 계산하고, 그 계산은
+			// 플레이어 파트(ABaseCharacter::UpdateHeavyCarryTransform)가 CMC 예측
+			// 경로 안에서 각 머신마다 로컬로 돌린다 (LootHeavyComponent.h 2026-08-20 결정).
+			//
+			// 물리를 끄는 것은 일반 노획물과 같지만 Attach 는 하지 않는다 — 어태치하면
+			// 엔진이 매 틱 상대 트랜스폼을 스스로 계산해 우리 계산과 경합한다. 대신
+			// 매 틱 SetActorLocationAndRotation 으로 직접 옮긴다.
+			LootMesh->SetSimulatePhysics(false);
+			LootMesh->SetCollisionProfileName(LootCollisionProfiles::CarriedHeavy);
+
+			// 위치는 서버·클라이언트가 각자 결정론적으로 계산하므로 복제할 필요가 없다.
+			// 복제를 켜 두면 서버 값이 뒤늦게 도착해 이미 맞는 로컬 계산 결과를
+			// 다시 어긋난 값으로 '보정'하려다 오히려 떨림이 생긴다.
+			SetReplicateMovement(false);
+		}
+		else
+		{
+			// 물리를 끄고 Attach 한 뒤, 놓기/던지기 순간에만 다시 켠다.
+			LootMesh->SetSimulatePhysics(false);
+			LootMesh->SetCollisionProfileName(LootCollisionProfiles::Carried);
+			AttachToCarrier(Carrier);
+		}
 
 		SetLootStateTag(HHTags::Loot_State_Carried);
 	}
 	else
 	{
 		bCarriedWithoutSocket = false;
+
+		// Kinematic 캐리 중 복제를 꺼 뒀다면 되돌린다. 일반 노획물은 원래 항상 켜져 있던
+		// 값이라 여기서 다시 켜도 무해하다(멱등).
+		SetReplicateMovement(true);
 
 		// 들려 있던 것이 놓였을 때만 Dropped 로 간다.
 		//
@@ -1067,6 +1172,7 @@ void ALootBase::AttachToCarrier(APawn* Carrier)
 		UpdateNoSocketCarryTransform(Carrier);
 	}
 }
+
 
 void ALootBase::ResolveReleaseOverlap(const APawn* Carrier)
 {
@@ -1290,6 +1396,18 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	{
 		ShowImpactDebug(
 			FString::Printf(TEXT("기각(카트 적재 중) %.0f"), ImpulseMagnitude),
+			FColor::Cyan, Hit.ImpactPoint, ImpulseMagnitude);
+		return;
+	}
+
+	// 중량형은 이제 캐리 중 물리를 꺼 두므로(Kinematic) 이 시간대에는 OnHit 자체가 안 온다.
+	// 그래도 막 집거나 놓는 전환 프레임처럼 물리가 잠깐 겹치는 경계 구간에서 운반자 본인의
+	// 캡슐과 충돌 판정이 뜰 수 있다 — 다른 캐릭터는 막아야 해서(Pawn 채널) 본인만 예외로 걸러낸다.
+	// 실제 낙하·투척 충격이 아니므로 여기서 걸러낸다.
+	if (OtherActor == PrimaryCarrier.Get() || OtherActor == SecondaryCarrier.Get())
+	{
+		ShowImpactDebug(
+			FString::Printf(TEXT("기각(운반자와 접촉) %.0f"), ImpulseMagnitude),
 			FColor::Cyan, Hit.ImpactPoint, ImpulseMagnitude);
 		return;
 	}

@@ -13,6 +13,7 @@
 
 class UStaticMeshComponent;
 class UPrimitiveComponent;
+class UPhysicsHandleComponent;
 class UNoiseEmitterComponent;
 class AHandCart;
 class APawn;
@@ -95,6 +96,47 @@ public:
 	virtual APawn* GetPrimaryCarrier() const override;
 	virtual UPrimitiveComponent* GetPhysicsRoot() const override;
 	//~ ICarryable 끝
+
+	/**
+	 * 중량형 노획물이 잡혀 있는 동안 취해야 할 강체 트랜스폼을 계산한다. (순수 함수)
+	 *
+	 * [설계 배경] 물리 시뮬레이션(Physics Handle)로 손을 따라가게 하면 캐리어 본인과의
+	 * 충돌, 회전 오버슈트, 서버 전용이라 클라이언트 예측과 어긋나는 문제가 계속 났다.
+	 * 이 함수는 그 대신 "그립 A/B 로컬 위치가 목표 월드 위치에 오도록" 강체 변환을
+	 * 대수적으로 풀기만 한다 — 물리도, 액터/컴포넌트 상태 참조도 하지 않는다.
+	 * 그래서 서버·클라이언트 어디서 불러도 같은 입력이면 항상 같은 답이 나온다
+	 * (LootHeavyComponent.h 의 2026-08-20 결정: 위치 계산은 CMC 예측 경로를 쥔
+	 * 플레이어 파트가 각자 로컬로 돌린다 — 이 함수가 그 계산의 핵심부다).
+	 *
+	 * [Primary 가 항상 기준점] GripA 는 SecondaryHandWorld 유무와 무관하게 항상
+	 * PrimaryHandWorld 에 정확히 맞춘다. 2인 캐리라도 GripB 가 SecondaryHandWorld 에
+	 * 정확히 맞는다는 보장은 없다 — 그립 간격(GetGripSeparation)이 고정된 강체라서,
+	 * 실제 두 손 사이 거리가 그 값과 다르면 방향만 맞고 위치는 살짝 어긋난다.
+	 * (거리 자체는 GA_HeavyCarryAssist::MaxAssistDistance 가 이미 제한한다)
+	 *
+	 * [Up 벡터로 롤 고정] 그립 축 하나만으로는 롤(비틀림) 자유도가 안 잡힌다.
+	 * 월드 Up 에 최대한 맞춰 세우는 쪽으로 롤을 고정한다. 축이 Up 과 거의 평행한
+	 * 특이 케이스(물건을 거의 수직으로 든 경우)는 기준 벡터를 Forward 로 바꿔 피한다.
+	 *
+	 * @param LocalGripA            액터 로컬 공간에서의 Grip A 위치 (주 운반자가 잡는 지점)
+	 * @param LocalGripB            액터 로컬 공간에서의 Grip B 위치 (보조 운반자가 잡는 지점)
+	 * @param PrimaryHandWorld      주 운반자 손 소켓의 월드 위치. GripA 가 여기 정확히 맞는다.
+	 * @param SecondaryHandWorld    보조 운반자 손 소켓의 월드 위치. 없으면(솔로) nullptr.
+	 * @param PrimaryCarrierForward 주 운반자의 수평 정면 벡터. 솔로일 때만 쓰인다
+	 *                              (그립 축을 이 방향 기준으로 아래로 늘어뜨린다).
+	 * @param SoloDragPitchDegrees  솔로 캐리 시 GripB 쪽을 아래로 늘어뜨리는 각도(도).
+	 */
+	static FTransform ComputeHeavyCarryTransform(
+		const FVector& LocalGripA,
+		const FVector& LocalGripB,
+		const FVector& PrimaryHandWorld,
+		const FVector* SecondaryHandWorld,
+		const FVector& PrimaryCarrierForward,
+		float SoloDragPitchDegrees);
+
+	/** 솔로 캐리 시 처짐 각도(도). ComputeHeavyCarryTransform 호출자(플레이어 파트)가 읽어 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "Loot|Carry")
+	float GetSoloDragPitchDegrees() const { return SoloDragPitchDegrees; }
 
 	/**
 	 * 지금 이 노획물을 밴에 실었을 때 받는 금액($).
@@ -335,6 +377,13 @@ protected:
 	TObjectPtr<UStaticMeshComponent> LootMesh;
 
 	/**
+	 * 중량형 운반 시 물리를 켠 채로 Grip_A 지점을 붙잡아 주 운반자 손 쪽으로 당기는 핸들.
+	 * 일반 노획물은 쓰지 않는다 — 그쪽은 AttachToCarrier(물리 끄고 Attach)를 그대로 쓴다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loot|Carry|Heavy")
+	TObjectPtr<UPhysicsHandleComponent> HeavyCarryHandle;
+
+	/**
 	 * 충돌을 소음으로 바꾼다. 소음 파트의 컴포넌트이고 여기서는 붙이기만 한다.
 	 *
 	 * [내가 부를 일이 없다] BeginPlay 에서 스스로 루트의 OnComponentHit 을 물고,
@@ -480,6 +529,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
 		meta = (ClampMin = "0.0"))
 	float ReleaseForwardClearance = 30.f;
+
+	/**
+	 * 솔로로 중량형을 들 때, 안 잡힌 쪽(Grip B)을 주 운반자 정면 기준 아래로
+	 * 늘어뜨리는 각도(도). 보조 운반자가 없어 두 번째 좌표를 못 구하는 상황을
+	 * 물리 없이 자연스러워 보이게 표현하는 값이다. ComputeHeavyCarryTransform 참고.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
+		meta = (ClampMin = "0.0", ClampMax = "89.0"))
+	float SoloDragPitchDegrees = 25.f;
 
 
 	/**

@@ -16,6 +16,9 @@
 #include "GameplayTagContainer.h"
 #include "GameplayTagAssetInterface.h"   // 노획물의 Loot.Type.* 태그를 읽는다 (IsCarryingHeavyItem)
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Loot/LootBase.h"               // ComputeHeavyCarryTransform, GetSoloDragPitchDegrees
+#include "Loot/LootHeavyComponent.h"     // GetGripSocketA/B
+#include "Noise/NoiseEmitterComponent.h" // Sprint 소음 발행
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -34,6 +37,8 @@ ABaseCharacter::ABaseCharacter()
 
     // 카메라 위치를 캐릭터의 눈높이(약 Z축 64cm 위)로 설정
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
+
+    NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
 
     // --- 캐릭터 이동 및 회전 방향 설정 ---
     bUseControllerRotationYaw = true; // 1인칭은 시선과 몸통 방향을 일치시키기 위해 true로 설정
@@ -167,6 +172,7 @@ void ABaseCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	UpdateHeavyCarryTransform();
 }
 
 // Called to bind functionality to input
@@ -284,6 +290,14 @@ void ABaseCharacter::Turn(const FInputActionValue& Value)
     float AxisValue = Value.Get<float>();
     if (AxisValue != 0.0f)
     {
+        // 중량형을 들고 있는 동안(솔로·협동 둘 다) 마우스로 화면을 홱 돌리지 못하게
+        // 감도를 크게 낮춘다. HeavyCarryState 는 주 운반자·보조자 양쪽 다 Coop 로
+        // 바뀌므로(솔로는 주 운반자만 Solo) 이 검사 하나로 둘 다 걸린다.
+        if (HeavyCarryState != EHeavyCarryState::None)
+        {
+            AxisValue *= HeavyCarryYawInputScale;
+        }
+
         AddControllerYawInput(AxisValue);
     }
 }
@@ -310,6 +324,11 @@ void ABaseCharacter::BindAttributeDelegates()
         // MovementSpeed 속성 변화를 감지하는 델리게이트 구독
         ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetMovementSpeedAttribute()).AddUObject(this, &ABaseCharacter::OnMovementSpeedChanged);
     }
+
+    // State.Sprinting 태그 추가/제거를 구독한다. SprintGameplayEffectClass 가 이 태그를
+    // 부여하도록 만들어져 있어야 한다 — 태그만 있고 GE 가 안 붙이면 이 델리게이트는 영원히 안 불린다.
+    ASC->RegisterGameplayTagEvent(HHTags::State_Sprinting, EGameplayTagEventType::NewOrRemoved)
+        .AddUObject(this, &ABaseCharacter::OnSprintTagChanged);
 }
 
 // 속성이 변경될 때 자동 호출되어 실제 무브먼트 속도에 적용
@@ -319,6 +338,45 @@ void ABaseCharacter::OnMovementSpeedChanged(const FOnAttributeChangeData& Data)
     {
         // Data.NewValue는 변경된 MovementSpeed의 새로운 값입니다.
         MoveComp->MaxWalkSpeed = Data.NewValue;
+    }
+}
+
+void ABaseCharacter::OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+    // ReportTaggedNoise 자체도 서버 전용이라, 타이머를 클라이언트에서 돌릴 이유가 없다.
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (NewCount > 0)
+    {
+        // 시작하자마자 한 번 내고, 이후 SprintNoiseInterval 마다 반복한다.
+        GetWorld()->GetTimerManager().SetTimer(
+            SprintNoiseTimerHandle, this, &ABaseCharacter::EmitSprintNoise,
+            SprintNoiseInterval, /*bLoop*/ true, /*FirstDelay*/ 0.f);
+    }
+    else
+    {
+        GetWorld()->GetTimerManager().ClearTimer(SprintNoiseTimerHandle);
+    }
+}
+
+void ABaseCharacter::EmitSprintNoise()
+{
+    if (!NoiseEmitter)
+    {
+        return;
+    }
+
+    // Noise.* 는 지성인 소유라 네이티브 태그로 올리지 않고 문자열로 조회한다
+    // (Config/Tags/Noise.ini 에 이미 정의돼 있다).
+    static const FGameplayTag RunNoiseTag =
+        FGameplayTag::RequestGameplayTag(FName("Noise.Player.Run"), /*ErrorIfNotFound*/ false);
+
+    if (RunNoiseTag.IsValid())
+    {
+        NoiseEmitter->ReportTaggedNoise(RunNoiseTag);
     }
 }
 
@@ -642,21 +700,30 @@ bool ABaseCharacter::SetHeldActor(AActor* NewHeldActor, bool bIsHeavyLoot)
                 *GetNameSafe(NewHeldActor));
             return false;
         }
+
+        // ICarryable 은 스스로 성공을 보고했다(GetPrimaryCarrier() == this) — 어떻게
+        // 붙잡을지(AttachToComponent 든 Kinematic 직접 이동이든)는 구현체 책임이라 여기서
+        // Attach 여부를 다시 확인하지 않는다. 중량형은 매 틱 SetActorLocationAndRotation 으로만
+        // 옮기고 AttachToComponent 를 아예 안 써서, 아래 Attach 재확인 검증에 걸리면
+        // 정상적으로 붙잡았는데도 "부착 실패"로 오판해 곧바로 놓아버리게 된다.
     }
-
-    // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
-    // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
-    // 그 상태로 던지면 엉뚱한 곳에 임펄스가 들어간다.
-    const USceneComponent* NewRoot = NewHeldActor->GetRootComponent();
-    if (!NewRoot || NewRoot->GetAttachParent() != GetMesh())
+    else
     {
-        UE_LOG(LogCarry, Warning,
-            TEXT("[서버] %s 부착에 실패해 운반 상태로 넘기지 않는다. (직전 AttachTo 경고 확인)"),
-            *GetNameSafe(NewHeldActor));
+        // 레거시 폴백(ICarryable 을 구현하지 않은 액터) 전용 검증.
+        // AActor::AttachToComponent 는 void 라 성공 여부를 돌려주지 않는다.
+        // 확인 없이 넘기면 붙지도 않은 액터를 "들고 있다"고 믿게 되고,
+        // 그 상태로 던지면 엉뚱한 곳에 임펄스가 들어간다.
+        const USceneComponent* NewRoot = NewHeldActor->GetRootComponent();
+        if (!NewRoot || NewRoot->GetAttachParent() != GetMesh())
+        {
+            UE_LOG(LogCarry, Warning,
+                TEXT("[서버] %s 부착에 실패해 운반 상태로 넘기지 않는다. (직전 AttachTo 경고 확인)"),
+                *GetNameSafe(NewHeldActor));
 
-        // 물리를 되돌려 원래 상태로 남긴다.
-        ApplyCarryState(NewHeldActor, false);
-        return false;
+            // 물리를 되돌려 원래 상태로 남긴다.
+            ApplyCarryState(NewHeldActor, false);
+            return false;
+        }
     }
 
     // 여기까지 왔으면 노획물 쪽은 이미 운반 상태다. 위 ApplyCarryState 가 다 했고,
@@ -741,6 +808,64 @@ bool ABaseCharacter::IsCarryingHeavyItem() const
 	}
 
 	return false;
+}
+
+void ABaseCharacter::UpdateHeavyCarryTransform()
+{
+	// HeldActor 는 주 운반자에게만 채워진다(SetHeldActor). 보조자는 AssistingPrimaryCarrier /
+	// AssistedHeavyItem 으로 자신을 추적할 뿐 HeldActor 는 비어 있다 — 그래서 이 가드 하나로
+	// "물건을 실제로 옮길 권한이 있는 쪽"이 자연히 걸러진다. 서버·클라 구분은 필요 없다 —
+	// 모든 머신이 같은 입력으로 같은 결과를 계산하는 결정론적 함수라서 누가 돌려도 같다.
+	if (!IsCarryingHeavyItem() || !IsValid(HeldActor))
+	{
+		return;
+	}
+
+	ALootBase* Loot = Cast<ALootBase>(HeldActor);
+	ULootHeavyComponent* Heavy = HeldActor->FindComponentByClass<ULootHeavyComponent>();
+	ICarryable* Carryable = Cast<ICarryable>(HeldActor);
+	if (!Loot || !Heavy || !Carryable)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* GripRoot = Carryable->GetPhysicsRoot();
+	USkeletalMeshComponent* MyMesh = GetMesh();
+	if (!GripRoot || !MyMesh || !MyMesh->DoesSocketExist(CarrySocketName))
+	{
+		return;
+	}
+
+	const FName SocketA = Heavy->GetGripSocketA();
+	const FName SocketB = Heavy->GetGripSocketB();
+	if (!GripRoot->DoesSocketExist(SocketA) || !GripRoot->DoesSocketExist(SocketB))
+	{
+		return;
+	}
+
+	const FVector LocalGripA = GripRoot->GetSocketTransform(SocketA, RTS_Component).GetLocation();
+	const FVector LocalGripB = GripRoot->GetSocketTransform(SocketB, RTS_Component).GetLocation();
+	const FVector PrimaryHandWorld = MyMesh->GetSocketLocation(CarrySocketName);
+
+	// 보조 운반자가 있고, 그쪽 손 소켓도 유효할 때만 2인 캐리로 계산한다.
+	FVector SecondaryHandWorld = FVector::ZeroVector;
+	const bool bHasAssistant = IsValid(HeavyCarryAssistant)
+		&& HeavyCarryAssistant->GetMesh() != nullptr
+		&& HeavyCarryAssistant->GetMesh()->DoesSocketExist(HeavyCarryAssistant->CarrySocketName);
+	if (bHasAssistant)
+	{
+		SecondaryHandWorld = HeavyCarryAssistant->GetMesh()->GetSocketLocation(HeavyCarryAssistant->CarrySocketName);
+	}
+
+	const FTransform NewTransform = ALootBase::ComputeHeavyCarryTransform(
+		LocalGripA, LocalGripB, PrimaryHandWorld,
+		bHasAssistant ? &SecondaryHandWorld : nullptr,
+		GetActorForwardVector(),
+		Loot->GetSoloDragPitchDegrees());
+
+	// Kinematic 텔레포트 — 스윕하지 않는다. 물리가 꺼져 있어 스윕해도 밀어낼 대상이
+	// 없고, UpdateNoSocketCarryTransform(일반 노획물의 손 안 든 캐리)도 같은 방식이다.
+	HeldActor->SetActorLocationAndRotation(NewTransform.GetLocation(), NewTransform.GetRotation(), /*bSweep=*/false);
 }
 
 bool ABaseCharacter::IsDowned() const

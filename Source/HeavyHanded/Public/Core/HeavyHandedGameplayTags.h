@@ -88,9 +88,14 @@ namespace HHTags
 
 	// ── 플레이어 상태 (전영배 / Config/Tags/State.ini) ──
 
-	/** 다운 — 무장 경비 접촉 / 경비견 3회 / 낙하. 동료가 5초간 복구한다 */
+/** 다운 — 무장 경비 접촉 / 경비견 3회 / 낙하. 동료가 5초간 복구한다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Downed);
-
+	/**
+	 * 뛰기(Shift 홀드) 중. SprintGameplayEffectClass 가 부여/해제한다.
+	 * ABaseCharacter::OnSprintTagChanged 가 이 태그의 추가/제거를 구독해 Noise.Player.Run
+	 * 반복 발행 타이머를 켜고 끈다 (Config/Tags/State.ini 의 원래 설계 의도 그대로).
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Sprinting);
 	/**
 	 * 밴 승차 완료. **진리원이 아니라 미러다** — 판정 근거는 GameState 의 승차 명단이고,
 	 * 태그로는 인원을 셀 수 없다. 남이 코어 루프 헤더 없이 물어볼 수 있게 두는 것이다.
@@ -99,7 +104,6 @@ namespace HHTags
 	 * 다루게 되면 넘기고 여기서는 걷어낼 것 — 둘이 동시에 붙이면 카운트가 영영 안 없어진다.
 	 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_InVan);
-
 	/** 체포 — 도주 시간이 끝날 때까지 밴에 못 탔거나, 그 시점에 다운 상태였다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Arrested);
 

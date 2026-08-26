@@ -27,6 +27,7 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(State_Downed,       "State.Downed");
 	UE_DEFINE_GAMEPLAY_TAG(State_InVan,        "State.InVan");
 	UE_DEFINE_GAMEPLAY_TAG(State_Arrested,     "State.Arrested");
+	UE_DEFINE_GAMEPLAY_TAG(State_Sprinting,    "State.Sprinting");
 
 	UE_DEFINE_GAMEPLAY_TAG(Ability_HeavyCarryAssist, "Ability.HeavyCarryAssist");
 	UE_DEFINE_GAMEPLAY_TAG(Ability_Slot_Consumable,  "Ability.Slot.Consumable");
