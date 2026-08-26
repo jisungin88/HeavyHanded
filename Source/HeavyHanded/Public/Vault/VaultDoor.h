@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "VaultDoor.generated.h"
 
+class UArrowComponent;
 class UNiagaraSystem;
 class UStaticMeshComponent;
 class USoundBase;
@@ -95,6 +96,25 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Vault")
 	TObjectPtr<UStaticMeshComponent> DoorLid;
 
+	/**
+	 * 파편이 날아갈 방향. 이 화살표의 정면(+X)이 곧 '금고 바깥' 이다.
+	 *
+	 * [처음에는 폭탄 위치에서 방향을 뽑았고, 그게 틀렸다]
+	 *   뚜껑 중심에서 폭탄으로 향하는 벡터를 썼다. 폭탄이 뚜껑 한가운데 붙으면 맞지만,
+	 *   금고 문은 넓어서 보통 중심에서 벗어나 붙는다. 그러면 그 벡터가 바깥이 아니라
+	 *   옆으로 눕고, 뚜껑이 넓고 얇을수록 심해진다 — 파편이 문을 따라 옆으로 쓸려 나갔다.
+	 *
+	 *   방향은 폭탄이 아니라 **문의 성질**이다. 어디에 붙여 터뜨리든 금고는 같은 쪽으로 열린다.
+	 *
+	 * [왜 프로퍼티가 아니라 컴포넌트인가]
+	 *   메시가 어느 축을 정면으로 삼았는지는 만든 사람마다 달라서 코드가 알 수 없다.
+	 *   숫자로 넣게 하면 (1,0,0) 부터 넣어 보고 틀리면 다시 켜서 확인하게 된다.
+	 *   화살표는 뷰포트에 그대로 보이므로, 금고 밖을 향할 때까지 돌리면 그걸로 끝이다.
+	 *   (게임에서는 안 보인다 — 에디터 전용 표시다)
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Vault")
+	TObjectPtr<UArrowComponent> BreachArrow;
+
 	/** 뚜껑에 직접 붙지 않은 폭발을 구제하는 거리. 뚜껑 표면 기준이다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vault|Breach",
 		meta = (ClampMin = "0.0", Units = "cm"))
@@ -103,17 +123,35 @@ protected:
 	// ---- 연출 (BP 는 에셋만 고른다) ----
 
 	/**
-	 * 검은 연기. 뚜껑이 사라지는 순간을 가린다.
+	 * 문이 부서지는 연출. 금속 파편이 날고 잔해 연기가 남는다.
 	 *
-	 * 폭발 화염은 여기 없다 — 그건 폭탄의 AEquipmentBase::SpentEffect 다.
-	 * 두 곳에 다 넣으면 같은 자리에서 폭발이 두 번 터진다.
+	 * [폭탄의 SpentEffect 와 역할이 갈린다]
+	 *   화염·섬광은 폭탄 몫이다. 벽에 붙여 터뜨려도 폭발로 보여야 하므로 폭탄이 어디서
+	 *   터지든 나온다. 여기 있는 것은 **문이 부서질 때만** 나오는 것 — 뚜껑에서 떨어져
+	 *   나온 금속 조각과 그 뒤에 남는 먼지다.
+	 *
+	 *   같은 화염을 양쪽에 넣으면 한 자리에서 두 번 터져 보인다. 화염과 파편은 다르다.
+	 *
+	 * 연기가 뚜껑이 사라지는 순간을 가리는 역할도 겸한다 — DoorHideDelay 참고.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vault|Visual")
-	TObjectPtr<UNiagaraSystem> BreachSmoke;
+	TObjectPtr<UNiagaraSystem> BreachEffect;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vault|Visual",
 		meta = (ClampMin = "0.1"))
-	float BreachSmokeScale = 1.f;
+	float BreachEffectScale = 1.f;
+
+	/**
+	 * 폭발 지점을 뚜껑 중심에서 바깥으로 얼마나 밀어낼지.
+	 *
+	 * 기준점은 뚜껑의 **바운즈 중심**이다 (피벗이 아니다 — 피벗은 메시마다 엉뚱한 데 있다).
+	 * 그 중심은 두꺼운 문의 한가운데라 문 안쪽이고, 0 으로 두면 연기 절반이 문에 묻힌다.
+	 *
+	 * 뚜껑 두께의 절반보다 조금 크게 잡으면 표면에서 터지는 것으로 보인다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vault|Visual",
+		meta = (Units = "cm"))
+	float BreachEffectForwardOffset = 30.f;
 
 	/** 뚜껑이 떨어져 나가는 소리. 폭발음은 폭탄 쪽(SpentSound)이다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vault|Visual")
@@ -141,6 +179,17 @@ private:
 
 	/** 뚜껑과 그 아래 붙은 것을 시야·콜리전·내비게이션에서 뺀다. 모든 머신에서 실행된다 */
 	void HideLid();
+
+	/**
+	 * 파편이 날아갈 월드 방향. BreachArrow 의 정면이다.
+	 *
+	 * 복제하지 않는다 — 화살표의 트랜스폼은 모든 머신이 똑같이 갖고 있어서
+	 * 각자 계산하면 같은 답이 나온다. 보낼 이유가 없다.
+	 *
+	 * Niagara 쪽은 **Local Space 를 켜고 콘 축을 (1,0,0)** 으로 두면 된다.
+	 * 이 방향이 스폰 회전의 +X 가 되도록 맞춰서 스폰한다.
+	 */
+	FVector GetBreachDirection() const;
 
 	/**
 	 * 열렸는가. 서버가 정하고 복제된다.

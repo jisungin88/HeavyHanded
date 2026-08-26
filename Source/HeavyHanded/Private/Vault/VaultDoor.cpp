@@ -1,5 +1,6 @@
 ﻿#include "Vault/VaultDoor.h"
 
+#include "Components/ArrowComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
@@ -44,6 +45,26 @@ AVaultDoor::AVaultDoor()
 	//   BP 에서 Static 으로 두고 라이팅을 구워도 된다 — Movable 부모 아래 Static 자식은
 	//   불가능하지만 그 반대는 허용된다.
 	DoorLid->SetMobility(EComponentMobility::Movable);
+
+	// 파편이 날아갈 방향. 뷰포트에서 이 화살표를 금고 바깥으로 돌려 놓으면 그걸로 끝이다.
+	// 루트에 붙인다 — 뚜껑에 붙이면 뚜껑을 숨길 때 같이 숨겨져 다시 맞출 때 안 보인다.
+	BreachArrow = CreateDefaultSubobject<UArrowComponent>(TEXT("BreachArrow"));
+	BreachArrow->SetupAttachment(DoorFrame);
+	BreachArrow->SetArrowColor(FLinearColor(1.f, 0.45f, 0.1f));
+	BreachArrow->ArrowSize = 3.f;
+	BreachArrow->ArrowLength = 120.f;
+	// 크기가 화면에 고정되면 큰 금고 앞에서 점처럼 보인다. 월드 크기로 그린다.
+	BreachArrow->bIsScreenSizeScaled = false;
+}
+
+FVector AVaultDoor::GetBreachDirection() const
+{
+	if (IsValid(BreachArrow))
+	{
+		return BreachArrow->GetForwardVector();
+	}
+
+	return GetActorForwardVector();
 }
 
 void AVaultDoor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -65,10 +86,10 @@ void AVaultDoor::BeginPlay()
 			TEXT("[VaultDoor:%s] DoorLid 에 메시가 없다 — 폭파해도 사라질 것이 없다"), *GetName());
 	}
 
-	if (!IsValid(BreachSmoke))
+	if (!IsValid(BreachEffect))
 	{
 		UE_LOG(LogLoot, Warning,
-			TEXT("[VaultDoor:%s] BreachSmoke 가 비어 있다 — 뚜껑이 소리 없이 증발한다"), *GetName());
+			TEXT("[VaultDoor:%s] BreachEffect 가 비어 있다 — 뚜껑이 소리 없이 증발한다"), *GetName());
 	}
 }
 
@@ -160,19 +181,31 @@ void AVaultDoor::ApplyBreach()
 		return;
 	}
 
-	const FVector LidLocation = IsValid(DoorLid) ? DoorLid->GetComponentLocation() : GetActorLocation();
-	const FRotator LidRotation = IsValid(DoorLid) ? DoorLid->GetComponentRotation() : GetActorRotation();
+	// [피벗이 아니라 바운즈 중심이다]
+	//   GetComponentLocation 은 메시의 피벗이고, 눈에 보이는 중심과 다를 수 있다.
+	//   실제로 금고 뚜껑은 피벗이 한쪽으로 치우쳐 있어서 폭발이 문 왼쪽 옆에서 터졌다.
+	//   Bounds.Origin 은 그려지는 형상의 한가운데라 피벗이 어디에 있든 맞는다.
+	const FVector LidCenter = IsValid(DoorLid) ? DoorLid->Bounds.Origin : GetActorLocation();
+
+	// 뚜껑은 두꺼워서 중심이 문 **안쪽**이다. 그대로 두면 연기 절반이 문에 묻힌다.
+	// 바깥으로 조금 밀어낸 자리에서 터뜨린다.
+	const FVector LidLocation = LidCenter + GetBreachDirection() * BreachEffectForwardOffset;
+
+	// 이펙트의 로컬 +X 가 문 바깥을 향하도록 세운다. Niagara 쪽은 Local Space 를 켜고
+	// 콘 축을 (1,0,0) 으로 두면 문이 어느 방향을 보든 파편이 항상 바깥으로 날아간다.
+	// 뚜껑의 회전을 그대로 쓰지 않는 이유는 메시가 어느 축을 정면으로 삼았는지 모르기 때문이다.
+	const FRotator BlastRotation = FRotationMatrix::MakeFromX(GetBreachDirection()).Rotator();
 
 	// 데디케이티드 서버는 화면도 스피커도 없다. 리슨 서버의 호스트는 클라이언트이기도 하므로
 	// 여기 걸리지 않는다 — 호스트 화면에서도 연기가 정상적으로 보인다
 	if (World->GetNetMode() != NM_DedicatedServer)
 	{
-		if (IsValid(BreachSmoke))
+		if (IsValid(BreachEffect))
 		{
 			// 뚜껑에 붙이지 않는다. 붙였다가는 DoorHideDelay 뒤에 부모를 숨길 때
 			// 연기도 같이 사라져서, 정작 가려야 할 순간에 화면이 맑아진다
-			UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, BreachSmoke,
-				LidLocation, LidRotation, FVector(BreachSmokeScale));
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, BreachEffect,
+				LidLocation, BlastRotation, FVector(BreachEffectScale));
 		}
 
 		if (IsValid(BreachSound))
