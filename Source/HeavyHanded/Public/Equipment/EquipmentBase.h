@@ -229,6 +229,43 @@ protected:
 		meta = (ClampMin = "0.0", Units = "s"))
 	float SpentDestroyDelay = 0.25f;
 
+	// ---- 소음 ----
+
+	/**
+	 * 자리를 잡고 발동할 때까지 주기적으로 발행할 소음 태그.
+	 * (Loot.ini — 대형 금고는 "폭파 진행 중 경계도 상승")
+	 *
+	 * 비워 두면 아무것도 발행하지 않는다. 소리를 낼 이유가 없는 장비가 더 많아서
+	 * 그쪽이 기본이다 — EMP·미끼는 조용히 놓여 있어야 한다.
+	 *
+	 * [소음 파트와의 경계]
+	 *   여기서 정하는 것은 "언제 무슨 태그로 소리가 나는가" 까지다. 그것이 몇 미터까지
+	 *   들리고 경계도를 몇 % 올리는지는 DT_NoiseProfiles 가 정한다.
+	 *
+	 *   ⚠️ 폭파 진행용 태그가 아직 없다. Noise.Device.SafeCut 이 수치상 맞지만
+	 *   (특대 지속 / +3%/초 / 전 구역) 이름이 '절단' 이라 지금 설계와 어긋난다.
+	 *   지성인 님께 태그를 요청해 두었고, 정해지면 BP 에서 지정한다.
+	 *
+	 * [Active 구간에는 아직 같은 슬롯이 없다]
+	 *   미끼는 발동한 뒤 20초 동안 시끄러워야 하므로(Noise.Equipment.Decoy) 이 훅으로는
+	 *   안 된다 — 여기는 Deployed 구간, 즉 '자리는 잡았지만 아직 발동 전' 이다.
+	 *   미끼를 만들 때 ActiveNoiseTag 를 대칭으로 붙인다. 지금 미리 파지 않는 것은
+	 *   그 20초를 EffectDuration 으로 둘지가 아직 안 정해져서, 추측으로 만든 슬롯이
+	 *   정작 그때 안 맞을 가능성이 높기 때문이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise")
+	FGameplayTag DeployNoiseTag;
+
+	/**
+	 * DeployNoiseTag 를 몇 초마다 발행할지.
+	 *
+	 * 너무 짧게 잡아도 소음 파트의 쿨다운(FNoiseProfileRow::CooldownSeconds)에 걸려
+	 * 그대로 나가지는 않는다. 다만 걸러지는 호출만 늘어나므로 프로파일 값과 맞춰 두는 편이 낫다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise",
+		meta = (ClampMin = "0.05", Units = "s"))
+	float DeployNoiseInterval = 1.f;
+
 	// ---- 연출 (BP 는 에셋만 고른다) ----
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Visual")
@@ -244,6 +281,22 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Visual")
 	TObjectPtr<USoundBase> DeploySound;
+
+	/**
+	 * 자리를 잡은 뒤 발동할 때까지 계속 나는 소리. 점착 폭탄의 경고음이다.
+	 * (Equipment.ini — "부착 후 기폭까지 경고음 지속")
+	 *
+	 * DeploySound 와 짝이 아니라 별개다. 저쪽은 '철컥' 하고 붙는 한 번의 소리이고,
+	 * 이쪽은 그 뒤로 이어지는 삑— 삑— 이다. 하나로 합치면 루프 여부를 에셋이 정하게 되어
+	 * BP 에서 잘못 고른 것을 코드가 알 수 없다.
+	 *
+	 * **루프하는 사운드 에셋을 넣을 것.** 한 번 재생하고 끝나는 에셋을 넣으면
+	 * 소리가 조용히 멈추고, 아무 경고도 뜨지 않는다.
+	 *
+	 * 액터에 붙여 재생하므로 폭탄이 움직이면 따라간다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Visual")
+	TObjectPtr<USoundBase> DeployLoopSound;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Visual")
 	TObjectPtr<USoundBase> SpentSound;
@@ -279,6 +332,17 @@ private:
 
 	void DestroySelf();
 
+	/** DeployNoiseTag 를 한 번 발행한다. Deployed 인 동안 타이머가 반복해서 부른다 (서버 전용) */
+	void EmitDeployNoise();
+
+	/**
+	 * 퓨즈 경고음을 끈다.
+	 *
+	 * Fadeout 으로 끈다 — Stop 은 파형을 그 자리에서 잘라서 '뚝' 하는 클릭음이 남고,
+	 * 폭발음과 겹치면 그것만 유난히 튄다.
+	 */
+	void StopDeployLoop();
+
 	/** 소지 상태에 맞춰 물리·콜리전·부착을 정리한다. 모든 머신에서 실행된다 */
 	void ApplyCarryState();
 
@@ -301,7 +365,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<class UNiagaraComponent> ActiveEffectComponent;
 
+	/** 돌고 있는 퓨즈 경고음. ActiveEffectComponent 와 같은 이유로 UPROPERTY 다 */
+	UPROPERTY(Transient)
+	TObjectPtr<class UAudioComponent> DeployLoopComponent;
+
 	FTimerHandle ActivationTimer;
 	FTimerHandle EffectTimer;
 	FTimerHandle DestroyTimer;
+	FTimerHandle DeployNoiseTimer;
 };
