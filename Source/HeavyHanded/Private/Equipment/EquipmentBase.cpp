@@ -1,5 +1,6 @@
 ﻿#include "Equipment/EquipmentBase.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"                 // TActorIterator — 아래 임시 콘솔 명령용
@@ -298,6 +299,17 @@ void AEquipmentBase::Deploy(const FHitResult& Hit)
 		return;
 	}
 
+	// 폭파가 진행 중이라는 사실을 소음으로 흘린다. 경고음(DeployLoopSound)은 들리는 소리이고
+	// 이쪽은 경비가 반응하는 근거다 — 둘은 다른 경로이며 한쪽만 켤 수도 있다.
+	// 발행 자체는 ReportTaggedNoise 가 권위를 다시 확인하므로 여기서는 태그 유무만 본다.
+	if (DeployNoiseTag.IsValid())
+	{
+		EmitDeployNoise();
+
+		World->GetTimerManager().SetTimer(DeployNoiseTimer, this,
+			&AEquipmentBase::EmitDeployNoise, DeployNoiseInterval, /*bLoop=*/true);
+	}
+
 	switch (ActivationMode)
 	{
 	case EEquipmentActivation::OnImpact:
@@ -338,6 +350,10 @@ void AEquipmentBase::Activate()
 	{
 		return;
 	}
+
+	// 발동했으면 '대기 중' 이 아니다. 폭탄이 터진 뒤에도 경고음이 계속 울리면 안 된다.
+	// 타이머는 서버에만 있고, 소리는 각 머신의 ApplyStateEffects 가 끈다.
+	GetWorldTimerManager().ClearTimer(DeployNoiseTimer);
 
 	SetEquipmentState(EEquipmentState::Active);
 	OnActivated();
@@ -394,6 +410,35 @@ void AEquipmentBase::DestroySelf()
 	{
 		Destroy();
 	}
+}
+
+void AEquipmentBase::EmitDeployNoise()
+{
+	// 발동한 뒤에도 타이머가 한 번 더 도는 경우를 막는다. ClearTimer 와 이 검사가
+	// 겹쳐 보이지만, 타이머가 이미 큐에 들어간 프레임에서는 검사 쪽만 남는다.
+	if (State != EEquipmentState::Deployed)
+	{
+		return;
+	}
+
+	if (IsValid(NoiseEmitter) && DeployNoiseTag.IsValid())
+	{
+		// 권위 검사는 ReportTaggedNoise 안에 있다. 클라이언트에서 불려도 조용히 무시된다.
+		NoiseEmitter->ReportTaggedNoise(DeployNoiseTag);
+	}
+}
+
+void AEquipmentBase::StopDeployLoop()
+{
+	if (!IsValid(DeployLoopComponent))
+	{
+		return;
+	}
+
+	// FadeOut 이다. Stop 은 파형을 그 자리에서 잘라 '뚝' 하는 클릭음을 남기는데,
+	// 폭발음과 겹치면 그 클릭만 유난히 튄다.
+	DeployLoopComponent->FadeOut(0.15f, 0.f);
+	DeployLoopComponent = nullptr;
 }
 
 void AEquipmentBase::OnDeployed(const FHitResult& Hit)
@@ -457,9 +502,20 @@ void AEquipmentBase::ApplyStateEffects(EEquipmentState OldState)
 		{
 			UGameplayStatics::PlaySoundAtLocation(World, DeploySound, GetActorLocation());
 		}
+		if (IsValid(DeployLoopSound))
+		{
+			// 붙여서 재생한다. 폭탄이 움직이는 것에 붙었으면 소리도 따라가야 한다.
+			// bStopWhenAttachedToDestroyed 를 켜 두면 액터가 사라질 때 소리도 같이 끊긴다.
+			DeployLoopComponent = UGameplayStatics::SpawnSoundAttached(
+				DeployLoopSound, EquipmentMesh, NAME_None,
+				FVector::ZeroVector, EAttachLocation::SnapToTarget,
+				/*bStopWhenAttachedToDestroyed=*/true);
+		}
 		break;
 
 	case EEquipmentState::Active:
+		// 발동했으면 대기가 끝났다. Spent 까지 기다리면 폭발 뒤에도 경고음이 남는다.
+		StopDeployLoop();
 		// 지속 이펙트는 붙인다. 액터가 움직이면 따라와야 한다.
 		if (IsValid(ActiveEffect))
 		{
@@ -471,6 +527,10 @@ void AEquipmentBase::ApplyStateEffects(EEquipmentState OldState)
 		break;
 
 	case EEquipmentState::Spent:
+		// Active 를 거쳐 왔으면 이미 꺼져 있다. 그 경로를 건너뛰는 장비가 생겨도
+		// 경고음만 남는 일이 없도록 여기서도 확인한다.
+		StopDeployLoop();
+
 		if (IsValid(ActiveEffectComponent))
 		{
 			// 파괴하지 않고 끈다. 이미 나와 있는 입자는 자연스럽게 사라진다.
