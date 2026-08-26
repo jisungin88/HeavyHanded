@@ -35,11 +35,11 @@ public:
     //   URunProgressSubsystem::GetTeamGold() 를 쓸 것. 화면에 그릴 값이면 GameState 로 복제된다.
 
     // [필수] 플레이어 세션 데이터 Getter / Setter
-    UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
+    /*UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
     int32 GetSelectedCharacterID() const { return SelectedCharacterID; }
 
     UFUNCTION(BlueprintCallable, Category = "PlayerSession|Data")
-    void SetSelectedCharacterID(int32 NewCharacterID);
+    void SetSelectedCharacterID(int32 NewCharacterID);*/
 
 protected:
     // 네트워크 동기화 변수 등록 (Replication)
@@ -55,6 +55,6 @@ protected:
     // --- 핵심 세션 데이터 (멀티플레이 동기화 적용) ---
 
     // 로비에서 선택한 캐릭터 고유 번호 (또는 타입)
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "PlayerSession|Data")
-    int32 SelectedCharacterID;
+    /*UPROPERTY(Replicated, BlueprintReadOnly, Category = "PlayerSession|Data")
+    int32 SelectedCharacterID;*/
 };
