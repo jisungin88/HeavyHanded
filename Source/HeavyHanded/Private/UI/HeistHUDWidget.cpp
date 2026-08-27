@@ -10,6 +10,13 @@
 #include "UI/HeavyUILog.h"
 #include "UI/UISettings.h"
 
+#include "Components/Image.h"
+#include "Components/ProgressBar.h"
+#include "Engine/Texture2D.h"
+
+#include "Character/BaseCharacter.h"   // GetHeldActor — 소지 슬롯이 읽는 유일한 진입점
+#include "Loot/LootBase.h"             // 이름 · 무게 · 가치. ICarryable 에는 이 셋이 없다
+
 #define LOCTEXT_NAMESPACE "HeavyUI"
 
 namespace
@@ -49,6 +56,67 @@ namespace
 	}
 }
 
+namespace
+{
+	/** 소지 슬롯에 그릴 값 한 묶음 */
+	struct FHeldDisplay
+	{
+		FText Name;
+		float MassKg = 0.f;
+		int32 Value = 0;
+		bool  bHasValue = false;
+		FGameplayTagContainer TypeTags;
+	};
+
+	/**
+	 * 손에 든 액터에서 화면에 쓸 값을 뽑는다.
+	 *
+	 * [타입을 보는 곳은 여기 하나다] 기획상 이 슬롯에는 노획물과 장비가 같이 들어온다.
+	 *   장비(Equipment)는 아직 코드가 없어 노획물 갈래만 채워져 있다 — 생기면 아래에
+	 *   분기 하나만 늘리면 되고 위젯 쪽은 건드릴 필요가 없다.
+	 *
+	 *   ICarryable 로 통일하지 않은 이유는 그 인터페이스에 이름 · 무게 · 가치가 없기 때문이다.
+	 *   운반 판정용(GetRequiredCarriers · GetCarrySpeedMultiplier · CanBeCarriedBy)만 들어 있다.
+	 *   장비를 붙일 때 인터페이스를 넓힐지는 사전 합의가 필요하다 (규약 06 — 여러 영역에
+	 *   걸치는 새 인터페이스).
+	 *
+	 * @return 그릴 것이 있으면 true
+	 */
+	bool BuildHeldDisplay(const AActor* Held, FHeldDisplay& Out)
+	{
+		if (!IsValid(Held))
+		{
+			return false;
+		}
+
+		if (const ALootBase* Loot = Cast<ALootBase>(Held))
+		{
+			Out.Name      = Loot->GetDisplayName();
+			Out.MassKg    = Loot->GetPhysicsData().MassKg;
+			Out.Value     = Loot->GetCurrentValue();
+			Out.bHasValue = true;
+			Loot->GetOwnedGameplayTags(Out.TypeTags);
+
+			// 카탈로그 행을 지정하지 않은 노획물은 이름이 비어 있다. 여기서 GetName() 으로
+			// 때우면 "BP_Loot_Fragile_C_0" 이 화면에 그대로 뜬다 (LootBase.h GetDisplayName 주석)
+			if (Out.Name.IsEmpty())
+			{
+				Out.Name = LOCTEXT("HeldUnnamed", "노획물");
+			}
+
+			return true;
+		}
+
+		// TODO(장비): Equipment 가 생기면 여기에 갈래를 하나 더 둔다.
+		//   Source/HeavyHanded/{Public,Private}/Equipment/ 는 현재 비어 있다 (기획서 7장 미착수)
+
+		// 노획물도 장비도 아닌 것을 들고 있다. 클래스 이름이라도 남긴다 —
+		// 슬롯이 통째로 비면 "안 들고 있는 것" 과 구분이 안 된다
+		Out.Name = FText::FromString(Held->GetName());
+		return true;
+	}
+}
+
 void UHeistHUDWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
@@ -71,6 +139,32 @@ void UHeistHUDWidget::NativePreConstruct()
 	{
 		Txt_Objective->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
 		Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::Money)));
+	}
+
+	if (Txt_HeldName)
+	{
+		// 슬롯 전용 토큰을 새로 만들지 않고 기본 토큰에 배율만 곱한다
+		// (UUISettings::HeldSlotFontScale — 폰트 3단계를 유지하기 위해서다)
+		FSlateFontInfo NameFont = UUISettings::GetUIFont(EUIFontToken::Value);
+		NameFont.Size *= UUISettings::Get()->HeldSlotFontScale;
+
+		Txt_HeldName->SetFont(NameFont);
+		Txt_HeldName->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+	}
+
+	if (Txt_HeldInfo)
+	{
+		FSlateFontInfo InfoFont = UUISettings::GetUIFont(EUIFontToken::Label);
+		InfoFont.Size *= UUISettings::Get()->HeldSlotFontScale;
+
+		Txt_HeldInfo->SetFont(InfoFont);
+		Txt_HeldInfo->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
+	}
+
+	if (Bar_HeldWeight)
+	{
+		// 무게는 금액이 아니다. 돈 색(Money)을 쓰면 목표 금액과 같은 뜻으로 읽힌다
+		Bar_HeldWeight->SetFillColorAndOpacity(UUISettings::GetUIColor(EUIColorToken::Gold));
 	}
 }
 
@@ -98,6 +192,18 @@ void UHeistHUDWidget::NativeConstruct()
 
 	BindElapsed = 0.f;
 	TryBind();
+
+	// 소지 슬롯은 AHeistGameState 와 무관하다 — 작업 레벨이 아닌 테스트 맵에서도 떠야 하므로
+	// TryBind 성공 여부와 상관없이 따로 건다.
+	//
+	// [여기서 위젯을 직접 만지지 않는 이유] 새 BindWidget 을 넣은 직후 BP 컴파일이 꼬여 있으면
+	// 포인터가 쓰레기값이다. 첫 접근을 타이머 첫 틱으로 미루면 크래시 대신 로그를 볼 기회가
+	// 남는다 (2026-08-25 Bar_Weight 이름 충돌로 두 번 크래시)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+				HeldTickHandle, this, &UHeistHUDWidget::RefreshHeldSlot, HeldTickInterval, true);
+	}
 }
 
 void UHeistHUDWidget::NativeDestruct()
@@ -106,6 +212,7 @@ void UHeistHUDWidget::NativeDestruct()
 	{
 		World->GetTimerManager().ClearTimer(BindRetryHandle);
 		World->GetTimerManager().ClearTimer(TimerTickHandle);
+		World->GetTimerManager().ClearTimer(HeldTickHandle);
 	}
 
 	// 구독을 안 풀면 위젯이 사라진 뒤에도 델리게이트에 남는다
@@ -347,6 +454,151 @@ void UHeistHUDWidget::SetHeistWidgetsVisible(bool bVisible)
 	if (Txt_Timer)     { Txt_Timer->SetVisibility(Vis); }
 	if (Txt_Phase)     { Txt_Phase->SetVisibility(Vis); }
 	if (Txt_Objective) { Txt_Objective->SetVisibility(Vis); }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 소지 슬롯 (기획서 8장 "소지 노획물")
+// ──────────────────────────────────────────────────────────────
+
+void UHeistHUDWidget::RefreshHeldSlot()
+{
+	AActor* Held = nullptr;
+
+	// 자기 폰만 본다. 남이 뭘 들었는지는 이 슬롯의 관심사가 아니다.
+	// 폰이 아직 없거나(스폰 전 · 관전) 다른 종류면 Held 는 null 이고 슬롯이 비는 것이 맞다
+	if (const ABaseCharacter* Character = Cast<ABaseCharacter>(GetOwningPlayerPawn()))
+	{
+		Held = Character->GetHeldActor();
+	}
+
+	const bool bWantFilled = IsValid(Held);
+
+	// 들고 있던 노획물이 파괴되면 Held 도 LastHeldActor 도 null 이 된다.
+	// 포인터만 비교하면 그때 다시 그릴 계기가 사라져 죽은 값이 화면에 남는다
+	if (bHeldSlotDrawn && bHeldSlotFilled == bWantFilled && LastHeldActor.Get() == Held)
+	{
+		return;
+	}
+
+	bHeldSlotDrawn  = true;
+	bHeldSlotFilled = bWantFilled;
+	LastHeldActor   = Held;
+
+	ApplyHeldSlot(Held);
+
+	OnHeldChanged(Held);
+}
+
+void UHeistHUDWidget::ApplyHeldSlot(AActor* Held)
+{
+	FHeldDisplay Display;
+	const bool bHasHeld = BuildHeldDisplay(Held, Display);
+
+	if (Panel_Held)
+	{
+		Panel_Held->SetVisibility(bHasHeld ? ESlateVisibility::SelfHitTestInvisible
+										   : ESlateVisibility::Collapsed);
+	}
+	else if (bHasHeld)
+	{
+		// 이름을 안 맞췄을 때 화면에는 "집었는데 아무것도 안 뜬다" 로만 드러난다.
+		// 그 모습은 "아직 안 만든 것" 과 같아서 로그가 유일한 구분 수단이다
+		UE_LOG(LogHeavyUI, Log,
+			   TEXT("%s: WBP 에 Panel_Held 가 없어 소지 슬롯을 통째로 숨길 수 없다"), *GetName());
+	}
+
+	if (!bHasHeld)
+	{
+		// 숨겼어도 내용은 지운다 — Panel_Held 가 없는 WBP 에서는 이것이 유일한 방어다
+		if (Txt_HeldName)   { Txt_HeldName->SetText(FText::GetEmpty()); }
+		if (Txt_HeldInfo)   { Txt_HeldInfo->SetText(FText::GetEmpty()); }
+		if (Bar_HeldWeight) { Bar_HeldWeight->SetPercent(0.f); }
+		if (Img_Held)       { Img_Held->SetVisibility(ESlateVisibility::Collapsed); }
+
+		UE_LOG(LogHeavyUI, Log, TEXT("%s: 소지 슬롯 비움"), *GetName());
+		return;
+	}
+
+	if (Txt_HeldName)
+	{
+		Txt_HeldName->SetText(Display.Name);
+	}
+
+	if (Txt_HeldInfo)
+	{
+		// kg 은 정수로만 보여준다. 소수점이 흔들리면 시선이 그쪽으로 끌리고,
+		// 무게는 어차피 '무거운가' 만 읽히면 되는 값이다
+		const int32 RoundedKg = FMath::RoundToInt(Display.MassKg);
+
+		Txt_HeldInfo->SetText(Display.bHasValue
+			? FText::Format(LOCTEXT("HeldInfoWithValue", "{0}kg · ${1}"),
+							FText::AsNumber(RoundedKg), FText::AsNumber(Display.Value))
+			: FText::Format(LOCTEXT("HeldInfoMassOnly", "{0}kg"),
+							FText::AsNumber(RoundedKg)));
+	}
+
+	if (Bar_HeldWeight)
+	{
+		// 분모는 게임플레이 판정이 아니라 표시 전용 값이다 (UUISettings::HeldWeightBarMaxKg 주석).
+		// GetDefault<T>() 는 절대 null 이 아니므로 폴백 리터럴을 두지 않는다
+		const float MaxKg = FMath::Max(1.f, UUISettings::Get()->HeldWeightBarMaxKg);
+		Bar_HeldWeight->SetPercent(FMath::Clamp(Display.MassKg / MaxKg, 0.f, 1.f));
+	}
+
+	if (Img_Held)
+	{
+		UTexture2D* Icon = ResolveHeldIcon(Display.TypeTags);
+
+		// 그림이 없으면 빈 흰 사각형이 남는다. 아이콘 자리가 아예 없는 편이 낫다
+		Img_Held->SetVisibility(Icon ? ESlateVisibility::SelfHitTestInvisible
+									 : ESlateVisibility::Collapsed);
+
+		if (Icon)
+		{
+			Img_Held->SetBrushFromTexture(Icon, /*bMatchSize=*/false);
+		}
+	}
+
+	// 무엇을 들었는지는 물리 파트가 이미 찍지만, 그것이 화면에 어떻게 나갔는지는 여기서만 안다.
+	// 집고 놓을 때만 도는 경로라 반복 로그가 되지 않는다
+	const FString ValuePart = Display.bHasValue
+		? FString::Printf(TEXT(", $%d"), Display.Value)
+		: FString();
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 소지 슬롯 → \"%s\" (%.0fkg%s)"),
+		   *GetName(), *Display.Name.ToString(), Display.MassKg, *ValuePart);
+}
+
+UTexture2D* UHeistHUDWidget::ResolveHeldIcon(const FGameplayTagContainer& TypeTags)
+{
+	const TSoftObjectPtr<UTexture2D> Soft = UUISettings::Get()->GetHeldSlotIcon(TypeTags);
+	if (Soft.IsNull())
+	{
+		return nullptr;
+	}
+
+	// 캐시 키를 태그가 아니라 에셋 경로로 잡는다. 태그 여럿이 같은 그림을 가리킬 수 있다
+	const FName Key(*Soft.ToSoftObjectPath().ToString());
+
+	if (const TObjectPtr<UTexture2D>* Cached = HeldIconCache.Find(Key))
+	{
+		// null 이 들어 있으면 '전에 로드에 실패했다' 는 뜻이다. 다시 시도하지 않는다 —
+		// 안 그러면 못 찾는 그림을 0.1초마다 다시 찾는다
+		return Cached->Get();
+	}
+
+	UTexture2D* Loaded = Soft.LoadSynchronous();
+	HeldIconCache.Add(Key, Loaded);
+
+	if (!Loaded)
+	{
+		UE_LOG(LogHeavyUI, Warning,
+			   TEXT("%s: 소지 슬롯 아이콘을 로드하지 못했다 — %s "
+					"(Project Settings → Game → UI → Held Slot)"),
+			   *GetName(), *Key.ToString());
+	}
+
+	return Loaded;
 }
 
 // ──────────────────────────────────────────────────────────────

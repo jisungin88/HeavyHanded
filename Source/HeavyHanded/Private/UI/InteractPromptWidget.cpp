@@ -296,6 +296,14 @@ void UInteractPromptWidget::RefreshFocus()
 	{
 		if (AActor* Held = Char->GetHeldActor())
 		{
+			if (!bShowHoldingPrompt)
+			{
+				// 소지 슬롯이 같은 정보를 이미 보여주고 있다 (bShowHoldingPrompt 주석)
+				DebugReason = TEXT("이미 들고 있음 — 프롬프트 끔(bShowHoldingPrompt=false)");
+				HidePrompt();
+				return;
+			}
+
 			DebugReason = TEXT("이미 들고 있음 — 스윕 생략");
 			ShowHoldingPrompt(Held);
 			return;

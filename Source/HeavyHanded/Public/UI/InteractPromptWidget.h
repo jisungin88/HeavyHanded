@@ -97,6 +97,19 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact Prompt", meta = (ClampMin = "0.01", Units = "s"))
 	float RefreshInterval = 0.1f;
 
+	/**
+	 * 물건을 들고 있을 때도 프롬프트를 띄울 것인가.
+	 *
+	 * [기본이 거짓인 이유] HUD 우하단 소지 슬롯이 이름 · 무게 · 가치를 이미 보여준다.
+	 *   화면 중앙에 같은 이름을 한 번 더 띄우면 시선만 분산되고, 조준선 자리에
+	 *   글자가 상시로 남아 정작 다음 목표를 보는 데 방해가 된다.
+	 *
+	 * [끄면 같이 사라지는 것] [Q] 놓기 · [좌클릭] 던지기 안내도 함께 없어진다.
+	 *   조작을 처음 익히는 자리(튜토리얼 · 시연용 맵)에서는 켜 둘 것.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interact Prompt")
+	bool bShowHoldingPrompt = false;
+
 	// ── BP 연출 훅 ──
 	//
 	// 표시는 C++ 이 이미 끝냈다. 여기는 사운드 · 페이드 자리다. 게임 상태를 바꾸지 말 것.

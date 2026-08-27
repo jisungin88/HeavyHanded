@@ -9,6 +9,9 @@
 class AHeistGameState;
 class UTextBlock;
 class UWidgetAnimation;
+class UImage;
+class UProgressBar;
+class UTexture2D;
 
 /**
  * 인게임 HUD 본체 (기획서 8장). WBP_HUD 의 C++ 베이스다.
@@ -104,6 +107,37 @@ protected:
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> UrgentPulse;
 
+	// ── 소지 슬롯 (기획서 8장 "소지 노획물") ──
+	//
+	// [이름을 전부 새로 잡은 이유] WBP_HUD 에 있던 Panel_HeldLoot · Bar_Weight ·
+	//   Txt_HeldLoot 은 쓰지 않는다. 같은 이름의 위젯에 '변수 여부' 가 켜져 있으면
+	//   BP 컴파일이 "another object already exists there" 로 실패하고, 그 상태로
+	//   플레이하면 프로퍼티 레이아웃이 꼬여 포인터가 쓰레기값이 된다
+	//   (2026-08-25 Bar_Weight 로 두 번 크래시). 새 이름은 BP 변수가 만들어진 적이
+	//   없어서 그 상태에 빠지지 않는다.
+	//
+	// 전부 Optional 이다 — WBP 에 아직 없어도 나머지 HUD 는 그대로 떠야 한다.
+
+	/** 슬롯 전체. 아무것도 안 들고 있으면 이것만 숨기면 된다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Held", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> Panel_Held;
+
+	/** 특성 아이콘. UUISettings::GetHeldSlotIcon() 이 고른다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Held", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_Held;
+
+	/** 표시 이름 ("도자기 세트"). DT_LootCatalog 의 DisplayName */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Held", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_HeldName;
+
+	/** 무게 바. 분모는 UUISettings::HeldWeightBarMaxKg — 표시 전용 값이다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Held", meta = (BindWidgetOptional))
+	TObjectPtr<UProgressBar> Bar_HeldWeight;
+
+	/** 무게와 가치 ("24kg · $8,000") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Held", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_HeldInfo;
+
 	/**
 	 * 이 시간 이하로 남으면 경고 상태가 된다.
 	 *
@@ -133,6 +167,14 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Heist")
 	void OnUrgentChanged(bool bIsUrgent);
 
+	/**
+	 * 손에 든 것이 바뀌었다. 집으면 NewHeld 가 유효하고 놓으면 null 이다.
+	 *
+	 * 표시는 C++ 이 이미 끝냈다. 여기는 슬라이드 인 · 사운드 자리다
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Held")
+	void OnHeldChanged(AActor* NewHeld);
+
 private:
 	UFUNCTION()
 	void HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag OldPhase, EHeistPhaseReason Reason);
@@ -158,11 +200,55 @@ private:
 	/** 타이머 · 목표 금액을 통째로 보이거나 숨긴다 */
 	void SetHeistWidgetsVisible(bool bVisible);
 
+	/**
+	 * 주기 콜백. 손에 든 것이 바뀌었는지 확인한다.
+	 *
+	 * [임시 — 왜 구독이 아니라 폴링인가] ABaseCharacter::HeldActor 는 복제되지만
+	 *   OnRep_HeldActor 가 델리게이트를 쏘지 않아 구독할 곳이 없다.
+	 *   전영배 님께 요청한 FOnHeldActorChanged 가 열리면 이 타이머를 지우고
+	 *   ApplyHeldSlot 을 그 델리게이트에 직접 붙인다.
+	 *   (규약 08 — UI 는 읽고 구독만 한다. 폴링은 그 예외라 임시로만 둔다)
+	 */
+	void RefreshHeldSlot();
+
+	/** 슬롯 내용을 그린다. Held 가 null 이면 슬롯을 통째로 숨긴다 */
+	void ApplyHeldSlot(AActor* Held);
+
+	/**
+	 * 특성 태그에 맞는 아이콘을 로드해 돌려준다.
+	 *
+	 * 로드 실패도 null 로 캐시에 넣는다 — 안 그러면 못 찾는 그림을 0.1초마다 다시 찾는다
+	 */
+	UTexture2D* ResolveHeldIcon(const FGameplayTagContainer& TypeTags);
+
 	UPROPERTY()
 	TObjectPtr<AHeistGameState> BoundState;
 
 	FTimerHandle BindRetryHandle;
 	FTimerHandle TimerTickHandle;
+
+	FTimerHandle HeldTickHandle;
+
+	/** 에셋 경로 → 로드된 아이콘. 로드에 실패한 경로는 null 로 들어가 있다 */
+	UPROPERTY(Transient)
+	TMap<FName, TObjectPtr<UTexture2D>> HeldIconCache;
+
+	/** 마지막으로 그린 대상. 같으면 아무것도 하지 않는다 */
+	TWeakObjectPtr<AActor> LastHeldActor;
+
+	/** 첫 틱인가. 아무것도 안 들고 시작해도 슬롯을 한 번은 숨겨야 한다 */
+	bool bHeldSlotDrawn = false;
+
+	/** 마지막에 슬롯에 내용이 있었는가. 들고 있던 것이 파괴되면 포인터만으로는 구분되지 않는다 */
+	bool bHeldSlotFilled = false;
+
+	/**
+	 * 소지 슬롯 확인 주기(초).
+	 *
+	 * 집고 놓는 것은 사람 손이라 0.1초면 즉각으로 느껴진다.
+	 * 자기 폰 하나만 보므로 4인이어도 각자 한 번씩이다
+	 */
+	static constexpr float HeldTickInterval = 0.1f;
 
 	/** 재바인딩 시도 간격 */
 	static constexpr float BindRetryInterval = 0.25f;
