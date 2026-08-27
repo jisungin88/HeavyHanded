@@ -3,7 +3,9 @@
 #include "Core/HeavyHandedGameplayTags.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"        // TActorIterator
 #include "Loot/LootLog.h"
+#include "Vault/VaultDoor.h"
 
 AStickyBomb::AStickyBomb()
 {
@@ -32,24 +34,38 @@ void AStickyBomb::OnActivated()
 {
 	Super::OnActivated();
 
-	// 실제 파괴는 서버가 판정한다. 연출은 베이스가 모든 머신에서 이미 처리했다.
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	// TODO(3번 작업): 반경 안의 ALargeSafe 문을 파괴한다.
-	//   금고가 아직 없으므로 지금은 반경만 알린다. 폭탄이 금고를 직접 아는 대신
-	//   인터페이스로 알릴지는 금고를 만들 때 정한다 — 반응할 대상이 하나뿐인데
-	//   인터페이스를 먼저 파면 쓰이지 않는 추상이 하나 남는다.
-
-	UE_LOG(LogLoot, Log, TEXT("[StickyBomb:%s] 폭발 — 반경 %.0f"), *GetName(), BlastRadius);
+	UWorld* World = GetWorld();
 
 #if ENABLE_DRAW_DEBUG
-	// 붙인 자리와 반경이 맞는지 눈으로 확인한다. 금고를 붙이면 지운다.
-	if (const UWorld* World = GetWorld())
+	// 연출과 같아서 모든 머신에서 그린다. 권위 검사 앞에 두는 이유는,
+	// 클라이언트 화면에서 폭발 위치가 어긋나 보일 때 그것을 봐야 하기 때문이다
+	if (bShowBlastDebug && World)
 	{
 		DrawDebugSphere(World, GetActorLocation(), BlastRadius, 16, FColor::Orange, false, 3.f, 0, 2.f);
 	}
 #endif
+
+	// 실제 파괴는 서버가 판정한다. 연출은 베이스가 모든 머신에서 이미 처리했다.
+	if (!HasAuthority() || !World)
+	{
+		return;
+	}
+
+	// [왜 오버랩이 아니라 순회인가]
+	//   금고 문은 레벨에 한두 개뿐이고, 폭발은 판당 몇 번 일어나지 않는다.
+	//   그리고 어차피 거리 판정은 문이 자기 뚜껑 기준으로 다시 한다 — 오버랩으로
+	//   미리 걸러 봐야 같은 계산을 두 번 하는 것이고, 대신 콜리전 채널 설정이
+	//   맞아야 한다는 조건이 하나 늘어난다. 그쪽이 조용히 깨지기 더 쉽다.
+	int32 BreachedCount = 0;
+
+	for (TActorIterator<AVaultDoor> It(World); It; ++It)
+	{
+		if (It->TryBreach(this, GetActorLocation(), BlastRadius))
+		{
+			++BreachedCount;
+		}
+	}
+
+	UE_LOG(LogLoot, Log, TEXT("[StickyBomb:%s] 폭발 — 반경 %.0f, 개방한 금고 문 %d개"),
+		*GetName(), BlastRadius, BreachedCount);
 }
