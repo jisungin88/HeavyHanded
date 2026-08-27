@@ -14,6 +14,8 @@
 #include "UI/HeavyUILog.h"
 #include "UI/HeavyUIText.h"
 #include "UI/UISettings.h"
+#include "Components/PanelWidget.h"
+#include "UI/ResultRowWidget.h"
 
 #define LOCTEXT_NAMESPACE "HeavyUI"
 
@@ -69,7 +71,93 @@ namespace
 		FText Name;
 		int32 Count = 0;
 		int32 Value = 0;
+		int32 BaseValue = 0;
 	};
+
+	/** 개인 기여도 한 줄 */
+	struct FPlayerLine
+	{
+		FString Name;
+		int32 Value = 0;
+		FText Status;
+	};
+
+	/** 적재 한 줄의 왼쪽 문구. 여러 개면 "도자기 세트 x5" 로 묶어 보인다 */
+	FText LootLineLabel(const FLootLine& Line)
+	{
+		return (Line.Count > 1)
+			? FText::Format(LOCTEXT("ResultLootNameMany", "{0} x{1}"),
+							Line.Name, FText::AsNumber(Line.Count))
+			: Line.Name;
+	}
+
+	/**
+	 * 적재 목록을 묶어 정렬한다.
+	 *
+	 * [여기 한 곳에만 둔다] 여러 줄 텍스트와 행 위젯이 같은 목록을 그린다.
+	 *   각자 집계하면 둘이 다른 순서 · 다른 묶음을 보여줄 수 있고,
+	 *   그때 어느 쪽이 맞는지 판단할 근거가 없다.
+	 */
+	void CollectLootLines(const AHeistGameState& GS, TArray<FLootLine>& Out)
+	{
+		// 같은 종류를 한 줄로 묶는다. 도자기 세트를 다섯 번 실었으면
+		// 다섯 줄이 아니라 "도자기 세트 x5" 한 줄이어야 읽힌다
+		for (const FHeistLoadEntry& Entry : GS.GetLoadedEntries())
+		{
+			const FText Name = HeavyUIText::LootName(Entry.LootClass);
+
+			FLootLine* Existing = Out.FindByPredicate(
+				[&Name](const FLootLine& Line) { return Line.Name.EqualTo(Name); });
+
+			if (Existing)
+			{
+				++Existing->Count;
+				Existing->Value     += Entry.Value;
+				Existing->BaseValue += Entry.BaseValue;
+			}
+			else
+			{
+				Out.Add({ Name, 1, Entry.Value, Entry.BaseValue });
+			}
+		}
+
+		// 비싼 것부터. 무엇을 잘 챙겼는지가 위에 와야 한다
+		Out.Sort([](const FLootLine& A, const FLootLine& B) { return A.Value > B.Value; });
+	}
+
+	/** 플레이어 목록을 모아 정렬한다. 많이 벌어온 사람부터 */
+	void CollectPlayerLines(const AHeistGameState& GS, TArray<FPlayerLine>& Out)
+	{
+		for (APlayerState* Player : GS.PlayerArray)
+		{
+			// 관전자와 나간 사람을 세는 기준은 GameState 가 이미 갖고 있다.
+			// 여기서 따로 세면 결과 화면과 판정이 다른 인원을 말하게 된다
+			if (!AHeistGameState::IsCountedPlayer(Player))
+			{
+				continue;
+			}
+
+			FText Status;
+			if (GS.IsArrested(Player))
+			{
+				Status = LOCTEXT("ResultStatusArrested", "체포");
+			}
+			else if (GS.IsBoarded(Player))
+			{
+				Status = LOCTEXT("ResultStatusEscaped", "탈출");
+			}
+			else
+			{
+				// 결과 페이즈에서는 체포 확정이 이미 끝났으므로 여기 오는 사람은 거의 없다.
+				// 그래도 빈칸으로 두지 않는다 — 빈칸은 버그와 구별되지 않는다
+				Status = LOCTEXT("ResultStatusUnknown", "-");
+			}
+
+			Out.Add({ Player->GetPlayerName(), GS.GetContributionOf(Player), Status });
+		}
+
+		Out.Sort([](const FPlayerLine& A, const FPlayerLine& B) { return A.Value > B.Value; });
+	}
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -104,7 +192,24 @@ void UHeistResultWidget::NativePreConstruct()
 		}
 	}
 
-	for (UTextBlock* Label : { Txt_Noisiest.Get(), Txt_LootList.Get(), Txt_PlayerList.Get(), Txt_Confirm.Get() })
+	// 최다 소음 유발자 이름은 시안에서 크게 나온다 — 라벨 급으로 두면 안 읽힌다
+	if (Txt_Noisiest)
+	{
+		Txt_Noisiest->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
+		Txt_Noisiest->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+	}
+
+	// 부연 · 달성률은 보조 정보다
+	for (UTextBlock* Sub : { Txt_NoisiestDetail.Get(), Txt_TargetRatio.Get() })
+	{
+		if (Sub)
+		{
+			Sub->SetFont(UUISettings::GetUIFont(EUIFontToken::Label));
+			Sub->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
+		}
+	}
+
+	for (UTextBlock* Label : { Txt_LootList.Get(), Txt_PlayerList.Get(), Txt_Confirm.Get() })
 	{
 		if (Label)
 		{
@@ -291,10 +396,21 @@ void UHeistResultWidget::PopulateResult()
 		float Contribution = 0.f;
 		const APlayerState* Noisiest = GS->GetNoisiestPlayer(Contribution);
 
+		// 시안은 이름만 크게 두고 라벨("최다 소음 유발자")은 WBP 의 고정 문구다.
+		// 여기서 라벨까지 넣으면 글자 크기를 나눌 수 없다
 		Txt_Noisiest->SetText(Noisiest
-			? FText::Format(LOCTEXT("ResultNoisiest", "최다 소음 유발자: {0}"),
-							FText::FromString(Noisiest->GetPlayerName()))
-			: LOCTEXT("ResultNoisiestNone", "최다 소음 유발자: 없음"));
+			? FText::FromString(Noisiest->GetPlayerName())
+			: LOCTEXT("ResultNoisiestNone", "없음"));
+
+		if (Txt_NoisiestDetail)
+		{
+			// 시안의 "소음 발생 14회" 는 만들 수 없다 — 발생 횟수를 세는 곳이 없고
+			// 집계되는 값은 누적 경계도 기여량뿐이다 (Txt_NoisiestDetail 주석)
+			Txt_NoisiestDetail->SetText(Noisiest
+				? FText::Format(LOCTEXT("ResultNoisiestDetail", "경계도 {0}% 유발 — 이 작업 최다"),
+								FText::AsNumber(FMath::RoundToInt(Contribution)))
+				: LOCTEXT("ResultNoisiestDetailNone", "아무도 소음을 내지 않았다"));
+		}
 	}
 
 	if (Txt_LootList)
@@ -306,6 +422,30 @@ void UHeistResultWidget::PopulateResult()
 	{
 		Txt_PlayerList->SetText(BuildPlayerList());
 	}
+
+	if (Txt_TargetRatio)
+	{
+		const int32 Target = GS->GetTargetValue();
+
+		// 목표가 0 인 맵(테스트 레벨)에서는 비율이 의미가 없다.
+		// 0 으로 나누는 것보다 문구를 비우는 편이 정직하다
+		Txt_TargetRatio->SetVisibility(Target > 0 ? ESlateVisibility::SelfHitTestInvisible
+												  : ESlateVisibility::Collapsed);
+
+		if (Target > 0)
+		{
+			const int32 Percent = FMath::RoundToInt(
+				static_cast<float>(GS->GetLoadedValue()) / static_cast<float>(Target) * 100.f);
+
+			Txt_TargetRatio->SetText(FText::Format(
+				LOCTEXT("ResultTargetRatio", "목표 {0} 대비 {1}%"),
+				HeavyUIText::Money(Target), FText::AsNumber(Percent)));
+		}
+	}
+
+	// 컨테이너가 있으면 행 위젯으로도 그린다. 없으면 아무것도 하지 않는다
+	PopulateLootRows();
+	PopulatePlayerRows();
 
 	UE_LOG(LogHeavyUI, Log, TEXT("%s: 결과 표시 — 등급 %s, 적재 %d건 $%d / $%d, 소요 %.1f초"),
 		   *GetName(), HeistOutcome::ToString(Outcome),
@@ -323,49 +463,21 @@ FText UHeistResultWidget::BuildLootList() const
 		return FText::GetEmpty();
 	}
 
-	const TArray<FHeistLoadEntry>& Entries = GS->GetLoadedEntries();
-	if (Entries.IsEmpty())
+	TArray<FLootLine> Lines;
+	CollectLootLines(*GS, Lines);
+
+	if (Lines.IsEmpty())
 	{
 		return LOCTEXT("ResultNoLoot", "실어온 것이 없다");
 	}
-
-	// 같은 종류를 한 줄로 묶는다. 도자기 세트를 다섯 번 실었으면
-	// 다섯 줄이 아니라 "도자기 세트 x5" 한 줄이어야 읽힌다
-	TArray<FLootLine> Lines;
-
-	for (const FHeistLoadEntry& Entry : Entries)
-	{
-		const FText Name = HeavyUIText::LootName(Entry.LootClass);
-
-		FLootLine* Existing = Lines.FindByPredicate(
-			[&Name](const FLootLine& Line) { return Line.Name.EqualTo(Name); });
-
-		if (Existing)
-		{
-			++Existing->Count;
-			Existing->Value += Entry.Value;
-		}
-		else
-		{
-			Lines.Add({ Name, 1, Entry.Value });
-		}
-	}
-
-	// 비싼 것부터. 무엇을 잘 챙겼는지가 위에 와야 한다
-	Lines.Sort([](const FLootLine& A, const FLootLine& B) { return A.Value > B.Value; });
 
 	TArray<FString> Rows;
 	Rows.Reserve(Lines.Num());
 
 	for (const FLootLine& Line : Lines)
 	{
-		const FText Row = (Line.Count > 1)
-			? FText::Format(LOCTEXT("ResultLootRowMany", "{0} x{1}    {2}"),
-							Line.Name, FText::AsNumber(Line.Count), HeavyUIText::Money(Line.Value))
-			: FText::Format(LOCTEXT("ResultLootRowOne", "{0}    {1}"),
-							Line.Name, HeavyUIText::Money(Line.Value));
-
-		Rows.Add(Row.ToString());
+		Rows.Add(FText::Format(LOCTEXT("ResultLootRow", "{0}    {1}"),
+							   LootLineLabel(Line), HeavyUIText::Money(Line.Value)).ToString());
 	}
 
 	return FText::FromString(FString::Join(Rows, TEXT("\n")));
@@ -379,50 +491,13 @@ FText UHeistResultWidget::BuildPlayerList() const
 		return FText::GetEmpty();
 	}
 
-	// 이름 · 금액 · 상태를 한 줄로. 상태는 등급과 달리 사람마다 다르다
-	struct FPlayerLine
-	{
-		FString Name;
-		int32 Value = 0;
-		FText Status;
-	};
-
 	TArray<FPlayerLine> Lines;
-
-	for (APlayerState* Player : GS->PlayerArray)
-	{
-		// 관전자와 나간 사람을 세는 기준은 GameState 가 이미 갖고 있다.
-		// 여기서 따로 세면 결과 화면과 판정이 다른 인원을 말하게 된다
-		if (!AHeistGameState::IsCountedPlayer(Player))
-		{
-			continue;
-		}
-
-		FText Status;
-		if (GS->IsArrested(Player))
-		{
-			Status = LOCTEXT("ResultStatusArrested", "체포");
-		}
-		else if (GS->IsBoarded(Player))
-		{
-			Status = LOCTEXT("ResultStatusEscaped", "탈출");
-		}
-		else
-		{
-			// 결과 페이즈에서는 체포 확정이 이미 끝났으므로 여기 오는 사람은 거의 없다.
-			// 그래도 빈칸으로 두지 않는다 — 빈칸은 버그와 구별되지 않는다
-			Status = LOCTEXT("ResultStatusUnknown", "-");
-		}
-
-		Lines.Add({ Player->GetPlayerName(), GS->GetContributionOf(Player), Status });
-	}
+	CollectPlayerLines(*GS, Lines);
 
 	if (Lines.IsEmpty())
 	{
 		return FText::GetEmpty();
 	}
-
-	Lines.Sort([](const FPlayerLine& A, const FPlayerLine& B) { return A.Value > B.Value; });
 
 	TArray<FString> Rows;
 	Rows.Reserve(Lines.Num());
@@ -436,6 +511,98 @@ FText UHeistResultWidget::BuildPlayerList() const
 	}
 
 	return FText::FromString(FString::Join(Rows, TEXT("\n")));
+}
+
+// ──────────────────────────────────────────────────────────────
+// 목록 — 행 위젯 (시안 sneakers_result_screen)
+// ──────────────────────────────────────────────────────────────
+
+void UHeistResultWidget::PopulateLootRows()
+{
+	// 컨테이너나 행 클래스 중 하나라도 없으면 여러 줄 텍스트 쪽이 그린다.
+	// 둘 다 Optional 이라 WBP 를 한 번에 갈아엎지 않아도 된다
+	if (!Box_LootList || !LootRowClass)
+	{
+		return;
+	}
+
+	Box_LootList->ClearChildren();
+
+	const AHeistGameState* GS = BoundState.Get();
+	if (!GS)
+	{
+		return;
+	}
+
+	TArray<FLootLine> Lines;
+	CollectLootLines(*GS, Lines);
+
+	for (const FLootLine& Line : Lines)
+	{
+		UResultRowWidget* Row = CreateWidget<UResultRowWidget>(this, LootRowClass);
+		if (!Row)
+		{
+			continue;
+		}
+
+		// 음수 비율은 '이 목록에 바가 없다' 는 뜻이다 (UResultRowWidget::SetRow 주석).
+		// 파손 · 유출로 깎인 줄은 흐리게 — 값이 낮다는 사실만으로는 사고였는지 알 수 없다
+		Row->SetRow(LootLineLabel(Line),
+					HeavyUIText::Money(Line.Value),
+					/*Ratio=*/-1.f,
+					/*bDimmed=*/Line.Value < Line.BaseValue);
+
+		Box_LootList->AddChild(Row);
+	}
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 적재 목록 %d행"), *GetName(), Lines.Num());
+}
+
+void UHeistResultWidget::PopulatePlayerRows()
+{
+	if (!Box_PlayerList || !PlayerRowClass)
+	{
+		return;
+	}
+
+	Box_PlayerList->ClearChildren();
+
+	const AHeistGameState* GS = BoundState.Get();
+	if (!GS)
+	{
+		return;
+	}
+
+	TArray<FPlayerLine> Lines;
+	CollectPlayerLines(*GS, Lines);
+
+	// [분모를 1등이 아니라 총액으로 잡는 이유] 1등 기준으로 정규화하면 1등 바가 항상
+	// 가득 차서, 혼자 다 벌어온 판과 넷이 고르게 나눈 판이 똑같아 보인다.
+	// 총액 기준이면 바 길이의 합이 곧 전체가 되어 '얼마나 몰렸는가' 가 읽힌다.
+	const int32 Total = GS->GetLoadedValue();
+
+	for (const FPlayerLine& Line : Lines)
+	{
+		UResultRowWidget* Row = CreateWidget<UResultRowWidget>(this, PlayerRowClass);
+		if (!Row)
+		{
+			continue;
+		}
+
+		const float Ratio = (Total > 0) ? static_cast<float>(Line.Value) / static_cast<float>(Total) : 0.f;
+
+		// 금액이 아니라 퍼센트를 쓴다 — 시안이 그렇고, 바와 같은 값을 두 번 말해야
+		// 바가 무엇을 재는 것인지 읽힌다. 절대 금액은 적재 목록에 이미 있다
+		Row->SetRow(FText::FromString(Line.Name),
+					FText::Format(LOCTEXT("ResultShare", "{0}%"),
+								  FText::AsNumber(FMath::RoundToInt(Ratio * 100.f))),
+					Ratio,
+					/*bDimmed=*/false);
+
+		Box_PlayerList->AddChild(Row);
+	}
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 기여도 %d행 (총액 $%d)"), *GetName(), Lines.Num(), Total);
 }
 
 // ──────────────────────────────────────────────────────────────

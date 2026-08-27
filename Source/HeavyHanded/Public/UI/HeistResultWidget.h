@@ -8,6 +8,8 @@
 class AGameStateBase;
 class AHeistGameState;
 class UButton;
+class UPanelWidget;
+class UResultRowWidget;
 class UTextBlock;
 class UWidgetAnimation;
 
@@ -111,6 +113,42 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> Btn_Confirm;
 
+	/** 목표 대비 달성률 ("목표 $50,000 대비 106%") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_TargetRatio;
+
+	/**
+	 * 최다 소음 유발자 부연 ("경계도 42% 유발 — 이 작업 최다").
+	 *
+	 * [횟수가 아니라 기여량이다] 시안에는 "소음 발생 14회" 로 되어 있지만
+	 *   집계되는 값은 누적 경계도 기여량(%)이고 발생 횟수는 아무도 세지 않는다.
+	 *   횟수가 필요하면 소음 · 경계도 파트에 새로 요청해야 한다.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_NoisiestDetail;
+
+	// ── 목록을 행 위젯으로 그릴 때 ──
+	//
+	// 컨테이너와 행 클래스가 둘 다 있으면 행 위젯으로 그리고, 하나라도 없으면
+	// 기존 여러 줄 텍스트(Txt_LootList · Txt_PlayerList)로 떨어진다.
+	// 둘을 같이 두는 것은 WBP 를 한 번에 갈아엎지 않아도 되게 하기 위해서다.
+
+	/** 적재 목록 행이 들어갈 컨테이너 (세로 박스 등) */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
+	TObjectPtr<UPanelWidget> Box_LootList;
+
+	/** 개인 기여도 행이 들어갈 컨테이너 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
+	TObjectPtr<UPanelWidget> Box_PlayerList;
+
+	/** 적재 목록 한 줄을 그릴 위젯. 보통 바가 없는 WBP 를 꽂는다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Result")
+	TSubclassOf<UResultRowWidget> LootRowClass;
+
+	/** 개인 기여도 한 줄을 그릴 위젯. 바가 있는 WBP 를 꽂는다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Result")
+	TSubclassOf<UResultRowWidget> PlayerRowClass;
+
 	/** 등장 연출. 없으면 그냥 즉시 뜬다 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> Intro;
@@ -153,6 +191,12 @@ private:
 
 	/** 플레이어 목록 문자열을 만든다. 많이 벌어온 사람부터 */
 	FText BuildPlayerList() const;
+
+	/** 적재 목록을 행 위젯으로 채운다. 컨테이너나 행 클래스가 없으면 아무것도 하지 않는다 */
+	void PopulateLootRows();
+
+	/** 개인 기여도를 행 위젯으로 채운다. 바 비율은 1등 기준이 아니라 총액 기준이다 */
+	void PopulatePlayerRows();
 
 	/** 주기 콜백. 남은 체류 시간을 다시 계산해 버튼 문구에 반영한다 */
 	void RefreshCountdown();
