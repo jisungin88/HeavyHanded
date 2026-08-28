@@ -92,7 +92,7 @@ void AShelterInterActor::StartIngameTravel()
 		return;
 	}
 
-	ShelterPC->IngameTravel(EntryTag);
+	//ShelterPC->IngameTravel(EntryTag);
 	
 }
 

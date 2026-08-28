@@ -10,6 +10,8 @@
 class AShelterPlayerController;
 
 
+// 이 코드가 굳이 필요한지(gs, pc 처리로 방식을 바꾸어서 필요하지 않다면 삭제)
+
 UENUM(BlueprintType)
 enum class EEntryTagType : uint8
 {

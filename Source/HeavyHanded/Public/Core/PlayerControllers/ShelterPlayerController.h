@@ -112,14 +112,10 @@ public:
 
 
 	UFUNCTION(BlueprintCallable)
-	void IngameTravel(FGameplayTag NewSiteTag);
+	void IngameTravel();//FGameplayTag NewSiteTag);
 
 
-	// 변경 후 아래는 지울 것
-	// 인게임 이동
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void serverIngameTravel();
-	// -------------------------------------------------------삭제예정
+	
 
 protected:
 
