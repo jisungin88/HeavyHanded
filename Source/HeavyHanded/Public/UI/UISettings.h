@@ -4,7 +4,10 @@
 #include "Engine/DeveloperSettings.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Noise/NoiseTypes.h"          // EAlertLevel — UFUNCTION 파라미터라 전방 선언 불가
+#include "GameplayTagContainer.h"  // FGameplayTag — 아래 TMap 의 키라 전방 선언이 불가능하다
 #include "UISettings.generated.h"
+
+class UTexture2D;   // TSoftObjectPtr 의 인자로만 쓴다
 
 // 색 토큰 (UISystem.md 2장). 시안 5장에서 픽셀 실측한 값이다.
 // 이름은 토큰 표를 그대로 따른다 — 쓰는 자리(예: ButtonColor)로 이름을 붙이면
@@ -84,6 +87,15 @@ public:
 	/** 단계 표시용 이름. EAlertLevel 의 UMETA(DisplayName) 을 그대로 쓴다 */
 	UFUNCTION(BlueprintPure, Category = "UI|Alert")
 	static FText GetAlertLevelText(EAlertLevel Level);
+
+	/**
+	 * 소지 슬롯에 쓸 아이콘. 특성 태그 여러 개 중 표에 있는 첫 번째를 돌려준다.
+	 *
+	 * 표에 없으면 HeldSlotFallbackIcon 을, 그것도 비었으면 null 이다.
+	 * HeldSlotIcons 를 직접 읽지 말 것 — 행이 지워지면 경고 없이 빈 그림이 나간다.
+	 * BP 에 열지 않는다. 읽는 곳은 UHeistHUDWidget 하나뿐이다
+	 */
+	TSoftObjectPtr<UTexture2D> GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const;
 
 	// ── 색 토큰 (UISystem.md 2장) ──
 	//
@@ -182,4 +194,57 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Alert Gauge", meta = (ClampMin = "0.0", Units = "Hz"))
 	float AlarmBlinkHz = 2.f;
+
+	// ── 소지 슬롯 (기획서 8장 "소지 노획물") ──
+	//
+	// 화면 우하단에 지금 손에 든 것 하나를 보여주는 자리다.
+	// ABaseCharacter::HeldActor 가 단일 포인터라 슬롯도 하나뿐이다 —
+	// 장비를 들면 노획물을 못 들고 반대도 마찬가지인 것이 코드에서 이미 보장된다.
+
+	/**
+	 * 소지 슬롯 아이콘. 노획물 특성 태그(Loot.Type.*) → 그림.
+	 *
+	 * [왜 카탈로그가 아니라 여기인가] DT_LootCatalog 의 행 구조(FLootDefinitionRow)에는
+	 *   아이콘 칸이 없다. 그쪽은 물리 · 아이템 파트 소유라 UI 사정으로 늘리지 않는다.
+	 *   지금 노획물 BP 가 특성당 하나씩(BP_Loot_Fragile / Heavy / Unstable)이라
+	 *   특성별 그림이 곧 아이템별 그림과 같다.
+	 *
+	 *   한 특성에 아이템이 여럿 생기면 그때 카탈로그에 아이콘 칸을 요청하고,
+	 *   이 표는 행을 못 찾았을 때의 폴백으로 남긴다.
+	 *
+	 * 조회는 GetHeldSlotIcon() 으로 한다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot")
+	TMap<FGameplayTag, TSoftObjectPtr<UTexture2D>> HeldSlotIcons;
+
+	/** 특성 태그가 표에 없을 때 쓰는 그림. 비워 두면 아이콘 자리가 숨는다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot")
+	TSoftObjectPtr<UTexture2D> HeldSlotFallbackIcon;
+
+	/**
+	 * 무게 바가 가득 차는 질량(kg).
+	 *
+	 * [기획서 근거가 없는 값이다] 기획서에 무게 상한이라는 개념 자체가 없다 —
+	 *   과적은 게이지가 아니라 이진 상태다 ("중량형 1인: 속도 30%, 점프 불가", 기획서 4장).
+	 *   코드에도 기준이 없다. 중량형 판정은 질량이 아니라 Loot.Type.Heavy 태그로 하고,
+	 *   ICarryable::GetWeightClass() 는 읽는 곳이 없어 삭제됐다.
+	 *
+	 *   그래서 이것은 순전히 바를 그리기 위한 표시용 분모다. 게임플레이 판정에 쓰지 말 것.
+	 *   DT_LootCatalog 의 MassKg 들을 보고 여기서 맞춘다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot", meta = (ClampMin = "1.0", Units = "kg"))
+	float HeldWeightBarMaxKg = 200.f;
+
+	/**
+	 * 소지 슬롯 글자 배율. 토큰 크기에 곱한다.
+	 *
+	 * [전용 토큰을 만들지 않고 배율을 두는 이유] 폰트는 Timer · Value · Label
+	 *   세 단계 밖으로 나가지 않기로 했다 (UISystem.md 2장). 슬롯마다 전용 토큰을
+	 *   만들기 시작하면 토큰 표가 곧 위젯 목록이 되고, 그러면 토큰을 두는 의미가 없어진다.
+	 *   "이 슬롯은 기본 글자의 N 배" 로 적어 두면 다른 화면과의 관계가 남는다.
+	 *
+	 * 비교용 — Timer 28 · Value 18 · Label 12 다. 3 배면 이름이 54 로 타이머보다 크다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+	float HeldSlotFontScale = 3.f;
 };

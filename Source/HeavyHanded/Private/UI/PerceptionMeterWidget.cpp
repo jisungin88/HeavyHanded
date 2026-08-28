@@ -5,8 +5,11 @@
 #include "TimerManager.h"
 
 #include "Noise/PerceptionMeterComponent.h"
+#include "UI/HeavyUILog.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogHeavyUI, Log, All);
+// UI 카테고리의 유일한 정의. 선언은 UI/HeavyUILog.h 에 있다 —
+// STATIC 으로 두면 위젯 .cpp 가 둘 이상일 때 unity build 에서 재정의로 깨진다
+DEFINE_LOG_CATEGORY(LogHeavyUI);
 
 void UPerceptionMeterWidget::NativeConstruct()
 {
