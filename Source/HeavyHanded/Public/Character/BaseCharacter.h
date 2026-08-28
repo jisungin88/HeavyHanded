@@ -114,6 +114,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInputAction> IA_Crouch;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UInputAction> IA_Jump;
+
 	UPROPERTY(EditAnywhere, Category = "Input") 
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
@@ -216,7 +219,7 @@ protected:
 	// Sprint 소음 발행 간격(초). 발소리 박자에 맞춰 디자이너가 튜닝할 수 있게 노출한다.
 	// 나중에 발소리 애님 노티파이로 옮기면 이 타이머 자체가 필요 없어진다.
 	UPROPERTY(EditDefaultsOnly, Category = "Noise", meta = (ClampMin = "0.05", Units = "s"))
-	float SprintNoiseInterval = 0.4f;
+	float SprintNoiseInterval = 1.0f;
 
 public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);

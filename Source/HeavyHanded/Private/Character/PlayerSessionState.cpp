@@ -17,7 +17,7 @@ APlayerSessionState::APlayerSessionState()
     BaseAttributeSet = CreateDefaultSubobject<UBaseAttributeSet>(TEXT("BaseAttributeSet"));
 
     // 초기값 설정
-    SelectedCharacterID = 0;
+    //SelectedCharacterID = 0;
 
     // 네트워크 업데이트 빈도 설정 (원활한 동기화)
     NetUpdateFrequency = 100.0f;
@@ -33,13 +33,13 @@ void APlayerSessionState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(APlayerSessionState, SelectedCharacterID);
+    //DOREPLIFETIME(APlayerSessionState, SelectedCharacterID);
 }
 
-void APlayerSessionState::SetSelectedCharacterID(int32 NewCharacterID)
-{
-    if (HasAuthority())
-    {
-        SelectedCharacterID = NewCharacterID;
-    }
-}
+//void APlayerSessionState::SetSelectedCharacterID(int32 NewCharacterID)
+//{
+//    if (HasAuthority())
+//    {
+//        SelectedCharacterID = NewCharacterID;
+//    }
+//}

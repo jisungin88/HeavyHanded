@@ -83,3 +83,22 @@ FText UUISettings::GetAlertLevelText(EAlertLevel Level)
 	// 여기서 또 정의하면 enum 이 바뀔 때 조용히 어긋난다
 	return StaticEnum<EAlertLevel>()->GetDisplayNameTextByValue(static_cast<int64>(Level));
 }
+
+TSoftObjectPtr<UTexture2D> UUISettings::GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const
+{
+	// 특성 태그는 여럿일 수 있다 — 대형 금고는 '중량형 + 경보 연동형' 처럼 겹친다(기획서 5장).
+	// 표에 있는 첫 번째를 쓴다. 우선순위를 정해야 할 만큼 겹치기 시작하면 그때 배열로 바꾼다
+	for (const FGameplayTag& Tag : TypeTags)
+	{
+		if (const TSoftObjectPtr<UTexture2D>* Found = HeldSlotIcons.Find(Tag))
+		{
+			// 표에 행은 있는데 그림을 안 꽂아 둔 경우가 있다. 그때는 없는 것으로 친다
+			if (!Found->IsNull())
+			{
+				return *Found;
+			}
+		}
+	}
+
+	return HeldSlotFallbackIcon;
+}
