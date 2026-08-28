@@ -7,7 +7,9 @@
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
+
 #include "GameplayTagContainer.h"
+#include "Core/GameStates/ShelterGameState.h"
 
 #include "ShelterPlayerController.generated.h"
 
@@ -97,10 +99,27 @@ public:
 
 	// -------------------------------------------------------
 
-		// 인게임 이동
+
+public:
+	// 클라이언트에서 Entry 변경 요청
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSetEntryTag(EEntryTag NewTag);
+
+	// 클라이언트에서 Site 변경 요청
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSetSiteTag(ESiteTag NewTag);
+
+
+
+	UFUNCTION(BlueprintCallable)
+	void IngameTravel(FGameplayTag NewSiteTag);
+
+
+	// 변경 후 아래는 지울 것
+	// 인게임 이동
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void serverIngameTravel();
-
+	// -------------------------------------------------------삭제예정
 
 protected:
 

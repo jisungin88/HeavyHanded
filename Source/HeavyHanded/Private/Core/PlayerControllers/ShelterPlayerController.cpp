@@ -299,6 +299,51 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 
 
+
+void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag)
+{
+	// 서버의 GameState 가져오기
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+	
+	// 서버 GameState의 Entry 변경
+	GameState->SetEntryTag(NewTag);
+}
+
+void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
+{
+	// 서버의 GameState 가져오기
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+	 // 서버 GameState의 Site 변경
+	GameState->SetSiteTag(NewTag);
+}
+
+
+
+void AShelterPlayerController::IngameTravel(FGameplayTag NewSiteTag)
+{
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	if (!Subsystem)
+	{
+		// 서브시스템 존재하지 않음
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Subsystem 찾을 수 없음"));
+		return;
+	}
+	//Subsystem->TrySelectEntry()
+	Subsystem->TryDepartToSite(NewSiteTag); // 이미 서버에서 돌리고 있어서 일반함수로 써도 괜찮음
+
+}
+
+
 void AShelterPlayerController::serverIngameTravel_Implementation()
 {
 	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
@@ -312,11 +357,17 @@ void AShelterPlayerController::serverIngameTravel_Implementation()
 	// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
 	// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
 
-	if (Subsystem)
+	if (!Subsystem)
 	{
-		Subsystem->TryDepartToSite(NewSiteTag);
+		// 서브시스템 존재하지 않음
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Subsystem 찾을 수 없음"));
+		return;
 	}
+		//Subsystem->TrySelectEntry()
+		Subsystem->TryDepartToSite(NewSiteTag); // 이미 서버에서 돌리고 있어서 일반함수로 써도 괜찮음
 }
+
+
 
 void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 {

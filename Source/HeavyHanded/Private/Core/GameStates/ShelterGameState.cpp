@@ -14,11 +14,26 @@ void AShelterGameState::AddPlayerState(APlayerState* PlayerState)
 {
 	Super::AddPlayerState(PlayerState);
 
+	// 직업 변경 이벤트를 받을 준비
+	AShelterPlayerState* ShelterPlayerState = Cast<AShelterPlayerState>(PlayerState);
+	if (ShelterPlayerState)
+	{
+		ShelterPlayerState->OnSelectedJobChanged.AddDynamic(this, &AShelterGameState::OnPlayerJobChanged);
+	}
+
 	UpdateLobbyPlayerCount();
 }
 
 void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
 {
+	AShelterPlayerState* ShelterPlayerState = Cast<AShelterPlayerState>(PlayerState);
+
+	if (ShelterPlayerState)
+	{
+		ShelterPlayerState->OnSelectedJobChanged.RemoveDynamic(this, &AShelterGameState::OnPlayerJobChanged);
+	}
+
+
 	Super::RemovePlayerState(PlayerState);
 
 	UpdateLobbyPlayerCount();
@@ -211,6 +226,7 @@ bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
 }
 
 
+
 void AShelterGameState::OnRep_JobStateChanged()
 {
 	if (GEngine)
@@ -221,8 +237,89 @@ void AShelterGameState::OnRep_JobStateChanged()
 	OnJobStateChanged.Broadcast();
 }
 
+
+
+TArray<AShelterPlayerState*> AShelterGameState::GetShelterPlayerStates() const
+{
+	TArray<AShelterPlayerState*> Result;
+
+	for (APlayerState* BasePlayerState : PlayerArray)
+	{
+		AShelterPlayerState* PlayerState = Cast<AShelterPlayerState>(BasePlayerState);
+
+		if (PlayerState)
+		{
+			Result.Add(PlayerState);
+		}
+	}
+
+	return Result;
+}
+
+//
+void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
+{
+	OnJobStateChanged.Broadcast();
+}
+
+
+
+// ---------------
+// GameState 자체는 클라이언트 소유 액터가 아니므로
+// 여기서 직접 Server RPC를 호출하는 구조는 적합하지 않음
+// ----------------
+
+void AShelterGameState::SetEntryTag(EEntryTag NewTag)
+{
+	// GameState의 공용 값은 서버에서만 변경
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 현재 Entry 변경
+	EntryTag = NewTag;
+
+	// 호스트의 UI 갱신
+	OnTravelTagChanged.Broadcast();
+}
+
+void AShelterGameState::SetSiteTag(ESiteTag NewTag)
+{
+	// GameState의 공용 값은 서버에서만 변경
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 현재 Site 변경
+	SiteTag = NewTag;
+
+	// 호스트의 UI는 RepNotify가 자동으로 호출되지 않으므로 직접 알림
+	OnTravelTagChanged.Broadcast();
+}
+
+
+
+void AShelterGameState::OnRep_EntryTag()
+{
+	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
+	OnTravelTagChanged.Broadcast();
+}
+
+void AShelterGameState::OnRep_SiteTag()
+{
+	// 클라이언트에서 SiteTag가 복제되면 UI 갱신
+	OnTravelTagChanged.Broadcast();
+}
+
+
+
 void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AShelterGameState, JobStateChanged);
+
+	DOREPLIFETIME(AShelterGameState, SiteTag);
+	DOREPLIFETIME(AShelterGameState, EntryTag);
 }
