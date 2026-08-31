@@ -486,6 +486,12 @@ void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
 
 
 
+void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
+{
+	BP_ShowStartGameWindow();
+}
+
+
 void AShelterPlayerController::IngameTravel()
 {
 
@@ -504,14 +510,24 @@ void AShelterPlayerController::IngameTravel()
 	}
 
 
+	// 로딩창 띄우기
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get());
+
+		if (PC)
+		{
+			PC->ClientShowStartGameWindow();
+		}
+	}
+
+
 
 	ESiteTag CurrentSite = GameState->SiteTag;
 	FGameplayTag SiteGT;
 
 	// config/Phase.ini 참고할 것
 
-
-	// config/Phase.ini 참고할 것
 
 	// 맵이 클리어 형식이라면 지금처럼 액터를 나눌 이유가 없음
 	/*
@@ -541,7 +557,6 @@ void AShelterPlayerController::IngameTravel()
 	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
 	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
 	Subsystem->TryDepartToSite(SiteGT);
-
 
 }
 

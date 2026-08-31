@@ -32,6 +32,7 @@ enum class EJobType : uint8
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedJobChanged, AShelterPlayerState*, PlayerState);
 
 
+class AShelterGameState;
 
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerState : public APlayerSessionState

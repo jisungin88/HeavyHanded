@@ -90,7 +90,17 @@ public:
 	bool SelectJob(AShelterPlayerState* PlayerState, EJobType NewJob);
 
 	// 현재 직업을 해제
-	bool ClearJob(AShelterPlayerState* PlayerState);
+	bool ClearJob(AShelterPlayerState* PlayerState); //
+
+
+	UPROPERTY(Replicated, BlueprintReadOnly)
+	bool bCanStart = false;
+
+	UFUNCTION(BlueprintPure)
+	bool CanStartGame() const;
+
+	void UpdateCanStart();
+
 
 	// --------------------------------------------------------------
 

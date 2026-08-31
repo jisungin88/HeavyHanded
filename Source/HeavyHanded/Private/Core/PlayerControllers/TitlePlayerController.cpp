@@ -49,14 +49,14 @@ void ATitlePlayerController::TitleCreateSession
     (const FString& RoomName, int maxPlayer, bool isPublic)
 {
 	// CreateSession 호출 여부 확인
-	SessionDebug(TEXT("TitleCreateSession ================="), true);
+	SessionDebug(TEXT("TitlePC : 1. TitleCreateSession ================="), true);
 
 
 	// 기존 GameSession이 있는지 확인
 	FNamedOnlineSession* ExistingSession =
 		SessionInterface->GetNamedSession(NAME_GameSession);
 
-	SessionDebug(TEXT("Existing GameSession"),ExistingSession == nullptr);
+	SessionDebug(TEXT("TitlePC : 2. Existing GameSession"),ExistingSession == nullptr);
 
 	// 삭제 후 재시도로 이 함수가 다시 불릴 수 있다.
 	// 남은 핸들 위에 덧붙이면 완료 콜백이 두 번 불린다
@@ -72,7 +72,7 @@ void ATitlePlayerController::TitleCreateSession
                 this,
                 &ATitlePlayerController::TitleOnCreateSessionComplete));
 
-	SessionDebug("Create Delegate Added", CreateHandle.IsValid());
+	SessionDebug("TitlePC : 3. Create Delegate Added", CreateHandle.IsValid());
 	if (!CreateHandle.IsValid()) { return; }
 
 
@@ -122,12 +122,6 @@ void ATitlePlayerController::TitleCreateSession
     }
 
 
-	
-
-
-
-
-
 	if (StartHandle.IsValid())
 	{
 		SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(StartHandle);
@@ -141,7 +135,7 @@ void ATitlePlayerController::TitleCreateSession
                 &ATitlePlayerController::TitleOnStartSessionComplete));
 
 
-	SessionDebug("Start Delegate Added", StartHandle.IsValid());
+	SessionDebug("TitlePC : 4. Start Delegate Added", StartHandle.IsValid());
 	if (!StartHandle.IsValid()) { return; }
 
 
@@ -166,7 +160,7 @@ void ATitlePlayerController::TitleCreateSession
         NAME_GameSession,
         Settings);
 
-	SessionDebug("CreateSession", bCreateStarted);
+	SessionDebug("TitlePC : 5. CreateSession", bCreateStarted);
 
 }
 
@@ -179,14 +173,14 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
     }
 
 
-	SessionDebug(TEXT("CreateSession Complete"), bWasSuccessful);
+	SessionDebug(TEXT("TitlePC : 6. CreateSession Complete"), bWasSuccessful);
     if (!bWasSuccessful) { return; }
 
 
 
 	FNamedOnlineSession* Session = SessionInterface->GetNamedSession(NAME_GameSession);
 
-	SessionDebug(TEXT("Created Session Exists"), Session != nullptr);
+	SessionDebug(TEXT("TitlePC : 7. Created Session Exists"), Session != nullptr);
 
 	if (Session)
 	{
@@ -210,7 +204,7 @@ void ATitlePlayerController::TitleOnCreateSessionComplete(FName SessionName, boo
 void ATitlePlayerController::TitleOnStartSessionComplete(FName SessionName, bool bWasSuccessful)
 {
     UE_LOG(LogTemp, Warning,
-        TEXT("StartSession Success = %d"),
+        TEXT("TitlePC : TitleOnStartSessionComplete 1. StartSession Success = %d"),
         bWasSuccessful);
 
     FNamedOnlineSession* Session =
@@ -219,7 +213,7 @@ void ATitlePlayerController::TitleOnStartSessionComplete(FName SessionName, bool
     if (Session)
     {
         UE_LOG(LogTemp, Warning,
-            TEXT("State After StartSession = %d"),
+            TEXT("TitlePC : TitleOnStartSessionComplete 3. State After StartSession = %d"),
             (int32)Session->SessionState);
     }
 
@@ -232,11 +226,12 @@ void ATitlePlayerController::TitleOnStartSessionComplete(FName SessionName, bool
 void ATitlePlayerController::TitleFindSessions()
 {
 
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("===== FindSessions Debug Start ====="));
-    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, IsLocalController() ? 
-        TEXT("IsLocalController = TRUE") : TEXT("IsLocalController = FALSE"));
+    //GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("===== FindSessions Debug Start ====="));
+    //GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, IsLocalController() ? 
+    //    TEXT("IsLocalController = TRUE") : TEXT("IsLocalController = FALSE"));
 
-	SessionDebug(TEXT("===== FindSessions CALLED ====="), true);
+	SessionDebug(TEXT("===== TitlePC : FindSessions CALLED ====="), true);
+
 
 	FString NetModeString;
 	switch (GetNetMode())
@@ -250,13 +245,7 @@ void ATitlePlayerController::TitleFindSessions()
 	SessionDebug(FString::Printf(TEXT("NetMode = %s"), *NetModeString), true);
 
 
-    ULocalPlayer* LP = GetLocalPlayer();
-	SessionDebug(TEXT("LocalPlayer"), LP != nullptr);
 
-    if (LP)
-    {
-		SessionDebug(FString::Printf(TEXT("ControllerId = %d"), LP->GetControllerId()), true);
-    }
 
     IOnlineSubsystem* OSS = IOnlineSubsystem::Get();
 	SessionDebug(TEXT("OSS"), OSS != nullptr);
@@ -292,25 +281,31 @@ void ATitlePlayerController::TitleFindSessions()
 	if (!FindHandle.IsValid()){return;}
 
     
+	ULocalPlayer* LP = GetLocalPlayer();
     int32 LocalPlayerNum = 0;
-    
-    if (GetLocalPlayer())
-    {
-        LocalPlayerNum = GetLocalPlayer()->GetControllerId();
-    }
-	SessionDebug(TEXT("LocalPlayer"), GetLocalPlayer() != nullptr);
+	SessionDebug(TEXT("LocalPlayer"), LP != nullptr);
+
+	if (LP)
+	{
+		SessionDebug(FString::Printf(TEXT("ControllerId = %d"), LP->GetControllerId()), true);
+
+		LocalPlayerNum = GetLocalPlayer()->GetControllerId();
+
+		bool bStarted = SessionInterface->FindSessions(LocalPlayerNum,SessionSearch.ToSharedRef());
 
 
-    bool bStarted = SessionInterface->FindSessions(
-        LocalPlayerNum,
-        SessionSearch.ToSharedRef()
-    );
+		SessionDebug(TEXT("FindSessions"), bStarted);
+		SessionDebug(TEXT("===== FindSessions CALLED ====="), true);
+
+	}
+
+	else
+	{
+		return;
+	}
 
 
 
-	SessionDebug(TEXT("FindSessions"), bStarted);
-
-	SessionDebug(TEXT("===== FindSessions CALLED ====="), true);
 
 
 }
@@ -616,7 +611,7 @@ void ATitlePlayerController::SessionDebug(const FString& Message, bool bSuccess)
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, DebugColor, *Message);
+		// GEngine->AddOnScreenDebugMessage(-1, 10.0f, DebugColor, *Message);
 	}
 
 	OnSessionDebug.Broadcast(Message, bSuccess);

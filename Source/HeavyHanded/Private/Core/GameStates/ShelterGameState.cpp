@@ -22,6 +22,7 @@ void AShelterGameState::AddPlayerState(APlayerState* PlayerState)
 	}
 
 	UpdateLobbyPlayerCount();
+	UpdateCanStart();
 }
 
 void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
@@ -37,6 +38,7 @@ void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
 	Super::RemovePlayerState(PlayerState);
 
 	UpdateLobbyPlayerCount();
+	UpdateCanStart();
 }
 
 void AShelterGameState::UpdateLobbyPlayerCount()
@@ -171,7 +173,7 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 
 
 
-	UE_LOG(LogTemp, Error,
+	UE_LOG(LogTemp, Display,
 		TEXT("[SET JOB] PS=%p Name=%s Authority=%s Job=%s"),
 		this,
 		*GetName(),
@@ -223,6 +225,36 @@ bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
 	PlayerState->SetSelectedJob(EJobType::None);
 
 	return true;
+}
+
+bool AShelterGameState::CanStartGame() const
+{
+	for (APlayerState* PS : PlayerArray)
+	{
+		AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
+
+		if (!ShelterPS)
+		{
+			continue;
+		}
+
+		if (ShelterPS->GetSelectedJob() == EJobType::None)
+		{
+			return false;
+		}
+	}
+
+	return PlayerArray.Num() > 0;
+}
+
+void AShelterGameState::UpdateCanStart()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	bCanStart = CanStartGame();
 }
 
 
@@ -305,6 +337,10 @@ void AShelterGameState::OnRep_EntryTag()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
 	OnTravelTagChanged.Broadcast();
+
+	UE_LOG(LogTemp, Warning, TEXT(
+		"[SiteTag] OnRep 실행 | World=%s | NetMode=%d | Tag=%d"
+	), *GetWorld()->GetName(), (int32)GetNetMode(), (int32)SiteTag);
 }
 
 void AShelterGameState::OnRep_SiteTag()
