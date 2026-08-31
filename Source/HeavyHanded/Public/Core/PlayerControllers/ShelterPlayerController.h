@@ -97,8 +97,18 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void serverConfirmedJob();
 
-	// -------------------------------------------------------
 
+protected:
+
+	// 직업별 Pawn 클래스
+	UPROPERTY(EditDefaultsOnly, Category = "Job")
+	TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
+
+	// Pawn을 실제로 생성하고 빙의
+	void SpawnJobPawn(FGameplayTag JobTag);
+
+
+	// -------------------------------------------------------
 
 public:
 	// 클라이언트에서 Entry 변경 요청
@@ -117,14 +127,7 @@ public:
 
 	
 
-protected:
 
-	// 직업별 Pawn 클래스
-	UPROPERTY(EditDefaultsOnly, Category = "Job")
-	TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
-
-	// Pawn을 실제로 생성하고 빙의
-	void SpawnJobPawn(FGameplayTag JobTag);
 
 
 

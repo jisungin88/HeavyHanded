@@ -126,13 +126,13 @@ public:
 	void SetSiteTag(ESiteTag NewTag);
 
 
-	// SiteTag가 클라이언트에 복제되었을 때 호출
-	UFUNCTION()
-	void OnRep_SiteTag();
-
 	// EntryTag가 클라이언트에 복제되었을 때 호출
 	UFUNCTION()
 	void OnRep_EntryTag();
+
+	// SiteTag가 클라이언트에 복제되었을 때 호출
+	UFUNCTION()
+	void OnRep_SiteTag();
 
 	// Replication에 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
