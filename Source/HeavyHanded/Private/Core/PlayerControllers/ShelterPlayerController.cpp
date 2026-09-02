@@ -12,6 +12,7 @@
 
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
+#include "Kismet/GameplayStatics.h"
 
 
 
@@ -66,15 +67,88 @@ AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 {
 	AShelterPlayerState* PS = GetPlayerState<AShelterPlayerState>();
 
-	FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, PS, PS ? *PS->GetName() : TEXT("NULL"));
+	//FString Message = FString::Printf(TEXT("[PC GetMyPS] PC=%p / PS=%p / %s"), this, PS, PS ? *PS->GetName() : TEXT("NULL"));
 
-	if (GEngine)
-	{
-		//GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
-	}
+	//if (GEngine)
+	//{
+	//	//GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+	//}
 
 	return PS;
 	//return GetPlayerState<AShelterPlayerState>();
+}
+
+void AShelterPlayerController::LeaveRoom(FName MapName)
+{
+	// 완료 콜백에서 사용할 맵 이름 저장
+	LeaveMapName = MapName;
+
+
+	IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get();
+
+	if (!Subsystem)
+	{
+		UGameplayStatics::OpenLevel(this, MapName);
+		return;
+	}
+
+	IOnlineSessionPtr SessionInterface = Subsystem->GetSessionInterface();
+
+	if (!SessionInterface.IsValid())
+	{
+		UGameplayStatics::OpenLevel(this, MapName);
+		return;
+	}
+
+	LeaveSessionCompleteHandle =
+		SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(
+				this,
+				&AShelterPlayerController::OnLeaveSessionComplete
+			)
+		);
+
+	// 세션 삭제 요청
+	if (!SessionInterface->DestroySession(NAME_GameSession))
+	{
+		SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(
+			LeaveSessionCompleteHandle
+		);
+
+		UE_LOG(LogTemp, Warning, TEXT("DestroySession request failed."));
+		return;
+	}
+
+
+}
+
+void AShelterPlayerController::OnLeaveSessionComplete(FName SessionName, bool bWasSuccessful)
+{
+	IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get();
+
+	if (Subsystem)
+	{
+		IOnlineSessionPtr SessionInterface = Subsystem->GetSessionInterface();
+
+		if (SessionInterface.IsValid())
+		{
+			SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(
+				LeaveSessionCompleteHandle
+			);
+		}
+	}
+
+	if (!bWasSuccessful)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("DestroySession failed."));
+		return;
+	}
+
+	// 로비 나가기 성공
+	OnLeaveRoomComplete.Broadcast();
+
+	UE_LOG(LogTemp, Warning, TEXT("LeaveMapName = %s"), *LeaveMapName.ToString());
+	UGameplayStatics::OpenLevel(this, LeaveMapName);
 }
 
 

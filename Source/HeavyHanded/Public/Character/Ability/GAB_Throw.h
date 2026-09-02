@@ -18,6 +18,17 @@ class HEAVYHANDED_API UGAB_Throw : public UBaseGameplayAbility
 public:
 	UGAB_Throw();
 
+	// 던지기는 "일반 노획물을 들고 있을 때"만 성립한다.
+	// 몽타주가 뜨기 전(커밋·태스크 생성 이전)에 막아야 한다 — ActivateAbility 안에서
+	// 늦게 걸러내면, 부모의 PlayMontageAndWait 이 bStopWhenAbilityEnds=false 로 떠 있어서
+	// EndAbility 를 불러도 이미 재생 중인 몽타주가 멈추지 않는다(BaseGameplayAbility.cpp).
+	virtual bool CanActivateAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayTagContainer* SourceTags = nullptr,
+		const FGameplayTagContainer* TargetTags = nullptr,
+		FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+
 	virtual void ActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
 		const FGameplayAbilityActorInfo* ActorInfo,

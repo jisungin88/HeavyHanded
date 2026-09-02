@@ -18,6 +18,7 @@
  *
  */
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLeaveRoomComplete);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnChatMessageReceived,
@@ -45,6 +46,27 @@ public:
 	UFUNCTION(BlueprintPure)
 	AShelterPlayerState* GetMyPlayerState() const;
 
+
+	// ----------------------------------------------------------------
+
+public:
+
+	UPROPERTY(BlueprintAssignable, Category = "Room")
+	FOnLeaveRoomComplete OnLeaveRoomComplete;
+
+	UFUNCTION(BlueprintCallable)
+	void LeaveRoom(FName MapName);
+
+
+
+protected:
+
+	UPROPERTY()
+	FName LeaveMapName;
+
+	void OnLeaveSessionComplete(FName SessionName, bool bWasSuccessful);
+
+	FDelegateHandle LeaveSessionCompleteHandle;
 
 
 
