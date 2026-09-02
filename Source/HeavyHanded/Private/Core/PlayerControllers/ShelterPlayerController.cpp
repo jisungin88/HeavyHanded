@@ -38,18 +38,14 @@ void AShelterPlayerController::BeginPlay()
 	);
 
 
+	UE_LOG(LogTemp, Warning, TEXT("=== AFTER BEGIN PLAY ==="));
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("=== AFTER BEGIN PLAY ==="));
 
-	bShowMouseCursor = true;
-
-	FInputModeGameAndUI InputMode;
-	InputMode.SetHideCursorDuringCapture(false);
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-
-	SetInputMode(InputMode);
-
-
+	
 
 }
+
+
 
 /**
  * 내 PlayerState. **아직 안 왔으면 nullptr 이다** — 호출부가 반드시 검사할 것.
@@ -74,7 +70,7 @@ AShelterPlayerState* AShelterPlayerController::GetMyPlayerState() const
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
+		//GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Cyan, Message);
 	}
 
 	return PS;
@@ -150,42 +146,7 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 {
-	/*
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	AShelterPlayerState* MyPlayerState = GetPlayerState<AShelterPlayerState>();
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("1. PC->ServerSelectJob 호출"));
-		if (!GameState)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> GameState 없음"));
-			return;
-		}
-
-		if (!MyPlayerState)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("PC -> PlayerState 없음"));
-			return;
-		}
-	}
-
-
-	const bool bSuccess = GameState->SelectJob(MyPlayerState, NewJob);
-
-
-	if (GEngine)
-	{
-		FString Message = FString::Printf(TEXT("직업 선택 결과: %s"), bSuccess ? TEXT("성공") : TEXT("실패"));
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, bSuccess ? FColor::Green : FColor::Red, Message);
-	}
-
-	if (!bSuccess)
-	{
-		return;
-	}
-	*/
-
-
+	
 	AShelterGameState* GameState =
 		GetWorld()->GetGameState<AShelterGameState>();
 
@@ -201,9 +162,7 @@ void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT")
 		);
 
-		GEngine->AddOnScreenDebugMessage(
-			-1, 10.f, FColor::Yellow, Message
-		);
+		//GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Yellow, Message);
 	}
 
 	if (!GameState || !MyPlayerState)
@@ -221,11 +180,7 @@ void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 			bSuccess ? TEXT("SUCCESS") : TEXT("FAIL")
 		);
 
-		GEngine->AddOnScreenDebugMessage(
-			-1, 10.f,
-			bSuccess ? FColor::Green : FColor::Red,
-			Message
-		);
+		GEngine->AddOnScreenDebugMessage(-1, 10.f,bSuccess ? FColor::Green : FColor::Red,Message);
 	}
 
 
@@ -306,8 +261,7 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	{
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-				TEXT("1.[SpawnJobPawn] HasAuthority() == FALSE"));
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,TEXT("1.[SpawnJobPawn] HasAuthority() == FALSE"));
 		}
 
 		return;
@@ -321,8 +275,7 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	{
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-				FString::Printf(TEXT("2. [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
 		}
 
 		return;
@@ -353,8 +306,7 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	{
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-				FString::Printf(TEXT("3. [SpawnJobPawn] PlayerStart NOT FOUND / JobTag = %s"), *JobTag.ToString()));
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] PlayerStart NOT FOUND / JobTag = %s"), *JobTag.ToString()));
 		}
 
 		return;
@@ -373,8 +325,7 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	{
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
-				FString::Printf(TEXT("4.[SpawnJobPawn] Failed to spawn Pawn [%s]"), *GetNameSafe(PawnClass)));
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] Failed to spawn Pawn [%s]"), *GetNameSafe(PawnClass)));
 		}
 
 		return;
@@ -386,30 +337,8 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-			FString::Printf(TEXT("5.[SpawnJobPawn] SUCCESS / PC=%s / Job=%s / Pawn=%s"), *GetName(), *JobTag.ToString(), *NewPawn->GetName()));
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,FString::Printf(TEXT("2.[SpawnJobPawn] SUCCESS / PC=%s / Job=%s / Pawn=%s"), *GetName(), *JobTag.ToString(), *NewPawn->GetName()));
 	}
-
-
-	// 마우스 커서 강제 표시
-	bShowMouseCursor = true;
-
-	FInputModeGameAndUI InputMode;
-	InputMode.SetWidgetToFocus(nullptr);
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	InputMode.SetHideCursorDuringCapture(false);
-
-	SetInputMode(InputMode);
-
-	// 한 번 더 강제 설정
-	int32 SizeX = 0;
-	int32 SizeY = 0;
-
-	GetViewportSize(SizeX, SizeY);
-
-	SetMouseLocation(SizeX / 2, SizeY / 2);
-
-	bShowMouseCursor = true;
 
 
 }
