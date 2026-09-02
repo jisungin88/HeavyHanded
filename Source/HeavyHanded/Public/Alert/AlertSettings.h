@@ -69,6 +69,10 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Reinforcement", meta = (ClampMin = "1"))
 	int32 NoiseDetectionsPerReinforcement = 2;
 
+	/** 한 번의 스테이지에서 발동할 수 있는 최대 증원 횟수 */
+	UPROPERTY(Config, EditAnywhere, Category = "Reinforcement", meta = (ClampMin = "0"))
+	int32 MaxReinforcements = 4;
+
 #if WITH_EDITOR
 	/** 히스테리시스가 뒤집힌 값이 저장되지 않게 막는다 */
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

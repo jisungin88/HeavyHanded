@@ -354,6 +354,7 @@ void UAlertComponent::ResetAlert()
 	SilenceTimer       = 0.f;
 	PursuitCount       = 0;                   // 증원까지 남은 추격 수도 같이 되돌린다
 	NoiseDetectionCount = 0;                  // 증원까지 남은 소음 감지 수도 같이 되돌린다
+	ReinforcementCount = 0;					  // 증원 상환 되돌림.
 
 	NoiseContribution.Reset();
 	NoisiestPlayer       = nullptr;     // 복제본도 같이 비운다
@@ -401,6 +402,15 @@ void UAlertComponent::ReportTowardReinforcement(int32& Counter, int32 Threshold,
 	}
 
 	Counter = 0;
+
+	// 증원 상한
+	const int32 Cap = UAlertSettings::Get()->MaxReinforcements;
+	if (Cap > 0 && ReinforcementCount >= Cap)
+	{
+		UE_LOG(LogAlert, Verbose, TEXT("병력 증원 상한(%d) 도달 — %s 무시."), Cap, SourceLabel);
+		return;
+	}
+
 	++ReinforcementCount;
 
 	UE_LOG(LogAlert, Log, TEXT("병력 증원 발동 (%d번째, 계기: %s) - 모든 경비 스포너에 1명씩 추가 스폰."),
