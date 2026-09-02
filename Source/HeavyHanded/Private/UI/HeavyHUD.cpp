@@ -6,6 +6,9 @@
 
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Core/PlayerControllers/HeistPlayerController.h"
+#include "Core/Spectate/HeistSpectatorComponent.h"
+#include "Core/Spectate/HeistSpectateTypes.h"
 #include "UI/HeavyUILog.h"
 
 AHeavyHUD::AHeavyHUD()
@@ -20,6 +23,8 @@ void AHeavyHUD::BeginPlay()
 	Super::BeginPlay();
 
 	CreateAndAddHUDWidget();
+	CreateAndAddSpectateOverlay();
+	BindToSpectator();
 	BindToHeistGameState();
 }
 
@@ -32,6 +37,12 @@ void AHeavyHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	BoundState = nullptr;
 
+	if (BoundSpectator)
+	{
+		BoundSpectator->OnSpectateStateChanged.RemoveDynamic(this, &AHeavyHUD::HandleSpectateStateChanged);
+		BoundSpectator = nullptr;
+	}
+
 	if (GameStateSetHandle.IsValid())
 	{
 		if (UWorld* World = GetWorld())
@@ -39,6 +50,12 @@ void AHeavyHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			World->GameStateSetEvent.Remove(GameStateSetHandle);
 		}
 		GameStateSetHandle.Reset();
+	}
+
+	if (SpectateOverlayWidget)
+	{
+		SpectateOverlayWidget->RemoveFromParent();
+		SpectateOverlayWidget = nullptr;
 	}
 
 	// 레벨 이동 시 위젯이 화면에 남지 않게 직접 뗀다.
@@ -57,6 +74,36 @@ void AHeavyHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // ──────────────────────────────────────────────────────────────
 // 페이즈 구독
 // ──────────────────────────────────────────────────────────────
+
+void AHeavyHUD::BindToSpectator()
+{
+	AHeistPlayerController* PC = Cast<AHeistPlayerController>(GetOwningPlayerController());
+	BoundSpectator = PC ? PC->GetSpectatorComponent() : nullptr;
+	if (!BoundSpectator)
+	{
+		return;
+	}
+
+	BoundSpectator->OnSpectateStateChanged.AddDynamic(this, &AHeavyHUD::HandleSpectateStateChanged);
+
+	ApplySpectateHUDVisibility(BoundSpectator->IsSpectating());
+}
+
+void AHeavyHUD::HandleSpectateStateChanged(bool bSpectating)
+{
+	ApplySpectateHUDVisibility(bSpectating);
+}
+
+void AHeavyHUD::ApplySpectateHUDVisibility(bool bSpectating)
+{
+	if (!HUDWidget || !BoundSpectator)
+	{
+		return;
+	}
+
+	const bool bHide = bSpectating && BoundSpectator->GetInfoLevel() == EHeistSpectateInfoLevel::ViewOnly;
+	HUDWidget->SetVisibility(bHide ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+}
 
 void AHeavyHUD::BindToHeistGameState()
 {
@@ -247,6 +294,52 @@ void AHeavyHUD::CreateAndAddHUDWidget()
 	}
 
 	UE_LOG(LogHeavyUI, Log, TEXT("%s: HUD 표시 (%s)"), *GetName(), *GetNameSafe(HUDWidgetClass.Get()));
+}
+
+void AHeavyHUD::CreateAndAddSpectateOverlay()
+{
+	if (SpectateOverlayWidget)
+	{
+		return;
+	}
+
+	if (!SpectateOverlayClass)
+	{
+		// 아직 WBP 가 없는 동안은 정상이라 Log 다 (결과 화면과 같은 취급)
+		UE_LOG(LogHeavyUI, Log,
+				   TEXT("%s: SpectateOverlayClass 가 비어 있어 관전 오버레이를 만들지 않는다"),
+				   *GetName());
+		return;
+	}
+
+	APlayerController* OwningPC = GetOwningPlayerController();
+	if (!OwningPC || !OwningPC->IsLocalController())
+	{
+		UE_LOG(LogHeavyUI, Warning,
+						 TEXT("%s: 로컬 플레이어 컨트롤러가 없어 관전 오버레이를 만들지 않는다"), *GetName());
+		return;
+	}
+
+	SpectateOverlayWidget = CreateWidget<UUserWidget>(OwningPC, SpectateOverlayClass);
+	if (!SpectateOverlayWidget)
+	{
+		UE_LOG(LogHeavyUI, Warning,
+						TEXT("%s: 관전 오버레이 생성 실패 (%s)"),
+						*GetName(), *GetNameSafe(SpectateOverlayClass.Get()));
+		return;
+	}
+
+	if (!SpectateOverlayWidget->AddToPlayerScreen(SpectateZOrder))
+	{
+		UE_LOG(LogHeavyUI, Warning,
+						 TEXT("%s: 관전 오버레이를 플레이어 화면에 붙이지 못했다 (%s)"),
+						 *GetName(), *GetNameSafe(SpectateOverlayClass.Get()));
+		SpectateOverlayWidget = nullptr;
+		return;
+	}
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 관전 오버레이 표시 (%s)"),
+				 *GetName(), *GetNameSafe(SpectateOverlayClass.Get()));
 }
 
 void AHeavyHUD::SetHUDVisible(bool bVisible)

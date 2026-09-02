@@ -1394,7 +1394,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	// 카트 밖으로 쏟아지면 여기부터 다시 정상으로 돈다.
 	if (IsValid(ContainingCart))
 	{
-		ShowImpactDebug(
+		ShowRejectDebug(
 			FString::Printf(TEXT("기각(카트 적재 중) %.0f"), ImpulseMagnitude),
 			FColor::Cyan, Hit.ImpactPoint, ImpulseMagnitude);
 		return;
@@ -1406,7 +1406,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	// 실제 낙하·투척 충격이 아니므로 여기서 걸러낸다.
 	if (OtherActor == PrimaryCarrier.Get() || OtherActor == SecondaryCarrier.Get())
 	{
-		ShowImpactDebug(
+		ShowRejectDebug(
 			FString::Printf(TEXT("기각(운반자와 접촉) %.0f"), ImpulseMagnitude),
 			FColor::Cyan, Hit.ImpactPoint, ImpulseMagnitude);
 		return;
@@ -1416,7 +1416,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	// 구르거나 미세하게 재접촉하는 것까지 전부 OnHit 으로 온다.
 	if (ImpulseMagnitude < PhysicsData.ImpactReportThreshold)
 	{
-		ShowImpactDebug(
+		ShowRejectDebug(
 			FString::Printf(TEXT("기각(약함) %.0f < %.0f"),
 				ImpulseMagnitude, PhysicsData.ImpactReportThreshold),
 			FColor::Silver, Hit.ImpactPoint, ImpulseMagnitude);
@@ -1428,7 +1428,7 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	const float Now = World->GetTimeSeconds();
 	if (!TryConsumeImpactCooldown(OtherActor, Now))
 	{
-		ShowImpactDebug(
+		ShowRejectDebug(
 			FString::Printf(TEXT("기각(%.1f초 내 재충돌) %.0f"), ImpactDebounceSeconds, ImpulseMagnitude),
 			FColor::Orange, Hit.ImpactPoint, ImpulseMagnitude);
 		return;
@@ -1733,6 +1733,19 @@ void ALootBase::ShowImpactDebug(const FString& Message, const FColor& Color, con
 	// 어디에 부딪혔는지가 기각 사유를 읽는 데 필요하다 (바닥인지 벽인지 다른 물건인지).
 	DrawDebugSphere(GetWorld(), Location, 12.f, 8, Color, false, 2.f);
 #endif
+}
+
+void ALootBase::ShowRejectDebug(const FString& Message, const FColor& Color, const FVector& Location,
+	float FilterImpulse) const
+{
+	// 기각은 확정보다 훨씬 자주 나온다. 중량형에 몸이 닿아 있기만 해도 임계값 미만의
+	// 접촉이 매 프레임 들어오는데, 그게 다 찍히면 확정 한 줄이 화면 밖으로 밀려난다.
+	if (!bShowRejectedImpacts)
+	{
+		return;
+	}
+
+	ShowImpactDebug(Message, Color, Location, FilterImpulse);
 }
 
 bool ALootBase::TryConsumeImpactCooldown(const AActor* OtherActor, float Now)
