@@ -15,6 +15,30 @@ UGAB_Throw::UGAB_Throw()
 	bReplicateInputDirectly = true;
 }
 
+bool UGAB_Throw::CanActivateAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayTagContainer* SourceTags,
+	const FGameplayTagContainer* TargetTags,
+	FGameplayTagContainer* OptionalRelevantTags) const
+{
+	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags))
+	{
+		return false;
+	}
+
+	// 일반 노획물을 들고 있을 때만 던지기가 성립한다.
+	// 안 들었거나(빈손) 중량형(2인 필수, Loot.ini — 던지기 불가)을 들었으면
+	// 여기서 막아 몽타주 태스크 자체가 생성되지 않게 한다.
+	const ABaseCharacter* Character = ActorInfo ? Cast<ABaseCharacter>(ActorInfo->AvatarActor.Get()) : nullptr;
+	if (!Character || !Character->GetHeldActor() || Character->IsCarryingHeavyItem())
+	{
+		return false;
+	}
+
+	return true;
+}
+
 void UGAB_Throw::ActivateAbility(
 	const FGameplayAbilitySpecHandle Handle,
 	const FGameplayAbilityActorInfo* ActorInfo,
@@ -33,8 +57,11 @@ void UGAB_Throw::ActivateAbility(
 	}
 
 	// 2. 캐릭터 확인
+	// 여기까지 왔다면 정상적으로는 CanActivateAbility 를 이미 통과한 상태다.
+	// 그래도 활성화 시점과 이 사이 한 프레임 안에 상태가 바뀔 수 있으므로
+	// (예: 서버 권위 판정이 늦게 도착) 방어적으로 다시 확인한다.
 	ABaseCharacter* Character = GetBaseCharacterFromActorInfo();
-	if (!Character || !Character->GetHeldActor())
+	if (!Character || !Character->GetHeldActor() || Character->IsCarryingHeavyItem())
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
