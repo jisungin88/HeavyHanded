@@ -43,7 +43,12 @@ public class HeavyHanded : ModuleRules
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 
 			// 소음 SFX는 폴리싱이 아니라 기능. 초반부터 배치한다
-			"AudioMixer"
+			"AudioMixer",
+
+			// 레벨 이동 로딩 화면 (ULoadingScreenSubsystem).
+			// 논심리스 트래블 중에는 게임 스레드가 LoadMap 안에서 멈춰 뷰포트 위젯이
+			// 한 프레임도 그려지지 않는다. 별도 스레드로 그려 주는 창구가 이것뿐이다
+			"MoviePlayer"
 		});
 	}
 }

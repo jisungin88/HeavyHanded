@@ -23,6 +23,28 @@ UUISettings::UUISettings()
 
 	LabelFont.Size = 12.f;
 	LabelFont.TypefaceFontName = TEXT("Regular");
+
+	TitleFont.Size = 44.f;
+	TitleFont.TypefaceFontName = TEXT("Bold");
+
+	// ── 로딩 화면 기본 문구 ──
+	//
+	// NSLOCTEXT 로 두는 이유는 FText 를 프로퍼티 선언부에서 초기화하면
+	// 지역화 수집에 잡히지 않기 때문이다. Project Settings 에서 덮어쓸 수 있다
+	LoadingEyebrowText     = NSLOCTEXT("HeavyHandedUI", "LoadingEyebrow", "다음 작업");
+	LoadingTitleFormat     = NSLOCTEXT("HeavyHandedUI", "LoadingTitleFormat", "{0} 진입 중…");
+	LoadingUnknownSiteText = NSLOCTEXT("HeavyHandedUI", "LoadingUnknownSite", "작업 장소");
+	LoadingTipLabelText    = NSLOCTEXT("HeavyHandedUI", "LoadingTipLabel", "TIP");
+	LoadingStatusText      = NSLOCTEXT("HeavyHandedUI", "LoadingStatus", "레벨 로딩 중…");
+
+	WaitingStatusFormat        = NSLOCTEXT("HeavyHandedUI", "WaitingStatusFormat", "{0} / {1} 함께하는 중");
+	WaitingStatusUnknownText   = NSLOCTEXT("HeavyHandedUI", "WaitingStatusUnknown", "동료를 기다리는 중…");
+
+	// [SiteDisplayNames 는 여기서 채우지 않는다] 이 생성자는 모듈 로드 중에 도는데
+	// 그 시점에 GameplayTag 매니저가 아직 표를 못 읽었을 수 있다. RequestGameplayTag 가
+	// 빈 태그를 돌려주면 세 줄이 전부 같은 키(빈 태그)로 들어가 마지막 하나만 남는다.
+	// 컴파일도 경고도 통과하고 화면에서만 이름이 하나로 보인다.
+	// 그래서 Project Settings → Game → UI → Loading 에서 세 줄을 직접 채운다
 }
 
 FSlateFontInfo UUISettings::GetUIFont(EUIFontToken Token)
@@ -31,6 +53,7 @@ FSlateFontInfo UUISettings::GetUIFont(EUIFontToken Token)
 
 	const FSlateFontInfo& Configured = (Token == EUIFontToken::Timer) ? Settings->TimerFont
 		: (Token == EUIFontToken::Value) ? Settings->ValueFont
+		: (Token == EUIFontToken::Title) ? Settings->TitleFont
 		: Settings->LabelFont;
 
 	// Project Settings 에서 게임 폰트를 꽂았으면 그대로 쓴다
@@ -59,6 +82,8 @@ FLinearColor UUISettings::GetUIColor(EUIColorToken Token)
 	case EUIColorToken::TextSecondary: return Settings->TextSecondaryColor;
 	case EUIColorToken::Health:        return Settings->HealthColor;
 	case EUIColorToken::Money:         return Settings->MoneyColor;
+	case EUIColorToken::PartySlotFilled: return Settings->PartySlotFilledColor;
+	case EUIColorToken::PartySlotEmpty:  return Settings->PartySlotEmptyColor;
 	}
 
 	return Settings->TextPrimaryColor;
@@ -82,6 +107,22 @@ FText UUISettings::GetAlertLevelText(EAlertLevel Level)
 	// EAlertLevel 의 UMETA(DisplayName) 이 이미 한글 이름을 갖고 있다.
 	// 여기서 또 정의하면 enum 이 바뀔 때 조용히 어긋난다
 	return StaticEnum<EAlertLevel>()->GetDisplayNameTextByValue(static_cast<int64>(Level));
+}
+
+FText UUISettings::GetSiteDisplayName(FGameplayTag SiteTag) const
+{
+	if (SiteTag.IsValid())
+	{
+		if (const FText* Found = SiteDisplayNames.Find(SiteTag))
+		{
+			if (!Found->IsEmpty())
+			{
+				return *Found;
+			}
+		}
+	}
+
+	return LoadingUnknownSiteText;
 }
 
 TSoftObjectPtr<UTexture2D> UUISettings::GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const
