@@ -257,6 +257,8 @@ bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
 
 bool AShelterGameState::CanStartGame() const
 {
+	// 0902 아래 변경 작동확인될시 지울 것
+	/*
 	for (APlayerState* PS : PlayerArray)
 	{
 		AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
@@ -273,6 +275,31 @@ bool AShelterGameState::CanStartGame() const
 	}
 
 	return PlayerArray.Num() > 0;
+	*/
+
+	if (PlayerArray.Num() <= 0)
+	{
+		return false;
+	}
+
+	for (APlayerState* PS : PlayerArray)
+	{
+		AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
+
+		if (!ShelterPS)
+		{
+			return false;
+		}
+
+		if (ShelterPS->GetSelectedJob() == EJobType::None)
+		{
+			return false;
+		}
+	}
+
+	return true;
+
+
 }
 
 void AShelterGameState::UpdateCanStart()
