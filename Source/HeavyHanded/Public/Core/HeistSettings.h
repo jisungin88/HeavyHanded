@@ -6,9 +6,12 @@
 #include "UObject/SoftObjectPtr.h"      // TSoftObjectPtr 를 값으로 보유
 #include "UObject/SoftObjectPath.h"     // FSoftObjectPath 를 값으로 반환
 #include "Core/HeistOutcome.h"          // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
+#include "Core/Spectate/HeistSpectateTypes.h"
 #include "HeistSettings.generated.h"
 
 class UWorld;
+class UInputAction;
+class UInputMappingContext;
 
 /**
  * 장소(Site.*) 하나와 그 작업 레벨.
@@ -164,4 +167,22 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Payout")
 	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Partial;
+
+	// -- 관전
+
+	/** 관전자에게 보여줄 정보의 범위 */
+	UPROPERTY(config, EditAnywhere, Category = "Spectate")
+	EHeistSpectateInfoLevel SpectateInfoLevel = EHeistSpectateInfoLevel::FollowTarget;
+
+	/** 관전 입력 맵핑 */
+	UPROPERTY(config, EditAnywhere, Category = "Spectate", meta = (AllowedClasses = "/Script/EnhancedInput.InputMappingContext"))
+	TSoftObjectPtr<UInputMappingContext> SpectateMappingContext;
+
+	/** 관전 시점을 다음으로 */
+	UPROPERTY(config, EditAnywhere, Category = "Spectate", meta = (AllowedClasses = "/Script/EnhancedInput.InputAction"))
+	TSoftObjectPtr<UInputAction> SpectateNextAction;
+
+	/** 관전 시점을 이전으로 */
+	UPROPERTY(config, EditAnywhere, Category = "Spectate", meta = (AllowedClasses = "/Script/EnhancedInput.InputAction"))
+	TSoftObjectPtr<UInputAction> SpectatePrevAction;
 };

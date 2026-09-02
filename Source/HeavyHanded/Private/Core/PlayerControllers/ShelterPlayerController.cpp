@@ -298,139 +298,6 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 }
 
 
-
-
-void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag)
-{
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
-	{
-		return;
-	}
-	
-	// 서버 GameState의 Entry 변경
-	GameState->SetEntryTag(NewTag);
-}
-
-void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
-{
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
-	{
-		return;
-	}
-
-	 // 서버 GameState의 Site 변경
-	GameState->SetSiteTag(NewTag);
-}
-
-
-
-void AShelterPlayerController::IngameTravel()
-{
-	/*
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-
-	if (!Subsystem)
-	{
-		// 서브시스템 존재하지 않음
-		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Subsystem 찾을 수 없음"));
-		return;
-	}
-	//Subsystem->TrySelectEntry()
-	Subsystem->TryDepartToSite(NewSiteTag); // 이미 서버에서 돌리고 있어서 일반함수로 써도 괜찮음
-	*/
-
-
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
-	{
-		return;
-	}
-
-
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-	if (!Subsystem)
-	{
-		return;
-	}
-
-
-
-	EEntryTag CurrentEntry = GameState->EntryTag;
-	ESiteTag CurrentSite = GameState->SiteTag;
-
-	FGameplayTag EntryGT;
-	FGameplayTag SiteGT;
-
-	// config/Phase.ini 참고할 것
-
-	switch (CurrentEntry)
-	{
-	case EEntryTag::Front:
-		// GameplayTagList = (Tag = "Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
-		EntryGT = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Front"));
-		break;
-
-
-	case EEntryTag::Garage:
-		// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
-		EntryGT = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Garage"));
-		break;
-
-	case EEntryTag::Alley:
-		// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
-		EntryGT = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Alley"));
-		break;
-
-	default:
-		EntryGT = FGameplayTag();
-		break;
-	}
-
-
-	// Entry 정보도 Subsystem에 먼저 전달
-	Subsystem->TrySelectEntry(EntryGT);
-
-
-	// config/Phase.ini 참고할 것
-
-	// 맵이 클리어 형식이라면 지금처럼 액터를 나눌 이유가 없음
-	/*
-	switch (CurrentSite)
-	{
-	case ESiteTag::Mansion:
-		// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-		break;
-
-	case ESiteTag::Museum:
-		//GameplayTagList = (Tag = "Site.Museum", DevComment = "박물관 — 목표 $120,000 / 8분. 레이저 센서, 감시 카메라")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Museum"));;
-		break;
-
-	case ESiteTag::Bank:
-		//GameplayTagList = (Tag = "Site.Bank", DevComment = "은행 — 목표 $250,000 / 9분. 압력판, 자동 셔터, 무장 경비")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Bank"));;
-		break;
-
-	default:
-		SiteGT = FGameplayTag();
-		break;
-	}
-	*/
-
-	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
-	Subsystem->TryDepartToSite(SiteGT);
-
-
-}
-
-
-
 void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 {
 
@@ -546,4 +413,152 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 
 }
+
+
+
+
+//-------------------------------------------------------------------------------
+
+
+void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag)
+{
+	// 서버의 GameState 가져오기
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	// 서버 GameState의 Entry 변경
+	GameState->SetEntryTag(NewTag);
+
+	FGameplayTag EntryTag;
+
+	// config/Phase.ini 참고할 것
+	switch (NewTag)
+	{
+	case EEntryTag::Front:
+		// GameplayTagList = (Tag = "Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
+		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Front"));
+		break;
+
+
+	case EEntryTag::Garage:
+		// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
+		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Garage"));
+		break;
+
+	case EEntryTag::Alley:
+		// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
+		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Alley"));
+		break;
+
+	default:
+		EntryTag = FGameplayTag();
+		break;
+	}
+
+
+	// Entry 정보도 Subsystem에 먼저 전달
+	Subsystem->TrySelectEntry(EntryTag);
+
+}
+
+void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
+{
+	// 서버의 GameState 가져오기
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+
+	 // 서버 GameState의 Site 변경
+	GameState->SetSiteTag(NewTag);
+}
+
+
+
+void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
+{
+	BP_ShowStartGameWindow();
+}
+
+
+void AShelterPlayerController::IngameTravel()
+{
+
+
+	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
+	if (!GameState)
+	{
+		return;
+	}
+
+
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+	if (!Subsystem)
+	{
+		return;
+	}
+
+
+	// 로딩창 띄우기
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get());
+
+		if (PC)
+		{
+			PC->ClientShowStartGameWindow();
+		}
+	}
+
+
+
+	ESiteTag CurrentSite = GameState->SiteTag;
+	FGameplayTag SiteGT;
+
+	// config/Phase.ini 참고할 것
+
+
+	// 맵이 클리어 형식이라면 지금처럼 액터를 나눌 이유가 없음
+	/*
+	switch (CurrentSite)
+	{
+	case ESiteTag::Mansion:
+		// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
+		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
+		break;
+
+	case ESiteTag::Museum:
+		//GameplayTagList = (Tag = "Site.Museum", DevComment = "박물관 — 목표 $120,000 / 8분. 레이저 센서, 감시 카메라")
+		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Museum"));;
+		break;
+
+	case ESiteTag::Bank:
+		//GameplayTagList = (Tag = "Site.Bank", DevComment = "은행 — 목표 $250,000 / 9분. 압력판, 자동 셔터, 무장 경비")
+		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Bank"));;
+		break;
+
+	default:
+		SiteGT = FGameplayTag();
+		break;
+	}
+	*/
+
+	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
+	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
+	Subsystem->TryDepartToSite(SiteGT);
+
+}
+
+
 

@@ -97,25 +97,6 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void serverConfirmedJob();
 
-	// -------------------------------------------------------
-
-
-public:
-	// 클라이언트에서 Entry 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetEntryTag(EEntryTag NewTag);
-
-	// 클라이언트에서 Site 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetSiteTag(ESiteTag NewTag);
-
-
-
-	UFUNCTION(BlueprintCallable)
-	void IngameTravel();//FGameplayTag NewSiteTag);
-
-
-	
 
 protected:
 
@@ -125,6 +106,37 @@ protected:
 
 	// Pawn을 실제로 생성하고 빙의
 	void SpawnJobPawn(FGameplayTag JobTag);
+
+
+	// -------------------------------------------------------
+
+public:
+	// --- tag 설정 ---
+	// 클라이언트에서 Entry 변경 요청
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSetEntryTag(EEntryTag NewTag);
+
+	// 클라이언트에서 Site 변경 요청
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSetSiteTag(ESiteTag NewTag);
+
+
+	// --- 로딩 UI ---
+	UFUNCTION(Client, Reliable)
+	void ClientShowStartGameWindow();
+
+	UFUNCTION(BlueprintImplementableEvent) //C++ 구현하면 오류
+	void BP_ShowStartGameWindow(); 
+
+
+	// --- 맵 이동 ---
+	UFUNCTION(BlueprintCallable)
+	void IngameTravel();//FGameplayTag NewSiteTag);
+
+
+	
+
+
 
 
 

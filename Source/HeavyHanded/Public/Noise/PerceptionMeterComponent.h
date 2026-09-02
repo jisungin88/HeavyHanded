@@ -51,6 +51,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Noise|Perception")
 	FVector GetLastNoiseLocation() const { return LastNoiseLocation; }
 
+	/** GuardType별 감소 속도 차별화용 (예: 경비견은 더 느리게 식음). 음수는 0으로 클램프한다 */
+	UFUNCTION(BlueprintCallable, Category = "Noise|Perception")
+	void SetDecayRate(float NewDecayPerSecond) { DecayPerSecond = FMath::Max(NewDecayPerSecond, 0.f); }
+
 	UPROPERTY(BlueprintAssignable, Category = "Noise|Perception")
 	FOnPerceptionFull OnPerceptionFull;
 

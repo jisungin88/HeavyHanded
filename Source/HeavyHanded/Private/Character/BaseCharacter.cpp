@@ -173,6 +173,11 @@ void ABaseCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	UpdateHeavyCarryTransform();
+
+	if (!IsLocallyControlled() && FollowCamera)
+	{
+		FollowCamera->SetWorldRotation(GetViewRotation());
+	}
 }
 
 // Called to bind functionality to input
@@ -814,6 +819,13 @@ bool ABaseCharacter::IsCarryingHeavyItem() const
 	}
 
 	return false;
+}
+
+bool ABaseCharacter::IsCarryingLightLoot() const
+{
+	// "Heavy 가 아닌 캐리" 판정 기준을 IsCarryingHeavyItem() 하나로 묶어 둔다 —
+	// HeavyCarryState(enum) 을 따로 보면 판정 기준이 태그 쪽과 두 군데로 갈라진다.
+	return IsValid(HeldActor) && !IsCarryingHeavyItem();
 }
 
 void ABaseCharacter::UpdateHeavyCarryTransform()

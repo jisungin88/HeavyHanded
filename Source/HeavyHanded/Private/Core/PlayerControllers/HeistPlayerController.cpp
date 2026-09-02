@@ -3,21 +3,86 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
-#include "TimerManager.h"
 
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistLog.h"
+#include "Core/HeistSettings.h"
+#include "Core/Spectate/HeistSpectatorComponent.h"
 
-namespace
+#include "EnhancedInputComponent.h"
+#include "InputAction.h"
+
+AHeistPlayerController::AHeistPlayerController()
 {
-	/**
-	 * 관전 상태를 다시 보는 주기(초).
-	 *
-	 * 밸런싱 값이 아니라 구현 상수라 UHeistSettings 에 두지 않는다 —
-	 * AHeistGameMode 의 StartWaitPollSeconds 와 같은 성격이다.
-	 */
-	constexpr float SpectatePollSeconds = 0.5f;
+	SpectatorComponent = CreateDefaultSubobject<UHeistSpectatorComponent>(TEXT("SpectatorComponent"));
+}
+
+void AHeistPlayerController::Server_SetSpectateTarget_Implementation(APlayerState* Target)
+{
+	UE_LOG(LogHeist, Log, TEXT("[관전RPC] Target=%s / 나는관전자=%d / IsCounted=%d / 대상폰=%s"),
+			  *GetNameSafe(Target),
+			  PlayerState ? (int32)PlayerState->IsOnlyASpectator() : -1,
+			  (int32)AHeistGameState::IsCountedPlayer(Target),
+			  Target ? *GetNameSafe(Target->GetPawn()) : TEXT("-"));
+
+	if (!PlayerState || !PlayerState->IsOnlyASpectator())
+	{
+		return;
+	}
+
+	if (!AHeistGameState::IsCountedPlayer(Target))
+	{
+		return;
+	}
+
+	if (APawn* TargetPawn = Target->GetPawn())
+	{
+		SetViewTarget(TargetPawn);
+	}
+}
+
+bool AHeistPlayerController::Server_SetSpectateTarget_Validate(APlayerState* Target)
+{
+	return true;
+}
+
+void AHeistPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+
+	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent);
+	if (!EIC)
+	{
+		return;
+	}
+
+	const UHeistSettings* Settings = UHeistSettings::Get();
+
+	if (UInputAction* NextAction = Settings->SpectateNextAction.LoadSynchronous())
+	{
+		EIC->BindAction(NextAction, ETriggerEvent::Started, this, &AHeistPlayerController::OnSpectateNext);
+	}
+	if (UInputAction* PrevAction = Settings->SpectatePrevAction.LoadSynchronous())
+	{
+		EIC->BindAction(PrevAction, ETriggerEvent::Started, this, &AHeistPlayerController::OnSpectatePrev);
+	}
+}
+
+void AHeistPlayerController::OnSpectateNext()
+{
+	if (SpectatorComponent)
+	{
+		SpectatorComponent->ViewNext();
+	}
+}
+
+void AHeistPlayerController::OnSpectatePrev()
+{
+	if (SpectatorComponent)
+	{
+		SpectatorComponent->ViewPrevious();
+	}
 }
 
 void AHeistPlayerController::BeginPlay()
@@ -32,14 +97,6 @@ void AHeistPlayerController::BeginPlay()
 
 		GameStateSetHandle =
 			World->GameStateSetEvent.AddUObject(this, &AHeistPlayerController::BindToGameState);
-
-		// 관전 판정은 내 PlayerState 가 와야 알 수 있고, 그건 지금 없을 수 있다.
-		// 로컬 컨트롤러만 돈다 — 시점은 자기 화면의 문제다
-		if (IsLocalController())
-		{
-			World->GetTimerManager().SetTimer(SpectateTimer, this,
-				&AHeistPlayerController::TickSpectate, SpectatePollSeconds, true);
-		}
 	}
 
 	// 접속 대기 중에도 화면은 떠 있어야 한다 — 지금 무엇을 기다리는지 보여줄 곳이 HUD 뿐이다.
@@ -58,8 +115,6 @@ void AHeistPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			World->GameStateSetEvent.Remove(GameStateSetHandle);
 			GameStateSetHandle.Reset();
 		}
-
-		World->GetTimerManager().ClearTimer(SpectateTimer);
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -186,126 +241,24 @@ void AHeistPlayerController::Server_SetResultConfirmed_Implementation(bool bConf
 	HeistState->SetResultConfirmed(PlayerState, bConfirmed);
 }
 
-// ──────────────────────────────────────────────────────────────
-// 관전
-// ──────────────────────────────────────────────────────────────
-
-bool AHeistPlayerController::IsSpectating() const
+void AHeistPlayerController::DumpSpectateCamera() const
 {
-	return PlayerState && PlayerState->IsOnlyASpectator();
-}
-
-void AHeistPlayerController::TickSpectate()
-{
-	// 아직 안 왔다. 다음 주기에 다시 본다
-	if (!PlayerState)
+	if (!PlayerCameraManager)
 	{
+		UE_LOG(LogHeist, Warning, TEXT("[관전카메라] PlayerCameraManager 가 없습니다."));
 		return;
 	}
 
-	if (!IsSpectating())
-	{
-		// 관전자가 아니다. 체포는 레벨 진입 시점에 정해지고 판 중에 바뀌지 않으므로
-		// 다시 볼 이유가 없다 — 여기서 타이머를 끈다
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(SpectateTimer);
-		}
-		return;
-	}
+	const APawn* VTPawn = PlayerCameraManager->GetViewTargetPawn();
 
-	EnsureSpectateTarget();
-}
+	UE_LOG(LogHeist, Log, TEXT("[관전카메라] ViewTarget=%s / Pawn=%s / Role=%d / 폰의Controller=%s"),
+			*GetNameSafe(PlayerCameraManager->GetViewTarget()),
+			*GetNameSafe(VTPawn),
+			VTPawn ? (int32)VTPawn->GetLocalRole() : -1,
+			VTPawn ? *GetNameSafe(VTPawn->GetController()) : TEXT("-"));
 
-void AHeistPlayerController::EnsureSpectateTarget()
-{
-	AActor* Current = GetViewTarget();
-
-	// 자기 자신을 보고 있으면 대상이 없는 것이다 — 관전 폰이 없으니 화면에 아무것도 안 나온다.
-	// 대상이 파괴된 경우도 엔진이 여기로 되돌려 놓는다 (APlayerCameraManager::AssignViewTarget)
-	const bool bNeedsTarget = !IsValid(Current) || Current == this;
-	if (!bNeedsTarget)
-	{
-		return;
-	}
-
-	if (AActor* Target = PickSpectateTarget(0))
-	{
-		SetViewTarget(Target);
-		UE_LOG(LogHeist, Verbose, TEXT("[관전] 시점을 %s 로 옮겼습니다."), *GetNameSafe(Target));
-	}
-
-	// 아무도 없으면 그대로 둔다. 팀원 폰이 아직 복제되지 않았을 뿐일 수 있어서
-	// 다음 주기에 다시 시도한다 — 여기서 로그를 남기면 초당 두 줄씩 쌓인다
-}
-
-void AHeistPlayerController::ViewNextTeammate()
-{
-	if (!IsSpectating())
-	{
-		return;
-	}
-
-	if (AActor* Target = PickSpectateTarget(1))
-	{
-		SetViewTarget(Target);
-	}
-}
-
-void AHeistPlayerController::ViewPreviousTeammate()
-{
-	if (!IsSpectating())
-	{
-		return;
-	}
-
-	if (AActor* Target = PickSpectateTarget(-1))
-	{
-		SetViewTarget(Target);
-	}
-}
-
-AActor* AHeistPlayerController::PickSpectateTarget(int32 Step) const
-{
-	const AGameStateBase* GS = GetWorld() ? GetWorld()->GetGameState() : nullptr;
-	if (!GS)
-	{
-		return nullptr;
-	}
-
-	// 볼 수 있는 사람 = 이 판에 실제로 뛰고 있는 사람. IsCountedPlayer 를 쓰면 다른 관전자와
-	// 접속이 끊긴 껍데기가 한 번에 걸러진다 — 여기서 조건을 다시 적으면 승차 · 체포 판정과
-	// 모집단이 갈라지고, 그때 "명단에 없는 사람을 보고 있다" 가 된다
-	TArray<APawn*> Candidates;
-
-	for (const APlayerState* Candidate : GS->PlayerArray)
-	{
-		if (Candidate == PlayerState || !AHeistGameState::IsCountedPlayer(Candidate))
-		{
-			continue;
-		}
-
-		if (APawn* CandidatePawn = Candidate->GetPawn())
-		{
-			Candidates.Add(CandidatePawn);
-		}
-	}
-
-	if (Candidates.IsEmpty())
-	{
-		return nullptr;
-	}
-
-	// 현재 대상이 목록에 있으면 거기서 이동하고, 없으면(파괴됐거나 첫 진입) 처음부터 본다.
-	// Step 0 은 "지금 것을 유지" 라서 현재 대상이 유효하면 그대로 돌아간다
-	const int32 CurrentIndex = Candidates.IndexOfByKey(Cast<APawn>(GetViewTarget()));
-	if (CurrentIndex == INDEX_NONE)
-	{
-		return Candidates[0];
-	}
-
-	// 음수 나머지를 피하려고 크기를 한 번 더한다 — Step 이 -1 일 때 인덱스가 -1 이 되면
-	// 배열 접근에서 그대로 터진다
-	const int32 NextIndex = (CurrentIndex + Step + Candidates.Num()) % Candidates.Num();
-	return Candidates[NextIndex];
+	UE_LOG(LogHeist, Log, TEXT("[관전카메라] Target=%s / Blended=%s / 폰의GetViewRotation=%s"),
+			*TargetViewRotation.ToCompactString(),
+			*BlendedTargetViewRotation.ToCompactString(),
+			VTPawn ? *VTPawn->GetViewRotation().ToCompactString() : TEXT("-"));
 }

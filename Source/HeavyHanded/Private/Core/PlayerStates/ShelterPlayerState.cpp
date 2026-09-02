@@ -2,6 +2,7 @@
 
 
 #include "Core/PlayerStates/ShelterPlayerState.h"
+#include "Core/GameStates/ShelterGameState.h"
 #include "Net/UnrealNetwork.h"
 
 
@@ -42,6 +43,13 @@ void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 	// 서버에서는 RepNotify가 자동 호출되지 않기 때문에
 	// 서버에서도 UI 갱신이 필요하다면 직접 호출
 	OnSelectedJobChanged.Broadcast(this);
+
+
+	AShelterGameState* GS = GetWorld()->GetGameState<AShelterGameState>();
+	if (GS)
+	{
+		GS->UpdateCanStart();
+	}
 
 }
 

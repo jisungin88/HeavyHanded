@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -1157,3 +1158,105 @@ static FAutoConsoleCommandWithWorld GResultShowCommand(
 	  TEXT("결과 데이터를 전부 찍는다 — 적재 목록 · 기여도 · 탈출/체포 · 소요 시간 · 최다 소음 유발자"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&ResultShowCommand),
 	  ECVF_Cheat);
+
+
+
+static APawn* FindPawnForPlayerState(UWorld* World, const APlayerState* Target)
+{
+	if (APawn* Pawn = Target->GetPawn())
+	{
+		return Pawn;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			if (PC->PlayerState == Target)
+			{
+				return PC->GetPawn();
+			}
+		}
+	}
+	return nullptr;
+}
+
+static void SpectateForceCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("hh.Spectate.Force 는 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	AGameStateBase* GS = World ? World->GetGameState() : nullptr;
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("GameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Index = Args.IsValidIndex(0) ? FCString::Atoi(*Args[0]) : 0;
+	if (!GS->PlayerArray.IsValidIndex(Index))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("플레이어 인덱스 %d 가 없습니다 (접속 %d명)."),
+					  Index, GS->PlayerArray.Num());
+		return;
+	}
+
+	APlayerState* Target = GS->PlayerArray[Index];
+	if (!IsValid(Target))
+	{
+		return;
+	}
+
+	if (Target->IsOnlyASpectator())
+	{
+		UE_LOG(LogHeist, Log, TEXT("%s 는 이미 관전자입니다."), *Target->GetPlayerName());
+		return;
+	}
+
+	// 정상 경로(InitNewPlayer)와 같은 신호
+	Target->SetIsOnlyASpectator(true);
+
+	// 폰 삭제
+	APawn* Pawn = FindPawnForPlayerState(World, Target);
+	UE_LOG(LogHeist, Log, TEXT("[Force] %s / PawnPrivate=%s / 찾은 폰=%s / 컨트롤러=%s"),
+			  *Target->GetPlayerName(),
+			  *GetNameSafe(Target->GetPawn()),
+			  *GetNameSafe(Pawn),
+			  Pawn ? *GetNameSafe(Pawn->GetController()) : TEXT("(없음)"));
+
+	if (Pawn)
+	{
+		AController* PawnController = Pawn->GetController();
+		if (PawnController)
+		{
+			PawnController->UnPossess();
+		}
+
+		const bool bDestroyed = Pawn->Destroy();
+		UE_LOG(LogHeist, Log, TEXT("[Force] Destroy %s"),
+					  bDestroyed ? TEXT("성공") : TEXT("실패"));
+
+		if (APlayerController* TargetPC = Cast<APlayerController>(PawnController))
+		{
+			TargetPC->ChangeState(NAME_Spectating);
+			TargetPC->ClientGotoState(NAME_Spectating);
+		}
+	}
+	else
+	{
+		UE_LOG(LogHeist, Warning, TEXT("[Force] %s 의 폰을 찾지 못했습니다."), *Target->GetPlayerName());
+	}
+
+	UE_LOG(LogHeist, Log,
+			  TEXT("%s 를 관전자로 만들었습니다. 되돌릴 수 없습니다 — 판을 다시 시작할 것."),
+			  *Target->GetPlayerName());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GSpectateForceCommand(
+		TEXT("hh.Spectate.Force"),
+		TEXT("hh.Spectate.Force [인덱스] — 해당 플레이어를 지금 이 판에서 관전자로 만든다"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SpectateForceCommand),
+		ECVF_Cheat);
