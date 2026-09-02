@@ -560,14 +560,30 @@ protected:
 	/**
 	 * 충돌 게이팅이 실제로 도는지 화면에 표시한다. (테스트용, 기본 꺼짐)
 	 *
-	 * 확정된 충격뿐 아니라 '기각된' 충격도 사유와 함께 찍는다.
-	 * 낙하 1회에 OnHit 이 몇 번 오고 그중 몇 개가 통과하는지를 눈으로 봐야
-	 * 임계값(200/3000)과 디바운스(0.3초)가 적당한지 판단할 수 있다.
+	 * 이것만 켜면 '확정' 된 충격만 보인다. 기각 사유까지 보려면
+	 * bShowRejectedImpacts 를 같이 켠다.
 	 *
 	 * 판정은 서버에서만 돌기 때문에 표시도 서버(호스트 창)에만 나온다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug")
 	bool bShowImpactDebug = false;
+
+	/**
+	 * 기각된 충격도 사유와 함께 표시한다. (bShowImpactDebug 가 켜져 있을 때만 의미가 있다)
+	 *
+	 * 낙하 1회에 OnHit 이 몇 번 오고 그중 몇 개가 통과하는지는 이걸 켜야 보인다.
+	 * 임계값과 디바운스가 적당한지 판단하려면 그 비율이 있어야 하므로, 값을 만질 때는 켠다.
+	 *
+	 * 그런데도 기본을 끈 것은 양 때문이다. 중량형은 질량이 커서 플레이어가 몸을 스치기만 해도
+	 * 임펄스 2000 대가 매 프레임 올라오는데, 임계값(궤짝은 4000)에 미치지 못해 전부
+	 * '기각(약함)' 으로 찍힌다. 정작 봐야 할 '확정' 한 줄이 그 사이에 묻힌다.
+	 *
+	 * DebugMinLogImpulse 를 올려서 거를 수도 있지만, 임계값이 BP 마다 다르니 두 값을 늘
+	 * 같이 맞춰야 한다. 스위치를 따로 두는 편이 관리할 것이 적다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Debug",
+		meta = (EditCondition = "bShowImpactDebug"))
+	bool bShowRejectedImpacts = false;
 
 	/**
 	 * [임시] G = 잡기/놓기, T = 던지기 키를 이 액터에 연결한다.
@@ -703,6 +719,15 @@ private:
 	 *                       음수를 넘기면 임펄스와 무관한 메시지로 보고 항상 출력한다.
 	 */
 	void ShowImpactDebug(const FString& Message, const FColor& Color, const FVector& Location,
+		float FilterImpulse = -1.f) const;
+
+	/**
+	 * 기각 사유 전용 표시. bShowRejectedImpacts 가 꺼져 있으면 아무것도 하지 않는다.
+	 *
+	 * 기각은 확정보다 훨씬 자주 나오므로 스위치를 따로 뒀다.
+	 * 그것 말고는 ShowImpactDebug 와 같다 — 앞에 스위치 하나를 더 둔 것뿐이다.
+	 */
+	void ShowRejectDebug(const FString& Message, const FColor& Color, const FVector& Location,
 		float FilterImpulse = -1.f) const;
 
 	/** [임시] G/T 키를 이 액터에 연결한다. BeginPlay 에서 부른다 */
