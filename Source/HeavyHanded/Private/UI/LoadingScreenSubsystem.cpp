@@ -3,6 +3,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Engine/DataTable.h"
 #include "Engine/GameInstance.h"
+#include "Engine/GameViewportClient.h"   // GetViewportSize — 지금 창 크기를 알아야 배율이 나온다
+#include "Engine/UserInterfaceSettings.h"  // GetDPIScaleBasedOnSize — 뷰포트가 쓰는 것과 같은 곡선
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
 #include "MoviePlayer.h"
@@ -10,6 +12,7 @@
 #include "UI/HeavyUILog.h"
 #include "UI/LoadingScreenWidget.h"
 #include "UI/UISettings.h"
+#include "Widgets/Layout/SDPIScaler.h"
 
 void ULoadingScreenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -114,7 +117,29 @@ void ULoadingScreenSubsystem::HandlePreLoadMap(const FString& MapName)
 	Attributes.bWaitForManualStop = false;
 	Attributes.bMoviesAreSkippable = false;
 	Attributes.MinimumLoadingScreenDisplayTime = Settings->LoadingMinDisplaySeconds;
-	Attributes.WidgetLoadingScreen = Widget->TakeWidget();
+	// [왜 감싸는가] 무비 플레이어는 게임 뷰포트 바깥에서 그린다. 해상도에 맞춰 UI 를
+	// 줄이고 늘리는 일은 뷰포트가 해 주던 것이라, 그냥 넘기면 배율이 항상 1 로 붙는다 —
+	// 작은 창에서 44pt 제목이 화면을 덮는다. 뷰포트가 쓰는 것과 같은 곡선을 여기서 직접 건다.
+	//
+	// [왜 값이 아니라 람다인가] 로딩 중에 창 크기가 바뀔 수 있고, 이 위젯은 그때
+	// 다시 만들어지지 않는다. 매번 읽어야 따라간다
+	Attributes.WidgetLoadingScreen =
+		SNew(SDPIScaler)
+		.DPIScale(TAttribute<float>::CreateLambda([]()
+			{
+				// 뷰포트가 아직 없으면(창이 뜨기 전) 1080p 기준으로 둔다
+				FVector2D ViewportSize(1920.f, 1080.f);
+				if (GEngine && GEngine->GameViewport)
+				{
+					GEngine->GameViewport->GetViewportSize(ViewportSize);
+				}
+
+				return GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(
+					FIntPoint(FMath::RoundToInt(ViewportSize.X), FMath::RoundToInt(ViewportSize.Y)));
+			}))
+		[
+			Widget->TakeWidget()
+		];
 
 	GetMoviePlayer()->SetupLoadingScreen(Attributes);
 
