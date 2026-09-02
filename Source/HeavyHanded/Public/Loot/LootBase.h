@@ -252,6 +252,15 @@ public:
 	 */
 	FName GetLootRowName() const { return LootDefinition.RowName; }
 
+	/**
+	 * 소음 발행 창구. 특성 컴포넌트(파손형·불안정형)가 자기 사건을 알릴 때 쓴다.
+	 *
+	 * 컴포넌트가 FindComponentByClass 로 매번 찾지 않도록 여기서 열어 준다.
+	 * 충돌 소음은 이 컴포넌트가 스스로 낸다 — 여기로 부르는 것은 '깨졌다' '쏟았다' 처럼
+	 * 물리 충돌이 아니어서 저쪽이 알 수 없는 사건뿐이다.
+	 */
+	UNoiseEmitterComponent* GetNoiseEmitter() const { return NoiseEmitter; }
+
 	// ── 카트 적재 ─────────────────────────────────────────────────────────
 
 	/** 지금 실려 있는 카트. 없으면 nullptr */

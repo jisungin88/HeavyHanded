@@ -13,6 +13,7 @@
 #include "Loot/LootSettings.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "Noise/NoiseEmitterComponent.h" // 파괴 소음 — 충돌이 아니라 내 판정으로 나간다
 #include "TimerManager.h"
 
 ULootDurabilityComponent::ULootDurabilityComponent()
@@ -193,6 +194,17 @@ void ULootDurabilityComponent::Break(const FLootImpactEvent& CausingEvent)
 	// 액터를 지우기 전에 먼저 방송해야 한다. 구독자가 LootActor 를 유효한 상태로 받는다.
 	OwnerLoot->ReportImpact(ELootImpactCause::Break, CausingEvent.ImpulseMagnitude,
 		CausingEvent.ImpactPoint, CausingEvent.InstigatorPawn.Get());
+
+	// 소음도 같은 이유로 지금 낸다. ReportTaggedNoise 는 소유 액터의 위치를 읽으므로
+	// BreakDestroyDelay 뒤 소멸 예약이 걸리기 전, 액터가 살아 있는 이 시점이어야 한다.
+	//
+	// 배율을 1.0 으로 고정하는 것은 파괴가 '얼마나 세게 맞았나' 와 무관한 사건이라서다.
+	// 살짝 금이 가서 깨지든 세게 맞아 깨지든, 부서지는 소리는 똑같이 크다.
+	// 몇 % 의 경계도가 되는지는 DT_NoiseProfiles 의 Noise.Loot.Break 행이 정한다.
+	if (UNoiseEmitterComponent* Noise = OwnerLoot->GetNoiseEmitter())
+	{
+		Noise->ReportTaggedNoise(HHTags::Noise_Loot_Break, 1.f);
+	}
 
 	if (OwnerLoot->IsImpactDebugEnabled() && GEngine)
 	{

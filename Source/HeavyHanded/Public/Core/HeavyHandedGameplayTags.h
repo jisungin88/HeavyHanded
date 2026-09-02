@@ -18,6 +18,16 @@ namespace HHTags
 	/** 파손형 노획물이 깨질 때 나가는 태그 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Break);
 
+	/** 불안정형이 기울어져 내용물을 쏟을 때. 충돌이 아니라 내 판정으로 나가는 소리다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Spill);
+
+	/** 중량형을 놓은 뒤 바닥에 닿는 첫 확정 충격. 기획서 5장 — 특대, 전 구역 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_HeavyDrop);
+
+	// Noise.Loot.Drop / Throw 는 선언하지 않는다.
+	//   놓든 던지든 결국 바닥에 부딪히고, 그 충돌이 이미 Noise.Loot.Impact 로
+	//   임펄스에 비례한 소리를 낸다. 태그를 하나 더 얹으면 같은 사건이 두 번 들린다.
+
 	// ── 코어 루프 페이즈 (지성인 / Config/Tags/Phase.ini) ──
 	//
 	// AHeistGameState 가 하나를 들고 전원에게 복제한다. 판정은 전부 서버(AHeistGameMode)다.

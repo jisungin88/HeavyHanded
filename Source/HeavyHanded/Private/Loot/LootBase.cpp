@@ -1462,10 +1462,35 @@ void ALootBase::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherAc
 	// 여기까지 온 것이 '확정 충격 1개'다.
 	// 아이템은 물리적 사실만 알린다 — 얼마나 시끄러운지는 판단하지 않는다.
 	//
-	// 델리게이트는 파손 컴포넌트가 듣고, BP 훅은 연출을 붙인다. 소음은 여기 없다 —
-	// UNoiseEmitterComponent 가 자기 경로로 따로 발행한다.
+	// 델리게이트는 파손 컴포넌트가 듣고, BP 훅은 연출을 붙인다. 일반 충돌 소음은
+	// 여기 없다 — UNoiseEmitterComponent 가 자기 경로로 따로 발행한다.
+	// (바로 아래 중량형 낙하만 예외다. 이유는 그쪽 주석에 적었다)
 	OnLootImpact.Broadcast(Event);
 	OnImpact(Event);
+
+	// [예외] 중량형 낙하만 소음을 여기서 직접 낸다.
+	//
+	// 위 주석대로 충돌 소음은 UNoiseEmitterComponent 가 자기 경로로 발행한다. 그런데
+	// 기획서 5장은 중량형 낙하를 '특대 · 전 구역' 으로 따로 정해 놓았고, 임펄스에 비례하는
+	// 보통 소리(Noise.Loot.Impact)로는 그 크기가 안 나온다. 저쪽은 '무거운 물건이
+	// 방금 손에서 떨어졌다' 는 맥락을 모르기 때문에 대신 판단해 줄 수도 없다.
+	//
+	// Cause 가 HeavyDrop 인 것은 놓기 때 예약된 원인이 이 확정 충격에서 소비됐다는 뜻이다.
+	// 즉 '중량형을 놓은 뒤 바닥에 닿는 첫 충격' 이고, 그 순간이 정확히 여기다.
+	// 살짝 내려놓아 임펄스가 ImpactReportThreshold 미만이면 여기까지 오지 못하고,
+	// 예약은 남아 있다가 다음 진짜 충격에서 소비된다.
+	if (Event.Cause == ELootImpactCause::HeavyDrop)
+	{
+		if (UNoiseEmitterComponent* Noise = GetNoiseEmitter())
+		{
+			// 크기는 임펄스에서 뽑는다 — 얼마나 세게 떨어졌는지는 물리적 사실이라
+			// 내가 알려 주는 것이 맞다. 그게 몇 % 의 경계도가 되는지는 여기서 정하지 않는다.
+			const float Loudness = FMath::Clamp(
+				ImpulseMagnitude / FMath::Max(PhysicsData.HeavyDropLoudImpulse, 1.f), 0.f, 1.f);
+
+			Noise->ReportTaggedNoise(HHTags::Noise_Loot_HeavyDrop, Loudness);
+		}
+	}
 
 	// 낙하 1회에 OnHit 5~15회가 확정 1회로 묶이는지를 이 비율로 확인한다.
 	++DebugConfirmedCount;
