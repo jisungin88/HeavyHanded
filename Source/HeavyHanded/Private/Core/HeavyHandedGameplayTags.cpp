@@ -5,8 +5,10 @@
 // 선언과 소유 구분은 Public/Core/HeavyHandedGameplayTags.h 에 있다.
 namespace HHTags
 {
-	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Impact, "Noise.Loot.Impact");
-	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,  "Noise.Loot.Break");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Impact,    "Noise.Loot.Impact");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,     "Noise.Loot.Break");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Spill,     "Noise.Loot.Spill");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_HeavyDrop, "Noise.Loot.HeavyDrop");
 
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Prep,   "Phase.Prep");
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Heist,  "Phase.Heist");
