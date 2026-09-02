@@ -6,6 +6,7 @@
 #include "UObject/SoftObjectPtr.h"      // TSoftObjectPtr 를 값으로 보유
 #include "UObject/SoftObjectPath.h"     // FSoftObjectPath 를 값으로 반환
 #include "Core/HeistOutcome.h"          // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
+#include "Core/Spectate/HeistSpectateTypes.h"
 #include "HeistSettings.generated.h"
 
 class UWorld;
@@ -164,4 +165,10 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Payout")
 	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Partial;
+
+	// -- 관전
+
+	/** 관전자에게 보여줄 정보의 범위 */
+	UPROPERTY(config, EditAnywhere, Category = "Spectate")
+	EHeistSpectateInfoLevel SpectateInfoLevel = EHeistSpectateInfoLevel::FollowTarget;
 };

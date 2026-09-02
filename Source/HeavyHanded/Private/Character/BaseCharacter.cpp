@@ -173,6 +173,11 @@ void ABaseCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	UpdateHeavyCarryTransform();
+
+	if (!IsLocallyControlled() && FollowCamera)
+	{
+		FollowCamera->SetWorldRotation(GetViewRotation());
+	}
 }
 
 // Called to bind functionality to input

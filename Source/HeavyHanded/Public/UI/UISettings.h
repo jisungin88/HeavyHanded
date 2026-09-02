@@ -7,7 +7,10 @@
 #include "GameplayTagContainer.h"  // FGameplayTag — 아래 TMap 의 키라 전방 선언이 불가능하다
 #include "UISettings.generated.h"
 
-class UTexture2D;   // TSoftObjectPtr 의 인자로만 쓴다
+class UDataTable;            // TSoftObjectPtr 의 인자로만 쓴다
+class ULoadingScreenWidget;  // TSoftClassPtr 의 인자로만 쓴다
+class UStartWaitWidget;      // TSoftClassPtr 의 인자로만 쓴다
+class UTexture2D;            // TSoftObjectPtr 의 인자로만 쓴다
 
 // 색 토큰 (UISystem.md 2장). 시안 5장에서 픽셀 실측한 값이다.
 // 이름은 토큰 표를 그대로 따른다 — 쓰는 자리(예: ButtonColor)로 이름을 붙이면
@@ -24,16 +27,25 @@ enum class EUIColorToken : uint8
 	TextPrimary    UMETA(DisplayName = "본문"),
 	TextSecondary  UMETA(DisplayName = "보조 텍스트"),
 	Health         UMETA(DisplayName = "체력"),
-	Money          UMETA(DisplayName = "금액")
+	Money          UMETA(DisplayName = "금액"),
+
+	// [맨 뒤에 붙인 이유] enum 값은 BP 노드와 ini 에 숫자로 굳어 있다.
+	// 중간에 끼워 넣으면 이미 저장된 위젯의 색이 말없이 한 칸씩 밀린다 (EUIFontToken::Title 과 같다)
+	PartySlotFilled UMETA(DisplayName = "합류한 팀원"),
+	PartySlotEmpty  UMETA(DisplayName = "빈 팀원 칸")
 };
 
-// 폰트 3단계 (UISystem.md 2장)
+// 폰트 4단계 (UISystem.md 2장 + 로딩 화면)
+//
+// [Title 을 맨 뒤에 붙인 이유] enum 값은 BP 노드와 ini 에 숫자로 굳어 있다.
+// 중간에 끼워 넣으면 이미 저장된 위젯의 폰트가 말없이 한 칸씩 밀린다
 UENUM(BlueprintType)
 enum class EUIFontToken : uint8
 {
 	Timer  UMETA(DisplayName = "타이머"),      // 28 Bold — 남은 시간, 목표 금액
 	Value  UMETA(DisplayName = "수치"),        // 18 — 체력 %, 가격, 노획물 가치
-	Label  UMETA(DisplayName = "라벨")         // 12 — 라벨, 부제
+	Label  UMETA(DisplayName = "라벨"),        // 12 — 라벨, 부제
+	Title  UMETA(DisplayName = "제목")         // 44 Bold — 로딩 · 결과 화면의 큰 제목
 };
 
 /**
@@ -97,6 +109,15 @@ public:
 	 */
 	TSoftObjectPtr<UTexture2D> GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const;
 
+	/**
+	 * 장소 표시 이름. 표에 없으면 LoadingUnknownSiteText 를 돌려준다.
+	 *
+	 * SiteDisplayNames 를 직접 읽지 말 것 — 행이 지워지면 제목이 빈 채로 나가서
+	 * "진입 중…" 만 덩그러니 남는다. 그 방어가 여기 있다
+	 */
+	UFUNCTION(BlueprintPure, Category = "UI|Loading")
+	FText GetSiteDisplayName(FGameplayTag SiteTag) const;
+
 	// ── 색 토큰 (UISystem.md 2장) ──
 	//
 	// 시안이 압축 스크린샷이라 실측값은 근사다. 골드만 4장에서 hue 41 로 일치해 확실하다.
@@ -142,6 +163,14 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Palette")
 	FLinearColor MoneyColor = FLinearColor::FromSRGBColor(FColor(0x6F, 0xD0, 0x8C));
 
+	/** 합류한 팀원 칸 — #A9D6A9. 접속 대기 오버레이의 채워진 바 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Palette")
+	FLinearColor PartySlotFilledColor = FLinearColor::FromSRGBColor(FColor(0xA9, 0xD6, 0xA9));
+
+	/** 아직 안 들어온 팀원 칸 — #3F443F. 채워진 색과 눈에 띄게 달라야 한다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Palette")
+	FLinearColor PartySlotEmptyColor = FLinearColor::FromSRGBColor(FColor(0x3F, 0x44, 0x3F));
+
 	// ── 타이포그래피 ──
 	//
 	// 크기를 위젯마다 찍으면 화면별로 제각각이 되므로 세 단계 밖으로 나가지 않는다.
@@ -161,6 +190,10 @@ public:
 	/** 라벨 · 부제 */
 	UPROPERTY(config, EditAnywhere, Category = "Typography")
 	FSlateFontInfo LabelFont;
+
+	/** 화면 하나에 하나뿐인 큰 제목 — 로딩 화면의 "박물관 진입 중…" */
+	UPROPERTY(config, EditAnywhere, Category = "Typography")
+	FSlateFontInfo TitleFont;
 
 	// ── 경계도 4단계 색상 (기획서 8장 "경계도 게이지(4단계 색상)") ──
 	//
@@ -247,4 +280,94 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot", meta = (ClampMin = "0.1", ClampMax = "10.0"))
 	float HeldSlotFontScale = 3.f;
+
+	// ── 로딩 화면 (기획서 8장 UI) ──
+	//
+	// 문구를 전부 설정으로 뺀 이유는 로딩 중에 위젯이 아무것도 조회할 수 없기 때문이다.
+	// 화면에 뜰 글자는 트래블이 시작되기 전에 이미 완성돼 있어야 한다.
+	//
+	// 기본값은 생성자에 있다. FText 는 여기서 초기화하면 지역화 대상에서 빠진다
+
+	/** 로딩 · 접속 대기에 쓸 위젯. 비어 있으면 로딩 화면이 뜨지 않는다 */
+	UPROPERTY(config, EditAnywhere, Category = "Loading")
+	TSoftClassPtr<ULoadingScreenWidget> LoadingScreenWidgetClass;
+
+	/** 팁 표. 비워 두면 팁 없이 제목만 나온다 */
+	UPROPERTY(config, EditAnywhere, Category = "Loading",
+			  meta = (AllowedClasses = "/Script/Engine.DataTable",
+					  RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LoadingTipRow"))
+	TSoftObjectPtr<UDataTable> LoadingTipsTable;
+
+	/**
+	 * 장소 태그 → 화면에 뜰 이름 (Site.Museum → "박물관").
+	 *
+	 * 조회는 GetSiteDisplayName() 으로 한다.
+	 * 목표 금액 · 제한시간은 여기 두지 않는다 — 그건 코어 루프의 값이고 여기는 표시 이름뿐이다
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading", meta = (Categories = "Site"))
+	TMap<FGameplayTag, FText> SiteDisplayNames;
+
+	/** 제목 위 작은 글씨 — "다음 작업" */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")
+	FText LoadingEyebrowText;
+
+	/** 제목 서식. {0} 에 장소 이름이 들어간다 — "{0} 진입 중…" */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")
+	FText LoadingTitleFormat;
+
+	/** 목적지를 모를 때 쓸 장소 이름. 제목이 통째로 비는 것보다 낫다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")
+	FText LoadingUnknownSiteText;
+
+	/** 팁 머리말 — "TIP" */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")
+	FText LoadingTipLabelText;
+
+	/** 하단 상태 문구 (1부) — "레벨 로딩 중…" */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")
+	FText LoadingStatusText;
+
+	/**
+	 * 접속 대기 오버레이의 문구. {0} 접속 인원 · {1} 예정 인원 — "2 / 4 함께하는 중".
+	 *
+	 * 예정 인원이 0 이면 "모른다"는 뜻이라 이 서식을 쓰지 않는다 —
+	 * "3/0" 이 화면에 뜨면 안 된다 (FHeistStartWaitState 주석 참조)
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "StartWait")
+	FText WaitingStatusFormat;
+
+	/** 예정 인원을 모를 때 쓰는 대기 문구 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "StartWait")
+	FText WaitingStatusUnknownText;
+
+	/**
+	 * 로딩 화면 최소 표시 시간.
+	 *
+	 * 맵이 빨리 열리면 화면이 한 번 번쩍이고 끝나 무슨 글자였는지 읽을 수가 없다.
+	 * 팁을 읽히려고 두는 값이라 0 으로 두면 팁의 의미가 없어진다
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading", meta = (ClampMin = "0.0", Units = "s"))
+	float LoadingMinDisplaySeconds = 1.5f;
+
+	// ── 접속 대기 오버레이 (로딩 2부) ──
+	//
+	// 문구는 위 WaitingStatusFormat · WaitingStatusUnknownText 를 그대로 쓴다.
+	// 색은 팔레트의 PartySlotFilled · PartySlotEmpty 토큰이다
+
+	/** 접속 대기에 쓸 위젯. 비어 있으면 오버레이가 뜨지 않는다 */
+	UPROPERTY(config, EditAnywhere, Category = "StartWait")
+	TSoftClassPtr<UStartWaitWidget> StartWaitWidgetClass;
+
+	/**
+	 * 배경 블러 강도.
+	 *
+	 * 배경을 완전히 가리지 않는 것이 이 화면의 요점이다 — 어디에 서 있는지는 보여야 한다.
+	 * 엔진 기본값(8)은 이 용도에는 세다
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "StartWait", meta = (ClampMin = "0.0", ClampMax = "20.0"))
+	float PartyWaitBlurStrength = 4.f;
+
+	/** 배경을 덮는 어두운 판의 불투명도. 색은 배경 토큰을 그대로 쓴다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "StartWait", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PartyWaitDimOpacity = 0.35f;
 };
