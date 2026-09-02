@@ -329,6 +329,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool IsCarryingHeavyItem() const;
 
+	// Heavy 캐리 포즈(BS_Haevy_Brute)로 안 가는 나머지 전부 — 즉 무언가를 들고 있지만
+	// 무겁지는 않은 상태. AnimBP 의 일반(한손) 캐리 Idle/Walk/Run 분기용 폴링 지점이다.
+	UFUNCTION(BlueprintPure, Category = "Carry")
+	bool IsCarryingLightLoot() const;
+
 	// State.Downed 태그 보유 여부를 ASC에서 조회한다. 새 태그를 만들지 않고
 	// 이미 있는 State.Downed 를 조회만 하는 헬퍼 — AnimBP 폴링 지점으로도 쓴다.
 	UFUNCTION(BlueprintPure, Category = "State")
