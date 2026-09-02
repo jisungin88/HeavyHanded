@@ -8,6 +8,12 @@
 class APlayerController;
 class APlayerState;
 
+/** 관전 시점 전환 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSpectateViewedChanged, APlayerState*, NewViewed);
+
+/** 관전 상태 전환 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSpectateStateChanged, bool, bSpectating);
+
 UCLASS( ClassGroup=(Heist), meta=(BlueprintSpawnableComponent) )
 class HEAVYHANDED_API UHeistSpectatorComponent : public UActorComponent
 {
@@ -35,6 +41,14 @@ public:
 	/** 관전 시점을 이전으로 */
 	UFUNCTION(BlueprintCallable, Category = "Heist|Spectate")
 	void ViewPrevious();
+
+	/** 관전 시점 전환 */
+	UPROPERTY(BlueprintAssignable, Category = "Heist|Spectate")
+	FOnSpectateViewedChanged OnViewedChanged;
+
+	/** 관전 상태 진입/이탈 */
+	UPROPERTY(BlueprintAssignable, Category = "Heist|Spectate")
+	FOnSpectateStateChanged OnSpectateStateChanged;
 
 	// -------------------------
 	// 치트
@@ -76,4 +90,7 @@ private:
 
 	/** 관전 상태에 맞춰 IMC_Spectate 추가/제거 */
 	void ApplySpectateInput(bool bEnable);
+
+	/** 직전 틱의 관전 여부 */
+	bool bWasSpectating = false;
 };

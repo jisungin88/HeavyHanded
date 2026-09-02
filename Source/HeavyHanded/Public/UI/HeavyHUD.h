@@ -10,6 +10,7 @@
 class AGameStateBase;
 class AHeistGameState;
 class UUserWidget;
+class UHeistSpectatorComponent;
 
 /**
  * 인게임 HUD 의 소유자 (기획서 8장).
@@ -119,6 +120,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|HUD")
 	int32 ResultZOrder = 10;
 
+	/** 관전 오버레이 위젯 클래스 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|HUD")
+	TSubclassOf<UUserWidget> SpectateOverlayClass;
+
+	/** 관전 오버레이 레이어 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|HUD")
+	int32 SpectateZOrder = 5;
+
 private:
 	/** HUD 위젯을 만들어 화면에 붙인다. 실패하면 이유를 로그로 남긴다 */
 	void CreateAndAddHUDWidget();
@@ -132,6 +141,18 @@ private:
 	 *   포기 시각이라는 상수 두 개가 아예 필요 없어진다.
 	 */
 	void BindToHeistGameState();
+
+	/** 관전 상태를 구독해서 인게임 HUD 가시성을 정함 */
+	void BindToSpectator();
+
+	UFUNCTION()
+	void HandleSpectateStateChanged(bool bSpectating);
+
+	/** 관전 + InfoLevel에 맞춰 HUD 가시성을 맞춘다 */
+	void ApplySpectateHUDVisibility(bool bSpectating);
+
+	UPROPERTY()
+	TObjectPtr<UHeistSpectatorComponent> BoundSpectator;
 
 	/** UWorld::GameStateSetEvent 콜백. 작업 레벨의 GameState 면 구독을 건다 */
 	void HandleGameStateSet(AGameStateBase* NewGameState);
@@ -153,11 +174,17 @@ private:
 	 */
 	void RemoveResultWidget();
 
+	/** 관전 오버레이 생성 후 부착 */
+	void CreateAndAddSpectateOverlay();
+
 	UPROPERTY()
 	TObjectPtr<UUserWidget> HUDWidget;
 
 	UPROPERTY()
 	TObjectPtr<UUserWidget> ResultWidget;
+
+	UPROPERTY()
+	TObjectPtr<UUserWidget> SpectateOverlayWidget;
 
 	UPROPERTY()
 	TObjectPtr<AHeistGameState> BoundState;

@@ -1,6 +1,7 @@
 #include "Core/Spectate/HeistSpectatorComponent.h"
 
 #include "Engine/World.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -85,7 +86,14 @@ void UHeistSpectatorComponent::TickSpectate()
 		return;
 	}
 
-	if (!IsSpectating())
+	const bool bNow = IsSpectating();
+	if (bNow != bWasSpectating)
+	{
+		bWasSpectating = bNow;
+		OnSpectateStateChanged.Broadcast(bNow);
+	}
+
+	if (!bNow)
 	{
 		ApplySpectateInput(false);
 		return;
@@ -250,13 +258,23 @@ void UHeistSpectatorComponent::ApplyViewTarget(APlayerState* Target)
 		return;
 	}
 
-	PC->SetViewTarget(TargetPawn);
+	const bool bChanged = (ViewedPlayer.Get() != Target);
+
+	FViewTargetTransitionParams Blend;
+	Blend.BlendTime = bChanged ? 0.3f : 0.f;
+	Blend.BlendFunction = VTBlend_Cubic;
+	PC->SetViewTarget(TargetPawn, Blend);
 	ViewedPlayer = Target;
 
 	// 서버
 	if (AHeistPlayerController* HeistPC = Cast<AHeistPlayerController>(PC))
 	{
 		HeistPC->Server_SetSpectateTarget(Target);
+	}
+
+	if (bChanged)
+	{
+		OnViewedChanged.Broadcast(Target);
 	}
 
 	UE_LOG(LogHeist, Verbose, TEXT("[관전] 시점 -> %s"), *Target->GetPlayerName());
