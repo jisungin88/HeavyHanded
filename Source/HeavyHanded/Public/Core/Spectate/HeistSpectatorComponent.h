@@ -70,4 +70,10 @@ private:
 	void ViewStep(int32 Step);
 
 	FTimerHandle SpectateTimer;
+
+	/** 관전 입력 매핑이 붙었는지 */
+	bool bSpectateInputApplied = false;
+
+	/** 관전 상태에 맞춰 IMC_Spectate 추가/제거 */
+	void ApplySpectateInput(bool bEnable);
 };

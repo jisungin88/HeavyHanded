@@ -13,6 +13,8 @@
 #include "Core/PlayerControllers/HeistPlayerController.h"
 
 #include "HAL/IConsoleManager.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
 
 namespace
 {
@@ -45,6 +47,8 @@ void UHeistSpectatorComponent::BeginPlay()
 
 void UHeistSpectatorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ApplySpectateInput(false);
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(SpectateTimer);
@@ -83,13 +87,11 @@ void UHeistSpectatorComponent::TickSpectate()
 
 	if (!IsSpectating())
 	{
-		// if (UWorld* World = GetWorld())
-		// {
-		// 	World->GetTimerManager().ClearTimer(SpectateTimer);
-		// }
+		ApplySpectateInput(false);
 		return;
 	}
 
+	ApplySpectateInput(true);
 	EnsureTarget();
 }
 
@@ -128,6 +130,44 @@ void UHeistSpectatorComponent::ViewStep(int32 Step)
 	}
 
 	ApplyViewTarget(PickTarget(Step));
+}
+
+void UHeistSpectatorComponent::ApplySpectateInput(bool bEnable)
+{
+	if (bEnable == bSpectateInputApplied)
+	{
+		return;
+	}
+
+	APlayerController* PC = GetOwningPC();
+	ULocalPlayer* LP = PC ? PC->GetLocalPlayer() : nullptr;
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		LP ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP) : nullptr;
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	UInputMappingContext* IMC = UHeistSettings::Get()->SpectateMappingContext.LoadSynchronous();
+	if (!IMC)
+	{
+		// 조용히 넘어가면 "관전인데 키가 안 먹는다" 로만 드러난다 — 한 번 알린다
+		UE_LOG(LogHeist, Warning,
+				TEXT("[관전] SpectateMappingContext 가 비어 있어 관전 입력을 붙이지 못했습니다. "
+					 "Project Settings > Game > Heist > Spectate 에서 지정하세요."));
+		return;
+	}
+
+	if (bEnable)
+	{
+		Subsystem->AddMappingContext(IMC, 100);
+	}
+	else
+	{
+		Subsystem->RemoveMappingContext(IMC);
+	}
+
+	bSpectateInputApplied = bEnable;
 }
 
 APlayerState* UHeistSpectatorComponent::GetViewedPlayer() const

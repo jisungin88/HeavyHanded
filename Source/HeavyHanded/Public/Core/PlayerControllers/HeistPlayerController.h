@@ -44,6 +44,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void SetupInputComponent() override;
 
 	/**
 	 * 페이즈가 바뀌었다. 화면과 입력을 여기 한 곳에서 맞춘다.
@@ -85,4 +86,7 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UHeistSpectatorComponent> SpectatorComponent;
+
+	void OnSpectateNext();
+	void OnSpectatePrev();
 };

@@ -7,7 +7,11 @@
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistLog.h"
+#include "Core/HeistSettings.h"
 #include "Core/Spectate/HeistSpectatorComponent.h"
+
+#include "EnhancedInputComponent.h"
+#include "InputAction.h"
 
 AHeistPlayerController::AHeistPlayerController()
 {
@@ -41,6 +45,44 @@ void AHeistPlayerController::Server_SetSpectateTarget_Implementation(APlayerStat
 bool AHeistPlayerController::Server_SetSpectateTarget_Validate(APlayerState* Target)
 {
 	return true;
+}
+
+void AHeistPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+
+	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent);
+	if (!EIC)
+	{
+		return;
+	}
+
+	const UHeistSettings* Settings = UHeistSettings::Get();
+
+	if (UInputAction* NextAction = Settings->SpectateNextAction.LoadSynchronous())
+	{
+		EIC->BindAction(NextAction, ETriggerEvent::Started, this, &AHeistPlayerController::OnSpectateNext);
+	}
+	if (UInputAction* PrevAction = Settings->SpectatePrevAction.LoadSynchronous())
+	{
+		EIC->BindAction(PrevAction, ETriggerEvent::Started, this, &AHeistPlayerController::OnSpectatePrev);
+	}
+}
+
+void AHeistPlayerController::OnSpectateNext()
+{
+	if (SpectatorComponent)
+	{
+		SpectatorComponent->ViewNext();
+	}
+}
+
+void AHeistPlayerController::OnSpectatePrev()
+{
+	if (SpectatorComponent)
+	{
+		SpectatorComponent->ViewPrevious();
+	}
 }
 
 void AHeistPlayerController::BeginPlay()
