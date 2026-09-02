@@ -76,5 +76,10 @@ struct FGuardStatsRow : public FTableRowBase
 	// 머리 위 게이지 위젯 갱신 주기. BTService_UpdateDetectionGauge 와 같은 값으로 맞출 것.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
 	float HeadGaugeUpdateInterval = 0.1f;
+
+	// 무자극 상태에서 인지 게이지가 초당 얼마나 식는지 (UPerceptionMeterComponent::DecayPerSecond 를 덮어쓴다).
+	// 기본값은 그 컴포넌트의 기본값과 같다 - 경비견처럼 한 번 물면 잘 안 놓는 타입만 낮춰서 차별화한다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.0"))
+	float PerceptionDecayPerSecond = 0.2f;
 };
 
