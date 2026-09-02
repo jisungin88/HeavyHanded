@@ -6,8 +6,10 @@
 #include "Core/PlayerControllers/HeavyHandedPlayerController.h"
 #include "HeistPlayerController.generated.h"
 
+class APlayerState;
 class AGameStateBase;
 class AHeistGameState;
+class UHeistSpectatorComponent;
 
 /**
  * 작업 레벨의 PlayerController. 페이즈에 따라 화면과 입력을 맞추고, 결과 확인을 서버로 올리고,
@@ -20,6 +22,8 @@ class HEAVYHANDED_API AHeistPlayerController : public AHeavyHandedPlayerControll
 	GENERATED_BODY()
 
 public:
+	AHeistPlayerController();
+
 	/**
 	 * 결과 화면을 확인했다고 서버에 알린다. HUD 의 '확인' 버튼이 부른다.
 	 * GameState 는 소유자가 없어 클라이언트 RPC 를 못 받는다 — 그래서 여기가 유일한 입구다.
@@ -27,28 +31,20 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "Heist|Result")
 	void Server_SetResultConfirmed(bool bConfirmed);
 
-	// ──────────────────────────────────────────────
-	// 관전 (체포된 사람의 시점)
-	//
-	// 전부 로컬이다 — 시점은 순수 표현이고 SetViewTarget 은 복제되지 않는다.
-	// 자유 비행 폰은 없앴다. 벽을 통과해 날아다니면 체포자가 경비 · 금고 위치를 알려 줄 수 있다
-	// ──────────────────────────────────────────────
+	/** 시선 pitch 복제 */
+	UFUNCTION(Server, Reliable, WithValidation, Category = "Heist|Spectate")
+	void Server_SetSpectateTarget(APlayerState* Target);
 
-	/** 관전 시점을 다음 팀원으로 넘긴다. HUD 버튼이나 입력 바인딩이 부른다 */
-	UFUNCTION(BlueprintCallable, Category = "Heist|Spectate")
-	void ViewNextTeammate();
-
-	/** 관전 시점을 이전 팀원으로 넘긴다 */
-	UFUNCTION(BlueprintCallable, Category = "Heist|Spectate")
-	void ViewPreviousTeammate();
-
-	/** 지금 이 화면이 관전 중인가. 관전자가 아니면 false */
 	UFUNCTION(BlueprintPure, Category = "Heist|Spectate")
-	bool IsSpectating() const;
+	UHeistSpectatorComponent* GetSpectatorComponent() const { return SpectatorComponent; }
+
+	/** 관전 카메라 체인을 로그로 찍는다 (치트) */
+	void DumpSpectateCamera() const;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void SetupInputComponent() override;
 
 	/**
 	 * 페이즈가 바뀌었다. 화면과 입력을 여기 한 곳에서 맞춘다.
@@ -83,22 +79,14 @@ private:
 
 	void UnbindFromGameState();
 
-	/**
-	 * 관전 상태를 주기적으로 확인한다. 기다리는 둘(내 PlayerState 도착 · 팀원 폰 복제) 다
-	 * 알림이 없어서 폴링이다. 관전자가 아니면 타이머를 꺼서 몇 번의 검사로 끝난다.
-	 */
-	void TickSpectate();
-
-	/** 볼 대상이 없거나 사라졌으면 다시 고른다 */
-	void EnsureSpectateTarget();
-
-	/** 관전 대상을 고른다. Step 0 이면 유지(없으면 첫 번째), +1/-1 이면 순환. 없으면 nullptr */
-	AActor* PickSpectateTarget(int32 Step) const;
-
 	FDelegateHandle GameStateSetHandle;
-
-	FTimerHandle SpectateTimer;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AHeistGameState> BoundGameState;
+
+	UPROPERTY()
+	TObjectPtr<UHeistSpectatorComponent> SpectatorComponent;
+
+	void OnSpectateNext();
+	void OnSpectatePrev();
 };

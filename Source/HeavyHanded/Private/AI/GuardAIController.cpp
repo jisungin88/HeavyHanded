@@ -281,9 +281,17 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 				*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
 		}
 
+		// 브로드캐스트는 false->true 전환 1회로 제한한다 - 덮어쓰기 전에 이전 값을 봐둔다.
+		const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+
 		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
 		if (Stimulus.WasSuccessfullySensed())
 		{
+			if (!bWasSeeing)
+			{
+				OnPlayerSpotted.Broadcast(Actor);
+			}
+
 			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
 
@@ -532,6 +540,16 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 		if (UCharacterMovementComponent* MovementComp = GuardCharacterPawn->GetCharacterMovement())
 		{
 			MovementComp->MaxWalkSpeed = Row->MoveSpeed;
+		}
+	}
+
+	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
+	// 뒤에 찾는다) - 여기서는 InPawn 에서 직접 다시 찾는다.
+	if (AGuardCharacter* GuardPawnForMeter = Cast<AGuardCharacter>(InPawn))
+	{
+		if (UPerceptionMeterComponent* Meter = GuardPawnForMeter->FindComponentByClass<UPerceptionMeterComponent>())
+		{
+			Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
 		}
 	}
 }

@@ -18,6 +18,10 @@ class AGameStateBase;
 class AGuardCharacter;
 class AHeistGameState;
 
+// 시야를 놓쳤다가 (혹은 최초로) 플레이어를 다시 포착한 순간에만 발화한다.
+// 시야를 유지하는 동안 매 프레임 다시 쏘지 않는다 - false->true 전환 1회.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
+
 UCLASS()
 class AGuardAIController : public AAIController
 {
@@ -25,6 +29,11 @@ class AGuardAIController : public AAIController
 
 public:
 	AGuardAIController();
+
+	// 시야로 플레이어를 새로 포착한 순간(false->true 전환)에만 발화. 연출용(효과음 등).
+	// 서버 권위 - OnTargetPerceptionUpdated 와 동일하게 HasAuthority() 인 곳에서만 브로드캐스트한다.
+	UPROPERTY(BlueprintAssignable, Category = "Guard|Perception")
+	FOnPlayerSpotted OnPlayerSpotted;
 
 	// 경비 개체 종류. 스폰 시 BP_GuardVariant_* 쪽에서 설정.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
