@@ -27,6 +27,8 @@ void AShelterGameState::AddPlayerState(APlayerState* PlayerState)
 
 void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
 {
+	// 작동 확인 후 지울 것
+	/*
 	AShelterPlayerState* ShelterPlayerState = Cast<AShelterPlayerState>(PlayerState);
 
 	if (ShelterPlayerState)
@@ -39,6 +41,32 @@ void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
 
 	UpdateLobbyPlayerCount();
 	UpdateCanStart();
+
+	*/
+
+	AShelterPlayerState* ShelterPlayerState = Cast<AShelterPlayerState>(PlayerState);
+
+	if (ShelterPlayerState)
+	{
+		// 퇴장하는 플레이어의 직업을 None으로 변경
+		ClearJob(ShelterPlayerState);
+
+		// 직업 변경 이벤트 연결 해제
+		ShelterPlayerState->OnSelectedJobChanged.RemoveDynamic(
+			this,
+			&AShelterGameState::OnPlayerJobChanged
+		);
+	}
+
+	// PlayerArray에서 실제로 제거
+	Super::RemovePlayerState(PlayerState);
+
+	UpdateLobbyPlayerCount();
+	UpdateCanStart();
+
+
+	//JobStateChanged++;
+
 }
 
 void AShelterGameState::UpdateLobbyPlayerCount()
