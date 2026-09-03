@@ -281,7 +281,7 @@ void AShelterPlayerController::ServerClearJob_Implementation()
 
 void AShelterPlayerController::serverConfirmedJob_Implementation()
 {
-
+	/*
 	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
 
 	// config/Role.ini 참고할 것
@@ -310,21 +310,56 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 		return;
 	}
 
-	//FGameplayTag RoleTag = ShelterPS->GetSelectedJob(); //GetSelectedJobTag();
-
-
-
-	// --------------------------------------------------------
-
-
-
-
-
-
-
-
 	// pawn 스폰
 	SpawnJobPawn(RoleTag);
+
+	*/
+
+
+	// 0903 디버그용
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("1. serverConfirmedJob 시작"));
+
+	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("2. Subsystem 가져옴"));
+
+	FUniqueNetIdRepl PlayerId = GetMyPlayerState()->GetUniqueId();
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("3. PlayerId 가져옴"));
+
+	FGameplayTag RoleTag = RoleTagFromJobType(GetMyPlayerState()->SelectedJob);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("4. RoleTag 생성 완료"));
+
+	if (Subsystem)
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("5. TrySelectRole 호출 전"));
+
+		Subsystem->TrySelectRole(PlayerId, RoleTag);
+
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("6. TrySelectRole 호출 완료"));
+	}
+
+	AShelterPlayerState* ShelterPS = GetPlayerState<AShelterPlayerState>();
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("7. ShelterPS 가져오기 완료"));
+
+	if (!ShelterPS)
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("8. ShelterPS == nullptr"));
+		return;
+	}
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, TEXT("8. ShelterPS 정상"));
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("9. SpawnJobPawn 호출 전"));
+
+	SpawnJobPawn(RoleTag);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, TEXT("10. SpawnJobPawn 호출 완료"));
+
+
 
 }
 
