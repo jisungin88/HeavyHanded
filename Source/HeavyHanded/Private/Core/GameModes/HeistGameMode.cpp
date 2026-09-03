@@ -11,6 +11,7 @@
 #include "TimerManager.h"
 
 #include "Alert/AlertComponent.h"
+#include "Character/CharacterSettings.h"
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistEntryGate.h"
@@ -304,6 +305,25 @@ AActor* AHeistGameMode::ChoosePlayerStart_Implementation(AController* Player)
 
 	// 진입점이 없는 레벨(테스트 맵)에서는 엔진 기본 동작으로 돌아간다
 	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+UClass* AHeistGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
+{
+	FGameplayTag RoleTag;
+
+	if (const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+		if (const APlayerState* PS = InController ? InController->PlayerState : nullptr)
+		{
+			RoleTag = Run->GetSelectedRole(PS->GetUniqueId());
+		}
+	}
+
+	if (UClass* RolePawn = UCharacterSettings::Get()->ResolveRolePawnClass(RoleTag))
+	{
+		return RolePawn;
+	}
+	return Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 
 void AHeistGameMode::HandleMatchHasStarted()

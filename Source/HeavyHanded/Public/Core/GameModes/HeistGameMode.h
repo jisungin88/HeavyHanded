@@ -42,6 +42,9 @@ public:
 	 */
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
+	/** 역할에 맞는 폰 클래스 */
+	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
+
 	/**
 	 * 페이즈를 즉시 다음으로 넘긴다. 접속 대기 중이면 기다리지 않고 준비 시간을 시작한다.
 	 * 치트(hh.Phase.Next)의 진입점이라 사유가 Cheat 로 기록된다.
