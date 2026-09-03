@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/Interactable.h"   // 부모 인터페이스 — 전방 선언 불가
 #include "VanZone.generated.h"
 
 struct FHeistLoadEntry;
@@ -20,7 +21,7 @@ class UNiagaraSystem;
  * 몸체는 BP 가 이 액터에 붙인다 — 별도 액터로 두면 PlaceVan 이 이 액터만 옮겨 껍데기만 남는다.
  */
 UCLASS()
-class HEAVYHANDED_API AVanZone : public AActor
+class HEAVYHANDED_API AVanZone : public AActor, public IInteractable
 {
 	GENERATED_BODY()
 
@@ -44,6 +45,13 @@ public:
 	 * 탈 수 있는 상황인지는 전부 여기서 본다. 상태가 실제로 바뀌었으면 true.
 	 */
 	bool TryToggleBoarding(APawn* Player);
+
+	/**
+	 * IInteractable — 뒷문 조준 판(BoardAimTarget)에 시선이 닿았을 때 GAB_Interact 가 부른다.
+	 * TryToggleBoarding 을 그대로 넘긴다. 대상 종류를 모르는 GAB_Interact 쪽에서
+	 * AVanZone 을 직접 캐스팅하던 분기를 대신한다(담당: 지성인).
+	 */
+	virtual void OnInteract_Implementation(APawn* Interactor) override;
 
 protected:
 	virtual void BeginPlay() override;

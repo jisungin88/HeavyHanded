@@ -395,13 +395,9 @@ void UGAB_Interact::PerformInteraction()
                 UE_LOG(LogInteract, Log, TEXT("집기 성공: %s (Heavy=%s)"), *HitActor->GetName(), bHeavy ? TEXT("O") : TEXT("X"));
             }
         }
-		// 2. 밴 — 승차 / 하차 (담당: 지성인)
-		// IInteractable 전환 중. AVanZone 이 IInteractable 을 구현하면 이 주석을 지우고
-		// 위쪽 IInteractable 분기가 자연히 처리한다. 그 전까지만 남겨 둔다.
-		//else if (AVanZone* Van = Cast<AVanZone>(HitActor))
-		//{
-		//    Van->TryToggleBoarding(Character);
-		//}
+		// 밴 승차 / 하차(담당: 지성인)는 AVanZone 이 IInteractable 을 구현하므로
+		// 아래 IInteractable 분기가 그대로 처리한다. 별도 캐스팅 분기는 필요 없다.
+
 		// 3. "Door" 태그가 붙어있는 경우 — 마찬가지로 IInteractable 전환 대상
 		//else if (HitActor->ActorHasTag(LegacyDoorActorTagName))
 		//{

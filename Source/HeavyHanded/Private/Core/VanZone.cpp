@@ -383,6 +383,13 @@ bool AVanZone::TryToggleBoarding(APawn* Player)
 	return true;
 }
 
+void AVanZone::OnInteract_Implementation(APawn* Interactor)
+{
+	// 하차는 PerformInteraction 이 스윕보다 먼저 TryDisembarkIfBoarded 로 처리한다.
+	// 여기로 들어오는 것은 전부 "밖에서 조준해 태워 달라" 는 경우다
+	TryToggleBoarding(Interactor);
+}
+
 bool AVanZone::CanBoardNow(const APawn* Player) const
 {
 	// 어빌리티 사거리(기본 300cm)만으로는 밴 옆이나 지붕 위에서도 닿는다
