@@ -1,4 +1,4 @@
-#include "Character/CharacterSettings.h"
+﻿#include "Character/CharacterSettings.h"
 
 #include "GameFramework/Pawn.h"
 

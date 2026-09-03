@@ -123,8 +123,8 @@ public:
 protected:
 
 	// 직업별 Pawn 클래스
-	UPROPERTY(EditDefaultsOnly, Category = "Job")
-	TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
+	///UPROPERTY(EditDefaultsOnly, Category = "Job")
+	///TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
 
 	// Pawn을 실제로 생성하고 빙의
 	void SpawnJobPawn(FGameplayTag JobTag);
