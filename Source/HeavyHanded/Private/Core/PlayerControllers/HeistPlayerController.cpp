@@ -1,5 +1,6 @@
 ﻿#include "Core/PlayerControllers/HeistPlayerController.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -9,9 +10,17 @@
 #include "Core/HeistLog.h"
 #include "Core/HeistSettings.h"
 #include "Core/Spectate/HeistSpectatorComponent.h"
+#include "UI/StartWaitWidget.h"
+#include "UI/UISettings.h"
 
 #include "EnhancedInputComponent.h"
 #include "InputAction.h"
+
+namespace
+{
+	/** 접속 대기 오버레이 Z 오더 — HUD 위, 로딩 화면 아래 (hh.UI.PartyWait 과 같은 값) */
+	constexpr int32 StartWaitWidgetZOrder = 900;
+}
 
 AHeistPlayerController::AHeistPlayerController()
 {
@@ -108,6 +117,9 @@ void AHeistPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindFromGameState();
 
+	// 레벨 이동 시 뷰포트에 남지 않게 직접 뗀다. 뷰포트가 든 참조는 자동 정리되지 않는다
+	RemoveStartWaitWidget();
+
 	if (UWorld* World = GetWorld())
 	{
 		if (GameStateSetHandle.IsValid())
@@ -183,7 +195,73 @@ void AHeistPlayerController::HandleStartWaitChanged(FHeistStartWaitState State)
 		ExitUIFocus(this);
 	}
 
+	// 기본 대기 오버레이는 C++ 이 띄운다. 아래 BP 훅은 추가 연출용으로 남겨 둔다
+	UpdateStartWaitWidget(State);
+
 	OnStartWaitChanged(State.bWaiting, State.NumConnected, State.NumExpected);
+}
+
+void AHeistPlayerController::UpdateStartWaitWidget(const FHeistStartWaitState& State)
+{
+	// 위젯은 자기 화면에만 붙는다. 서버(호스트)는 클라이언트 몫의 이 델리게이트도 받는다
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (!StartWaitWidget)
+	{
+		// 대기가 이미 끝난 뒤 늦게 붙었으면 만들 이유가 없다
+		if (!State.bWaiting)
+		{
+			return;
+		}
+
+		const UUISettings* Settings = UUISettings::Get();
+		if (Settings->StartWaitWidgetClass.IsNull())
+		{
+			// WBP 를 아직 안 꽂았을 수 있다. 입력 차단은 위에서 이미 했으므로 화면만 비는 것이다
+			UE_LOG(LogHeist, Warning,
+				TEXT("StartWaitWidgetClass 가 비어 있어 접속 대기 오버레이를 띄우지 못합니다. "
+					 "Project Settings → Game → UI → StartWait 에 WBP_StartWait 을 지정하세요."));
+			return;
+		}
+
+		UClass* WidgetClass = Settings->StartWaitWidgetClass.LoadSynchronous();
+		if (!WidgetClass)
+		{
+			UE_LOG(LogHeist, Warning, TEXT("StartWaitWidgetClass '%s' 를 로드하지 못했습니다."),
+				*Settings->StartWaitWidgetClass.ToString());
+			return;
+		}
+
+		StartWaitWidget = CreateWidget<UStartWaitWidget>(this, WidgetClass);
+		if (!StartWaitWidget)
+		{
+			return;
+		}
+
+		StartWaitWidget->AddToViewport(StartWaitWidgetZOrder);
+	}
+
+	// 위젯은 bWaiting=false 를 받으면 스스로 접힌다. 그래도 아래에서 참조를 끊어 다음 판에 새로 만든다
+	StartWaitWidget->UpdateWaitState(State.bWaiting, State.NumConnected, State.NumExpected);
+
+	if (!State.bWaiting)
+	{
+		RemoveStartWaitWidget();
+	}
+}
+
+void AHeistPlayerController::RemoveStartWaitWidget()
+{
+	if (!StartWaitWidget)
+	{
+		return;
+	}
+
+	StartWaitWidget->RemoveFromParent();
+	StartWaitWidget = nullptr;
 }
 
 void AHeistPlayerController::HandlePhaseChanged(

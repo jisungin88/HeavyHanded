@@ -10,6 +10,7 @@ class APlayerState;
 class AGameStateBase;
 class AHeistGameState;
 class UHeistSpectatorComponent;
+class UStartWaitWidget;
 
 /**
  * 작업 레벨의 PlayerController. 페이즈에 따라 화면과 입력을 맞추고, 결과 확인을 서버로 올리고,
@@ -79,10 +80,23 @@ private:
 
 	void UnbindFromGameState();
 
+	/**
+	 * 접속 대기 오버레이를 상태에 맞춘다. 로컬 컨트롤러에서만 뜬다.
+	 * 위젯 클래스는 UUISettings::StartWaitWidgetClass 에서 온다 — 비어 있으면 아무것도 안 한다.
+	 */
+	void UpdateStartWaitWidget(const FHeistStartWaitState& State);
+
+	/** 접속 대기 오버레이를 떼고 버린다. 없으면 아무것도 하지 않는다 */
+	void RemoveStartWaitWidget();
+
 	FDelegateHandle GameStateSetHandle;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AHeistGameState> BoundGameState;
+
+	/** 접속 대기 오버레이. 대기 중에만 존재한다 */
+	UPROPERTY(Transient)
+	TObjectPtr<UStartWaitWidget> StartWaitWidget;
 
 	UPROPERTY()
 	TObjectPtr<UHeistSpectatorComponent> SpectatorComponent;
