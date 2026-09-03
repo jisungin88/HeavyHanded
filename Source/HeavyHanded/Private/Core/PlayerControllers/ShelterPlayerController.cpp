@@ -318,47 +318,64 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 	// 0903 디버그용
 
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("1. serverConfirmedJob 시작"));
+	DebugMessage(TEXT("1. serverConfirmedJob 시작"));
 
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("2. Subsystem 가져옴"));
-
-	FUniqueNetIdRepl PlayerId = GetMyPlayerState()->GetUniqueId();
-
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("3. PlayerId 가져옴"));
-
-	FGameplayTag RoleTag = RoleTagFromJobType(GetMyPlayerState()->SelectedJob);
-
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("4. RoleTag 생성 완료"));
-
-	if (Subsystem)
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!GameInstance)
 	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("5. TrySelectRole 호출 전"));
-
-		Subsystem->TrySelectRole(PlayerId, RoleTag);
-
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("6. TrySelectRole 호출 완료"));
-	}
-
-	AShelterPlayerState* ShelterPS = GetPlayerState<AShelterPlayerState>();
-
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("7. ShelterPS 가져오기 완료"));
-
-	if (!ShelterPS)
-	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, TEXT("8. ShelterPS == nullptr"));
+		DebugMessage(TEXT("ERROR: GameInstance == nullptr"), true);
 		return;
 	}
 
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, TEXT("8. ShelterPS 정상"));
+	URunProgressSubsystem* Subsystem = GameInstance->GetSubsystem<URunProgressSubsystem>();
+	if (!Subsystem)
+	{
+		DebugMessage(TEXT("ERROR: Subsystem == nullptr"), true);
+		return;
+	}
 
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Yellow, TEXT("9. SpawnJobPawn 호출 전"));
+	DebugMessage(TEXT("2. Subsystem 가져옴"));
+
+	AShelterPlayerState* ShelterPS = GetPlayerState<AShelterPlayerState>();
+	if (!ShelterPS)
+	{
+		DebugMessage(TEXT("ERROR: ShelterPS == nullptr"), true);
+		return;
+	}
+
+	DebugMessage(TEXT("3. ShelterPS 가져옴"));
+
+	FUniqueNetIdRepl PlayerId = ShelterPS->GetUniqueId();
+
+	if (!PlayerId.IsValid())
+	{
+		DebugMessage(TEXT("ERROR: PlayerId가 유효하지 않음"), true);
+		return;
+	}
+
+	DebugMessage(TEXT("4. PlayerId 가져옴"));
+
+	FGameplayTag RoleTag = RoleTagFromJobType(ShelterPS->SelectedJob);
+
+	if (!RoleTag.IsValid())
+	{
+		DebugMessage(TEXT("ERROR: RoleTag가 유효하지 않음"), true);
+		return;
+	}
+
+	DebugMessage(TEXT("5. RoleTag 생성 완료"));
+
+	DebugMessage(TEXT("6. TrySelectRole 호출 전"));
+
+	Subsystem->TrySelectRole(PlayerId, RoleTag);
+
+	DebugMessage(TEXT("7. TrySelectRole 호출 완료"));
+
+	DebugMessage(TEXT("8. SpawnJobPawn 호출 전"));
 
 	SpawnJobPawn(RoleTag);
 
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, TEXT("10. SpawnJobPawn 호출 완료"));
-
+	DebugMessage(TEXT("9. SpawnJobPawn 호출 완료"));
 
 
 }
@@ -625,6 +642,14 @@ void AShelterPlayerController::IngameTravel()
 
 	Subsystem->TryDepartToSite(SiteGT);
 
+}
+
+void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)
+{
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, bError ? FColor::Red : FColor::Yellow, Message);
+	}
 }
 
 

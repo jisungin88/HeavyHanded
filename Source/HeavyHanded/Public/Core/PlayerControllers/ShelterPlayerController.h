@@ -169,7 +169,8 @@ public:
 
 
 
-
+	UFUNCTION(BlueprintCallable)
+	void DebugMessage(const FString& Message, bool bError = false);
 
 
 
