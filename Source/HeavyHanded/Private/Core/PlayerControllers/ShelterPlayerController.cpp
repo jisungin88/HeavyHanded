@@ -377,7 +377,11 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 	DebugMessage(TEXT("9. SpawnJobPawn 호출 완료"));
 
+	// 확정이 끝났으니 클라에 팝업을 닫으라고 알린다. 호스트는 이 RPC 가 로컬에서 즉시 실행돼
+	// 동일하게 닫힌다. 여기까지 왔다는 건 위 가드를 다 통과했다는 뜻이라 안전하게 닫아도 된다
+	ClientHideJobSelect();
 
+	DebugMessage(TEXT("10. ClientHideJobSelect 호출 완료"));
 }
 
 
@@ -491,6 +495,11 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 void AShelterPlayerController::ClientShowJobSelect_Implementation()
 {
 	BP_ShowJobSelect();
+}
+
+void AShelterPlayerController::ClientHideJobSelect_Implementation()
+{
+	BP_HideJobSelect();
 }
 
 

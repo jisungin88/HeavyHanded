@@ -128,6 +128,15 @@ public:
 	UFUNCTION(BlueprintImplementableEvent)
 	void BP_ShowJobSelect();
 
+	// 직업 확정이 끝났으니 클라에 팝업을 닫으라고 지시한다. serverConfirmedJob 성공 뒤 서버가 호출.
+	// 버튼 로컬 BP 에 맡기지 않는 것은, 호스트는 serverConfirmedJob 이 동기라 그 안에서 에러나면
+	// 뒤 노드가 안 돌아 팝업이 남기 때문이다. 서버 구동이면 호스트/클라가 같은 경로로 닫힌다.
+	UFUNCTION(Client, Reliable)
+	void ClientHideJobSelect();
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void BP_HideJobSelect();
+
 protected:
 
 	// 직업별 Pawn 클래스
