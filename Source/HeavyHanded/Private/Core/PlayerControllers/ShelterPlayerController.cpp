@@ -14,6 +14,8 @@
 #include "OnlineSubsystemUtils.h"
 #include "Kismet/GameplayStatics.h"
 
+#include "Character/CharacterSettings.h"
+
 
 
 void AShelterPlayerController::BeginPlay()
@@ -321,6 +323,29 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 		Subsystem->TrySelectRole(PlayerId, RoleTag);
 	}
 
+
+	// --------------------------------------------------------
+
+	AShelterPlayerState* ShelterPS = GetPlayerState<AShelterPlayerState>();
+
+	if (!ShelterPS)
+	{
+		return;
+	}
+
+	//FGameplayTag RoleTag = ShelterPS->GetSelectedJob(); //GetSelectedJobTag();
+
+	
+
+	// --------------------------------------------------------
+
+
+
+
+
+
+
+
 	// pawn 스폰
 	SpawnJobPawn(RoleTag);
 
@@ -343,19 +368,36 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 
 	// 2. GameplayTag에 해당하는 Pawn 클래스 찾기
-	TSubclassOf<APawn>* FoundPawnClass = JobPawnMap.Find(JobTag);
+	
+	//TSubclassOf<APawn>* FoundPawnClass = JobPawnMap.Find(JobTag);
+	//
+	//if (!FoundPawnClass || !(*FoundPawnClass))
+	//{
+	//	if (GEngine)
+	//	{
+	//		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
+	//	}
+	//
+	//	return;
+	//}
+	//
+	//TSubclassOf<APawn> PawnClass = *FoundPawnClass;
 
-	if (!FoundPawnClass || !(*FoundPawnClass))
+	//0903 수정
+	const UCharacterSettings* CharacterSettings =
+		GetDefault<UCharacterSettings>();
+
+	UClass* PawnClass =
+		CharacterSettings->ResolveRolePawnClass(JobTag);
+
+	if (!PawnClass)
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] No Pawn class for JobTag [%s]"), *JobTag.ToString()));
-		}
+		UE_LOG(LogTemp, Error, TEXT("RoleTag [%s]에 해당하는 PawnClass가 없습니다."),*JobTag.ToString());
 
 		return;
 	}
 
-	TSubclassOf<APawn> PawnClass = *FoundPawnClass;
+
 
 
 	// 3. 기존 Pawn의 위치/회전 저장

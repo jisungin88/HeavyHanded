@@ -1,4 +1,4 @@
-#include "Character/CharacterSettings.h"
+﻿#include "Character/CharacterSettings.h"
 
 #include "GameFramework/Pawn.h"
 
@@ -8,7 +8,7 @@ UClass* UCharacterSettings::ResolveRolePawnClass(const FGameplayTag& RoleTag) co
 {
 	if (RoleTag.IsValid())
 	{
-		for (const FHeistRolePawn& Entry : RolePawnClasses)
+		for (const FRoleSetup& Entry : RolePawnClasses)
 		{
 			if (Entry.RoleTag != RoleTag)
 			{

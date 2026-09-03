@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataTable.h"
+#include "GameplayTagContainer.h"
 #include "JobDataInfo.generated.h"
 
 
@@ -29,7 +30,7 @@ struct FSkillInfo
 	FText SkillName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MultiLine = true))
-	FText SkillEffect;
+	FText SkillDesc;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TObjectPtr<UTexture2D> SkillIcon = nullptr;
@@ -42,6 +43,9 @@ struct FJobInfo : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText JobName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FGameplayTag JobTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MultiLine = true))
 	FText JobDescription;
