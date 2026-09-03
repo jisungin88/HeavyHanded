@@ -107,13 +107,23 @@ void AGuardSpawner::SpawnGuards()
 
 void AGuardSpawner::HandleSpawnTimer()
 {
+	const int32 Before = SpawnedCount;
 	SpawnSingleGuard();
+
+	if (SpawnedCount == Before)
+	{
+		GetWorldTimerManager().ClearTimer(SpawnTimerHandle);
+		UE_LOG(LogGuardAI, Error,
+			TEXT("[%s] 경비 스폰 실패 — 스폰 루프 중단 (%d/%d)."),
+			*GetName(), SpawnedCount, GuardCount);
+		return;
+	}
 
 	if (SpawnedCount >= GuardCount)
 	{
 		GetWorldTimerManager().ClearTimer(SpawnTimerHandle);
-
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 경비 %d/%d명 스폰 완료 (순찰 지점 %d개, 패턴은 경비마다 무작위)."),
+		UE_LOG(LogGuardAI, Log,
+			TEXT("[%s] 경비 %d/%d명 스폰 완료 (순찰 지점 %d개)."),
 			*GetName(), SpawnedCount, GuardCount, PatrolPoints.Num());
 	}
 }
