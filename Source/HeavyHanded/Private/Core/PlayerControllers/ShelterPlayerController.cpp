@@ -44,7 +44,7 @@ void AShelterPlayerController::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("=== AFTER BEGIN PLAY ==="));
 	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("=== AFTER BEGIN PLAY ==="));
 
-	
+
 
 }
 
@@ -222,7 +222,7 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 
 void AShelterPlayerController::ServerSelectJob_Implementation(EJobType NewJob)
 {
-	
+
 	AShelterGameState* GameState =
 		GetWorld()->GetGameState<AShelterGameState>();
 
@@ -285,7 +285,7 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
 
 	// config/Role.ini 참고할 것
-	
+
 	//	"Role.Brute"
 	//	"Role.Ghost"
 	//	"Role.Oracle"
@@ -293,30 +293,7 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 
 	FUniqueNetIdRepl PlayerId = GetMyPlayerState()->GetUniqueId();
-
-	FGameplayTag RoleTag;
-	switch (GetMyPlayerState()->SelectedJob)
-	{
-	case EJobType::Brute:
-		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Brute"));
-		break;
-
-	case EJobType::Ghost:
-		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Ghost"));
-		break;
-
-	case EJobType::Oracle:
-		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Oracle"));
-		break;
-
-	case EJobType::Mimic:
-		RoleTag = FGameplayTag::RequestGameplayTag(FName("Role.Mimic"));
-		break;
-
-	default:
-		break;
-	}
-		
+	FGameplayTag RoleTag = RoleTagFromJobType(GetMyPlayerState()->SelectedJob);
 
 	if (Subsystem)
 	{
@@ -335,7 +312,7 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 	//FGameplayTag RoleTag = ShelterPS->GetSelectedJob(); //GetSelectedJobTag();
 
-	
+
 
 	// --------------------------------------------------------
 
@@ -368,7 +345,7 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 
 	// 2. GameplayTag에 해당하는 Pawn 클래스 찾기
-	
+
 	//TSubclassOf<APawn>* FoundPawnClass = JobPawnMap.Find(JobTag);
 	//
 	//if (!FoundPawnClass || !(*FoundPawnClass))

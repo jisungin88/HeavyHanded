@@ -6,6 +6,29 @@
 #include "Net/UnrealNetwork.h"
 
 
+EJobType JobTypeFromRoleTag(const FGameplayTag& RoleTag)
+{
+	const FName Name = RoleTag.GetTagName();
+	if (Name == "Role.Brute")  return EJobType::Brute;
+	if (Name == "Role.Ghost")  return EJobType::Ghost;
+	if (Name == "Role.Oracle") return EJobType::Oracle;
+	if (Name == "Role.Mimic")  return EJobType::Mimic;
+	return EJobType::None;
+}
+
+FGameplayTag RoleTagFromJobType(EJobType Job)
+{
+	switch (Job)
+	{
+	case EJobType::Brute: 	return FGameplayTag::RequestGameplayTag("Role.Brute");
+	case EJobType::Ghost: 	return FGameplayTag::RequestGameplayTag("Role.Ghost");
+	case EJobType::Oracle: 	return FGameplayTag::RequestGameplayTag("Role.Oracle");
+	case EJobType::Mimic: 	return FGameplayTag::RequestGameplayTag("Role.Mimic");
+	default:				return FGameplayTag();
+	}
+}
+
+
 void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 {
 	// 직업 변경은 서버에서만 가능

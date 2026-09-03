@@ -119,6 +119,8 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void serverConfirmedJob();
 
+	// Pawn을 실제로 생성하고 빙의
+	void SpawnJobPawn(FGameplayTag JobTag);
 
 protected:
 
@@ -126,8 +128,6 @@ protected:
 	///UPROPERTY(EditDefaultsOnly, Category = "Job")
 	///TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
 
-	// Pawn을 실제로 생성하고 빙의
-	void SpawnJobPawn(FGameplayTag JobTag);
 
 
 	// -------------------------------------------------------
@@ -148,7 +148,7 @@ public:
 	void ClientShowStartGameWindow();
 
 	UFUNCTION(BlueprintImplementableEvent) //C++ 구현하면 오류
-	void BP_ShowStartGameWindow(); 
+	void BP_ShowStartGameWindow();
 
 
 	// --- 맵 이동 ---
@@ -156,7 +156,7 @@ public:
 	void IngameTravel();//FGameplayTag NewSiteTag);
 
 
-	
+
 
 
 

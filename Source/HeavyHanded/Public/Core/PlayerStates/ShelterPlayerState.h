@@ -4,13 +4,14 @@
 
 #include "CoreMinimal.h"
 //#include "GameFramework/PlayerState.h"
+#include "GameplayTagContainer.h"
 #include "Character/PlayerSessionState.h"
 //#include "AbilitySystemInterface.h"
 
 #include "ShelterPlayerState.generated.h"
 
 /**
- * 
+ *
  */
 
  // 플레이어가 선택할 수 있는 직업
@@ -27,6 +28,10 @@ enum class EJobType : uint8
 	Mimic    UMETA(DisplayName = "Mimic")
 };
 
+/** Role.* 태그 → EJobType. 매칭 없으면 None */
+HEAVYHANDED_API EJobType JobTypeFromRoleTag(const FGameplayTag& RoleTag);
+/** EJobType → Role.* 태그. None 이면 무효 태그 */
+HEAVYHANDED_API FGameplayTag RoleTagFromJobType(EJobType Job);
 
 /// DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSelectedJobChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedJobChanged, AShelterPlayerState*, PlayerState);
@@ -78,7 +83,7 @@ public:
 
 
 	// // ---------------------------- 상호작용 테스트용 코드 : 해결되면 상속 형태로 반드시 수정할 것
-	
+
 	// -----------------------------------------------------------------------------------------------
 
 
