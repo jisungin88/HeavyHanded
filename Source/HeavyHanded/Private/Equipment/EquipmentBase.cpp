@@ -18,6 +18,9 @@ namespace
 {
 	/** 물리 시뮬레이션 중. 노획물과 같은 프로파일을 쓴다 — 던진 장비도 물건처럼 굴러야 한다 */
 	static const FName EquipmentSimulatingProfile(TEXT("Loot"));
+
+	/** 막 놓거나 던진 직후 — 위와 같고 사람만 Ignore. 노획물과 같은 프로파일을 쓴다 */
+	static const FName EquipmentReleasedProfile(TEXT("ReleasedLoot"));
 }
 
 AEquipmentBase::AEquipmentBase()
@@ -141,6 +144,11 @@ void AEquipmentBase::ApplyCarryState()
 {
 	const bool bCarried = IsValid(PrimaryCarrier);
 
+	// 놓인 순간을 구분하려고 직전 운반자를 들고 있는다. 그냥 PrimaryCarrier 가 비었는지만
+	// 보면 맵에 처음부터 놓여 있던 장비까지 '방금 놓였다' 로 취급된다.
+	APawn* const PreviousCarrier = AppliedCarrier.Get();
+	AppliedCarrier = PrimaryCarrier;
+
 	if (bCarried)
 	{
 		// PhysicsHandle 로 물리를 유지한 채 드는 방식은 멀티에서 깨진다.
@@ -199,8 +207,52 @@ void AEquipmentBase::ApplyCarryState()
 	}
 
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
+
+	// 던진 직후 잠깐 사람을 통과시킨다. 노획물(ALootBase::ReleaseIgnorePawnSeconds)과 같은
+	// 이유이고, 장비는 하나가 더 있다 — 점착 폭탄은 가장 먼저 닿는 것에 붙기 때문에
+	// 이게 없으면 던진 사람 몸에 붙는다. 자기 발밑에서 퓨즈가 도는 그림이 나온다.
+	const bool bIgnorePawnOnRelease =
+		IsValid(PreviousCarrier) && ReleaseIgnorePawnSeconds > 0.f;
+
+	EquipmentMesh->SetCollisionProfileName(bIgnorePawnOnRelease
+		? EquipmentReleasedProfile
+		: EquipmentSimulatingProfile);
+
 	EquipmentMesh->SetSimulatePhysics(true);
+
+	if (bIgnorePawnOnRelease)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				ReleaseIgnorePawnTimer, this, &AEquipmentBase::EndReleaseIgnorePawn,
+				ReleaseIgnorePawnSeconds, /*bLoop=*/false);
+		}
+	}
+}
+
+void AEquipmentBase::EndReleaseIgnorePawn()
+{
+	if (!IsValid(EquipmentMesh))
+	{
+		return;
+	}
+
+	// 구간이 끝나기 전에 누가 집어 갔으면 콜리전이 꺼져 있다. 여기서 되돌리면 다시 켜진다.
+	if (IsValid(PrimaryCarrier))
+	{
+		return;
+	}
+
+	// 이미 어딘가에 붙었으면(Deployed 이후) 그 상태의 콜리전을 그대로 둔다.
+	if (State == EEquipmentState::Deployed
+		|| State == EEquipmentState::Active
+		|| State == EEquipmentState::Spent)
+	{
+		return;
+	}
+
+	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
 }
 
 void AEquipmentBase::OnRep_PrimaryCarrier()

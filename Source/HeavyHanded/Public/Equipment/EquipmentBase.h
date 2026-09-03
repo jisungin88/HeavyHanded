@@ -182,6 +182,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Carry")
 	FName CarrySocketName = TEXT("Hand_R_Socket");
 
+	/**
+	 * 놓거나 던진 뒤 이 시간(초) 동안 사람과의 물리 충돌을 무시한다. 0 이면 끈다.
+	 *
+	 * 소지 중에는 장비가 운반자 몸 안에 있다. 놓는 순간 물리를 켜면 그 침투를 물리 엔진이
+	 * 밀어내면서 던진 것이 손에서 튕기고 궤도가 어긋난다. (ALootBase 쪽과 같은 문제다)
+	 *
+	 * [장비에는 이유가 하나 더 있다]
+	 *   bAttachOnImpact 인 장비는 가장 먼저 닿는 것에 붙는다. 이게 없으면 던진 사람
+	 *   몸에 붙어서, 자기 발밑에서 퓨즈가 도는 그림이 나온다.
+	 *
+	 * 경비(Guard 채널)는 계속 Block 이라 던져 맞히거나 붙이는 것은 그대로 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Carry",
+		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
+	float ReleaseIgnorePawnSeconds = 0.3f;
+
 	// ---- 자리잡기 · 발동 ----
 
 	/**
@@ -346,6 +362,14 @@ private:
 	/** 소지 상태에 맞춰 물리·콜리전·부착을 정리한다. 모든 머신에서 실행된다 */
 	void ApplyCarryState();
 
+	/**
+	 * 놓기·던지기 직후의 사람 통과 구간을 끝낸다.
+	 *
+	 * 구간이 끝나기 전에 다시 집혔거나 이미 어딘가에 붙었으면 아무것도 하지 않는다 —
+	 * 그때 되돌리면 그 상태의 콜리전을 덮어쓴다.
+	 */
+	void EndReleaseIgnorePawn();
+
 	/** 상태에 맞는 연출을 켜고 끈다. 모든 머신에서 실행된다 */
 	void ApplyStateEffects(EEquipmentState OldState);
 
@@ -369,8 +393,17 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<class UAudioComponent> DeployLoopComponent;
 
+	/**
+	 * 직전에 반영해 둔 운반자. '방금 놓였다' 를 구분하는 데만 쓴다.
+	 * PrimaryCarrier 가 비었는지만 보면 맵에 처음부터 놓여 있던 장비까지 걸린다.
+	 */
+	TWeakObjectPtr<APawn> AppliedCarrier;
+
 	FTimerHandle ActivationTimer;
 	FTimerHandle EffectTimer;
 	FTimerHandle DestroyTimer;
 	FTimerHandle DeployNoiseTimer;
+
+	/** 사람 통과 구간의 타이머. 액터가 먼저 사라지면 타이머 매니저가 스스로 정리한다 */
+	FTimerHandle ReleaseIgnorePawnTimer;
 };
