@@ -9,16 +9,16 @@
 class APawn;
 
 USTRUCT()
-struct FHeistRolePawn
+struct FRoleSetup
 {
 	GENERATED_BODY()
 
 	/** 역할 식별자 */
-	UPROPERTY(EditAnywhere, Category = "Role")
+	UPROPERTY(EditAnywhere, Category = "Role", meta = (Categories = "Role"))
 	FGameplayTag RoleTag;
 
 	/** 스폰되는 폰 */
-	UPROPERTY(EditAnywhere, Category = "Role", meta = (AllowedClasses = "/Script/Engine.Pawn"))
+	UPROPERTY(EditAnywhere, Category = "Role", meta = (AllowedClasses = "/Script/HeavyHanded.BaseCharacter"))
 	TSoftClassPtr<APawn> PawnClass;
 };
 
@@ -34,10 +34,10 @@ public:
 
 	/** 역할 선택 */
 	UPROPERTY(config, EditAnywhere, Category = "Role", meta = (TitleProperty = "RoleTag"))
-	TArray<FHeistRolePawn> RolePawnClasses;
+	TArray<FRoleSetup> RolePawnClasses;
 
 	/** 역할 미선택 */
-	UPROPERTY(config, EditAnywhere, Category = "Role", meta = (AllowedClasses = "/Script/Engine.Pawn"))
+	UPROPERTY(config, EditAnywhere, Category = "Role", meta = (AllowedClasses = "/Script/HeavyHanded.BaseCharacter"))
 	TSoftClassPtr<APawn> DefaultRolePawnClass;
 
 	UClass* ResolveRolePawnClass(const FGameplayTag& RoleTag) const;
