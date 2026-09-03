@@ -311,6 +311,14 @@ bool AHandCart::IsContaining(const ALootBase* Loot) const
 // 끌기
 // ──────────────────────────────────────────────────────────────
 
+void AHandCart::OnInteract_Implementation(APawn* Interactor)
+{
+	// UGAB_Interact 는 서버 권한에서만 이 함수를 부른다(Interactable.h). 그래도 판정을
+	// TryTogglePush 안에 그대로 두는 것은, 콘솔 명령(hh.Cart.TogglePush)도 같은 문을
+	// 쓰기 때문이다. 입구가 둘이면 검사는 안쪽에 하나만 있어야 한다.
+	TryTogglePush(Interactor);
+}
+
 void AHandCart::TryTogglePush(APawn* Pawn)
 {
 	// Server RPC 는 요청일 뿐이다. 판정은 서버가 한다.

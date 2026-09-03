@@ -40,6 +40,19 @@ AEquipmentBase::AEquipmentBase()
 	// ALootBase 와 같은 이유로 생성자에서 붙인다. BP 마다 추가하는 방식이면 언젠가
 	// 빼먹고, 그 장비만 조용한데 경고도 없어서 발견이 아주 늦다.
 	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
+
+	// [임시] E 로 집히게 하는 액터 태그.
+	//
+	//   UGAB_Interact::IsCarryableLoot 은 'Loot.Type' 하위 태그를 보고 집을 대상을 고른다.
+	//   장비는 그 태그를 달 수 없다 — 달면 AVanZone 이 노획물로 인식해 던져 둔 EMP 가
+	//   정산 화면에 뜬다. 그래서 저쪽이 남겨 둔 액터 태그 폴백('Item')을 쓴다.
+	//
+	//   BP 가 아니라 여기서 다는 이유는 NoiseEmitter 와 같다. 장비가 4종 더 늘어날 때
+	//   BP 마다 붙이는 방식이면 언젠가 빼먹고, 그 장비만 집히지 않는데 경고도 없다.
+	//
+	//   플레이어 파트에 'Equipment' 루트를 보는 판정을 요청해 두었다. 그게 들어오면
+	//   이 줄을 지운다 — 그때까지는 이것이 유일하게 동작하는 경로다.
+	Tags.Add(TEXT("Item"));
 }
 
 void AEquipmentBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
