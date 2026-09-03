@@ -3,6 +3,7 @@
 
 #include "Core/GameStates/ShelterGameState.h"
 #include "Net/UnrealNetwork.h"
+#include "GameplayTagsManager.h"
 
 
 int32 AShelterGameState::GetLobbyPlayerCount() const
@@ -502,6 +503,19 @@ void AShelterGameState::OnRep_SiteTag()
 {
 	// 클라이언트에서 SiteTag가 복제되면 UI 갱신
 	OnTravelTagChanged.Broadcast();
+}
+
+void AShelterGameState::DebugPrintGameplayTags()
+{
+	UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
+
+	FGameplayTagContainer AllTags;
+	Manager.RequestAllGameplayTags(AllTags, true);
+
+	for (const FGameplayTag& Tag : AllTags)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GameplayTag: %s"), *Tag.ToString());
+	}
 }
 
 

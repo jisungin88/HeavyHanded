@@ -159,6 +159,11 @@ public:
 	UFUNCTION()
 	void OnRep_SiteTag();
 
+	// 모든 태그 디버그
+	UFUNCTION(BlueprintCallable)
+	void DebugPrintGameplayTags();
+
+
 	// Replication에 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
