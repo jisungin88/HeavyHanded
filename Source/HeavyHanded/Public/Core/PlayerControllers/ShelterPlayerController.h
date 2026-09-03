@@ -122,6 +122,12 @@ public:
 	// Pawn을 실제로 생성하고 빙의
 	void SpawnJobPawn(FGameplayTag JobTag);
 
+	UFUNCTION(Client, Reliable)
+	void ClientShowJobSelect();
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void BP_ShowJobSelect();
+
 protected:
 
 	// 직업별 Pawn 클래스

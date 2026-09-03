@@ -436,7 +436,10 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 }
 
-
+void AShelterPlayerController::ClientShowJobSelect_Implementation()
+{
+	BP_ShowJobSelect();
+}
 
 
 //-------------------------------------------------------------------------------

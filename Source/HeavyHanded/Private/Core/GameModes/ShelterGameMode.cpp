@@ -17,9 +17,29 @@ void AShelterGameMode::PostLogin(APlayerController* NewPlayer)
 	}
 
 	const FGameplayTag RoleTag = Run->GetSelectedRole(PS->GetUniqueId());
-	if (!RoleTag.IsValid())
+	if (RoleTag.IsValid())
 	{
-		return;
+		const EJobType Restored = JobTypeFromRoleTag(RoleTag);
+		if (Restored != EJobType::None && PS->GetSelectedJob() == EJobType::None)
+		{
+			PS->SetSelectedJob(Restored);
+		}
+
+		if (!NewPlayer->GetPawn())
+		{
+			if (AShelterPlayerController* SPC = Cast<AShelterPlayerController>(NewPlayer))
+			{
+				SPC->SpawnJobPawn(RoleTag);
+			}
+		}
+	}
+	else
+	{
+		// 처음 방문
+		if (AShelterPlayerController* SPC = Cast<AShelterPlayerController>(NewPlayer))
+		{
+			SPC->ClientShowJobSelect();
+		}
 	}
 
 	const EJobType Restored = JobTypeFromRoleTag(RoleTag);
