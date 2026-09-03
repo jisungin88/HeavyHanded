@@ -32,11 +32,18 @@ enum class ESiteTag : uint8
 	Bank
 };
 
+// .h
+
+
+
+
 
 
 
  // Delegate 선언
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLobbyPlayerCountChanged, int32, PlayerCount);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
@@ -45,7 +52,9 @@ UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
 {
 	GENERATED_BODY()
-	
+
+
+
 
 public:
 
@@ -93,10 +102,16 @@ public:
 	bool ClearJob(AShelterPlayerState* PlayerState); //
 
 
-	UPROPERTY(Replicated, BlueprintReadOnly)
+	UPROPERTY(ReplicatedUsing = OnRep_CanStart, BlueprintReadOnly)
 	bool bCanStart = false;
 
-	UFUNCTION(BlueprintPure)
+	UPROPERTY(BlueprintAssignable)
+	FOnCanStartChanged OnCanStartChanged;
+
+	UFUNCTION()
+	void OnRep_CanStart();
+
+	//UFUNCTION(BlueprintPure)
 	bool CanStartGame() const;
 
 	void UpdateCanStart();
@@ -119,11 +134,11 @@ public:
 
 	// 현재 선택된 Entry
 	UPROPERTY(ReplicatedUsing = OnRep_EntryTag, BlueprintReadOnly)
-	EEntryTag EntryTag = EEntryTag::None;
+	EEntryTag EntryTag = EEntryTag::Front; //초기값
 
 	// 현재 선택된 Site
 	UPROPERTY(ReplicatedUsing = OnRep_SiteTag, BlueprintReadOnly)
-	ESiteTag SiteTag = ESiteTag::None;
+	ESiteTag SiteTag = ESiteTag::Mansion;
 
 	// 서버에서 Entry를 변경
 	// PlayerController의 Server RPC에서 호출

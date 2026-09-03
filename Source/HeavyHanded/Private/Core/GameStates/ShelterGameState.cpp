@@ -213,7 +213,7 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 
 	// 직업 변경
 	PlayerState->SetSelectedJob(NewJob);
-
+	UpdateCanStart();
 
 
 
@@ -225,7 +225,7 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	// 값 자체를 변경해야 클라이언트에서 OnRep가 실행됨
 	JobStateChanged++;
 	//OnJobStateChanged.Broadcast();
-
+	OnRep_CanStart(); // 서버
 
 
 
@@ -255,6 +255,19 @@ bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
 	return true;
 }
 
+void AShelterGameState::OnRep_CanStart()
+{
+	// 클라이언트에서 이벤트 발생
+	OnCanStartChanged.Broadcast(bCanStart);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("OnRep_CanStart : %s"),
+		bCanStart ? TEXT("TRUE") : TEXT("FALSE")
+	);
+}
+
 bool AShelterGameState::CanStartGame() const
 {
 	// 0902 아래 변경 작동확인될시 지울 것
@@ -277,6 +290,8 @@ bool AShelterGameState::CanStartGame() const
 	return PlayerArray.Num() > 0;
 	*/
 
+
+	/*
 	if (PlayerArray.Num() <= 0)
 	{
 		return false;
@@ -300,6 +315,74 @@ bool AShelterGameState::CanStartGame() const
 	return true;
 
 
+	*/
+
+
+	// 디버그용
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("========== CanStartGame ==========")
+	);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("PlayerArray Num = %d"),
+		PlayerArray.Num()
+	);
+
+	if (PlayerArray.Num() <= 0)
+	{
+		return false;
+	}
+
+	for (APlayerState* PS : PlayerArray)
+	{
+		if (!PS)
+		{
+			UE_LOG(LogTemp, Error, TEXT("PlayerState is nullptr"));
+			return false;
+		}
+
+		AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
+
+		if (!ShelterPS)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("PlayerState Cast Failed! Class = %s"),
+				*PS->GetClass()->GetName()
+			);
+
+			continue;
+		}
+
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("PS = %s / Job = %s"),
+			*ShelterPS->GetName(),
+			*UEnum::GetValueAsString(ShelterPS->GetSelectedJob())
+		);
+
+		if (ShelterPS->GetSelectedJob() == EJobType::None)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Cannot Start: %s has no Job"),
+				*ShelterPS->GetName()
+			);
+
+			return false;
+		}
+	}
+
+	return true;
+
+
 }
 
 void AShelterGameState::UpdateCanStart()
@@ -309,7 +392,24 @@ void AShelterGameState::UpdateCanStart()
 		return;
 	}
 
-	bCanStart = CanStartGame();
+	const bool bNewCanStart = CanStartGame();
+
+	if (bCanStart == bNewCanStart)
+	{
+		return;
+	}
+
+	bCanStart = bNewCanStart;
+
+	// 서버에서도 이벤트 발생
+	OnCanStartChanged.Broadcast(bCanStart);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("UpdateCanStart : %s"),
+		bCanStart ? TEXT("TRUE") : TEXT("FALSE")
+	);
 }
 
 
@@ -410,6 +510,7 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AShelterGameState, JobStateChanged);
+	DOREPLIFETIME(AShelterGameState, bCanStart);
 
 	DOREPLIFETIME(AShelterGameState, SiteTag);
 	DOREPLIFETIME(AShelterGameState, EntryTag);
