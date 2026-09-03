@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/Interactable.h"   // 부모 인터페이스 — 전방 선언 불가
 #include "HandCart.generated.h"
 
 class ALootBase;
@@ -43,12 +44,23 @@ class UStaticMeshComponent;
  * 서버 권위 + 클라이언트 보간. 노획물과 같은 정책이다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API AHandCart : public AActor
+class HEAVYHANDED_API AHandCart : public AActor, public IInteractable
 {
 	GENERATED_BODY()
 
 public:
 	AHandCart();
+
+	/**
+	 * IInteractable — 상호작용 키(E)로 끌기를 시작하거나 놓는다.
+	 *
+	 * 카트는 '드는' 물건이 아니라 '미는' 물건이라 ICarryable 이 아니다.
+	 * 그래서 버리기(Q)나 던지기도 없다 — 놓는 것도 E 를 다시 누르는 것이다.
+	 *
+	 * UGAB_Interact 가 IInteractable 구현체를 종류를 모른 채 처리하므로,
+	 * 이걸 구현하는 것만으로 플레이어 파트를 고치지 않고 E 가 붙는다.
+	 */
+	virtual void OnInteract_Implementation(APawn* Interactor) override;
 
 	/** 지금 이 카트에 실려 있는 노획물. 서버에서만 채워진다 */
 	const TArray<TObjectPtr<ALootBase>>& GetContainedLoot() const { return ContainedLoot; }
@@ -81,20 +93,16 @@ public:
 	// ── 끌기 ─────────────────────────────────────────────────────────────
 
 	/**
-	 * 상호작용 키로 카트를 잡거나 놓는다. (서버 전용 — 플레이어 파트가 부르는 유일한 진입점)
+	 * 상호작용 키로 카트를 잡거나 놓는다. (서버 전용)
 	 *
-	 * [왜 이 모양인가]
-	 *   UGAB_Interact 는 시선에 맞은 액터를 if-else 사슬로 분기하는데, 그 파일은 플레이어 파트다.
-	 *   AVanZone 이 TryToggleBoarding 하나로 처리되는 것과 같은 모양으로 맞춰서,
-	 *   저쪽에 들어갈 코드가 두 줄로 끝나게 한다.
+	 * OnInteract_Implementation 이 부르는 실제 판정부다. 잡을 수 있는지, 이미 누가 잡고
+	 * 있는지, 어떻게 따라가는지는 전부 이 클래스 안에 있다.
+	 * Server RPC 는 요청일 뿐이므로 판정은 여기서 한다 — 클라이언트를 신뢰하지 않는다.
 	 *
-	 *       else if (AHandCart* Cart = Cast<AHandCart>(HitActor))
-	 *       {
-	 *           Cart->TryTogglePush(Character);
-	 *       }
-	 *
-	 *   잡을 수 있는지, 이미 누가 잡고 있는지, 어떻게 따라가는지는 전부 이 클래스 안에 있다.
-	 *   Server RPC 는 요청일 뿐이므로 판정은 여기서 한다 — 클라이언트를 신뢰하지 않는다.
+	 * [예전에는 플레이어 파트에 분기를 추가해 달라고 할 생각이었다]
+	 *   UGAB_Interact 의 if-else 사슬에 Cast<AHandCart> 를 한 줄 넣는 방식이었는데,
+	 *   그 사이 IInteractable 이 생기면서 저쪽이 구현체를 종류를 모른 채 처리하게 됐다.
+	 *   그래서 요청 없이 이쪽에서 인터페이스만 구현하는 것으로 끝났다.
 	 */
 	void TryTogglePush(APawn* Pawn);
 

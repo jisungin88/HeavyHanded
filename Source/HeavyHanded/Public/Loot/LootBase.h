@@ -540,6 +540,33 @@ protected:
 	float ReleaseForwardClearance = 30.f;
 
 	/**
+	 * 놓거나 던진 뒤 이 시간(초) 동안 사람과의 물리 충돌을 무시한다. 0 이면 끈다.
+	 *
+	 * [위치를 빼내는 것만으로는 부족하다]
+	 *   ResolveReleaseOverlap 이 물리를 켜기 전에 물건을 몸 밖으로 옮기지만, 좁은 구석에서는
+	 *   빠져나갈 자리가 없어 겹친 채로 남는다. 던지기는 아예 위치로 못 막는다 — 손에서
+	 *   출발해 몸을 스치며 날아가는 것이 정상 궤도라서, 출발점을 몸 밖으로 옮기면
+	 *   조준 궤적 예측과 실제 궤도가 어긋난다.
+	 *
+	 * [그래서 접촉 자체를 잠깐 끈다]
+	 *   ReleasedLoot 프로파일로 바꿨다가 이 시간이 지나면 Loot 으로 돌아온다.
+	 *   IgnoreActorWhenMoving 으로는 안 된다 — 그건 컴포넌트 이동 스윕 전용이고,
+	 *   시뮬레이션 중인 바디의 접촉은 물리 엔진이 따로 처리한다 (ResolveReleaseOverlap 주석 참고).
+	 *
+	 * [던진 사람만 골라 무시할 수는 없다]
+	 *   프로파일은 채널 단위라 그 구간에는 모든 사람을 통과한다. 0.3 초면 물건이 몸을
+	 *   벗어나기에 충분하고, 남이 그 사이에 끼어들어 통과당하는 일은 눈에 띄지 않는다.
+	 *   경비(Guard 채널)는 계속 Block 이라 던져 맞히는 것은 그대로 된다.
+	 *
+	 * [팔 뻗기 애니메이션이 오면 다시 볼 것]
+	 *   물건을 몸 밖에서 놓게 되면 원인 자체가 없어진다. 그때 이 값을 0 으로 내려
+	 *   껐을 때 문제가 없는지 확인하고, 없으면 이 경로를 지운다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot|Carry",
+		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
+	float ReleaseIgnorePawnSeconds = 0.3f;
+
+	/**
 	 * 솔로로 중량형을 들 때, 안 잡힌 쪽(Grip B)을 주 운반자 정면 기준 아래로
 	 * 늘어뜨리는 각도(도). 보조 운반자가 없어 두 번째 좌표를 못 구하는 상황을
 	 * 물리 없이 자연스러워 보이게 표현하는 값이다. ComputeHeavyCarryTransform 참고.
@@ -701,6 +728,20 @@ private:
 	void SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore);
 
 	/**
+	 * 놓기·던지기 직후 사람을 통과시키는 구간을 시작한다. 모든 머신에서 돈다.
+	 * 물리를 켠 뒤에 부른다 — 프로파일을 먼저 바꾸고 시뮬레이션을 켜야 필터가 반영된다.
+	 */
+	void BeginReleaseIgnorePawn();
+
+	/**
+	 * 통과 구간을 끝내고 평소 프로파일로 되돌린다.
+	 *
+	 * 구간이 끝나기 전에 누가 다시 집어 갔을 수 있다. 그때 되돌리면 소지 중 프로파일을
+	 * 덮어써서 운반자가 자기 물건에 막힌다. 그래서 아직 놓여 있을 때만 되돌린다.
+	 */
+	void EndReleaseIgnorePawn();
+
+	/**
 	 * 물리를 켜기 전에 운반자 몸 밖으로 빼낸다. (서버 전용)
 	 * 겹친 채로 켜면 물리 엔진이 침투를 밀어내며 만든 임펄스가 그대로 충돌로 잡히고,
 	 * 버린 물건이 엉뚱한 방향으로 튄다.
@@ -838,6 +879,14 @@ private:
 
 	/** 두 번째 운반자 몫. 이유는 위와 같다 */
 	TWeakObjectPtr<APawn> MoveIgnoredSecondary;
+
+	/**
+	 * 놓기·던지기 직후 사람 통과 구간의 타이머.
+	 *
+	 * 액터가 먼저 파괴되면 타이머 매니저가 스스로 정리한다(대상 객체를 약참조로 든다).
+	 * 그래서 EndPlay 에 해제 코드를 두지 않았다.
+	 */
+	FTimerHandle ReleaseIgnorePawnTimer;
 
 	/** 마지막으로 이 노획물을 든 사람. PrimaryCarrier 와 달리 놓은 뒤에도 지워지지 않는다 */
 	TWeakObjectPtr<APawn> LastCarrier;

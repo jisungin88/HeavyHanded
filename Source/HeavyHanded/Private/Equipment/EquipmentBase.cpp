@@ -18,6 +18,9 @@ namespace
 {
 	/** 물리 시뮬레이션 중. 노획물과 같은 프로파일을 쓴다 — 던진 장비도 물건처럼 굴러야 한다 */
 	static const FName EquipmentSimulatingProfile(TEXT("Loot"));
+
+	/** 막 놓거나 던진 직후 — 위와 같고 사람만 Ignore. 노획물과 같은 프로파일을 쓴다 */
+	static const FName EquipmentReleasedProfile(TEXT("ReleasedLoot"));
 }
 
 AEquipmentBase::AEquipmentBase()
@@ -37,6 +40,19 @@ AEquipmentBase::AEquipmentBase()
 	// ALootBase 와 같은 이유로 생성자에서 붙인다. BP 마다 추가하는 방식이면 언젠가
 	// 빼먹고, 그 장비만 조용한데 경고도 없어서 발견이 아주 늦다.
 	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
+
+	// [임시] E 로 집히게 하는 액터 태그.
+	//
+	//   UGAB_Interact::IsCarryableLoot 은 'Loot.Type' 하위 태그를 보고 집을 대상을 고른다.
+	//   장비는 그 태그를 달 수 없다 — 달면 AVanZone 이 노획물로 인식해 던져 둔 EMP 가
+	//   정산 화면에 뜬다. 그래서 저쪽이 남겨 둔 액터 태그 폴백('Item')을 쓴다.
+	//
+	//   BP 가 아니라 여기서 다는 이유는 NoiseEmitter 와 같다. 장비가 4종 더 늘어날 때
+	//   BP 마다 붙이는 방식이면 언젠가 빼먹고, 그 장비만 집히지 않는데 경고도 없다.
+	//
+	//   플레이어 파트에 'Equipment' 루트를 보는 판정을 요청해 두었다. 그게 들어오면
+	//   이 줄을 지운다 — 그때까지는 이것이 유일하게 동작하는 경로다.
+	Tags.Add(TEXT("Item"));
 }
 
 void AEquipmentBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -141,6 +157,11 @@ void AEquipmentBase::ApplyCarryState()
 {
 	const bool bCarried = IsValid(PrimaryCarrier);
 
+	// 놓인 순간을 구분하려고 직전 운반자를 들고 있는다. 그냥 PrimaryCarrier 가 비었는지만
+	// 보면 맵에 처음부터 놓여 있던 장비까지 '방금 놓였다' 로 취급된다.
+	APawn* const PreviousCarrier = AppliedCarrier.Get();
+	AppliedCarrier = PrimaryCarrier;
+
 	if (bCarried)
 	{
 		// PhysicsHandle 로 물리를 유지한 채 드는 방식은 멀티에서 깨진다.
@@ -199,8 +220,52 @@ void AEquipmentBase::ApplyCarryState()
 	}
 
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
+
+	// 던진 직후 잠깐 사람을 통과시킨다. 노획물(ALootBase::ReleaseIgnorePawnSeconds)과 같은
+	// 이유이고, 장비는 하나가 더 있다 — 점착 폭탄은 가장 먼저 닿는 것에 붙기 때문에
+	// 이게 없으면 던진 사람 몸에 붙는다. 자기 발밑에서 퓨즈가 도는 그림이 나온다.
+	const bool bIgnorePawnOnRelease =
+		IsValid(PreviousCarrier) && ReleaseIgnorePawnSeconds > 0.f;
+
+	EquipmentMesh->SetCollisionProfileName(bIgnorePawnOnRelease
+		? EquipmentReleasedProfile
+		: EquipmentSimulatingProfile);
+
 	EquipmentMesh->SetSimulatePhysics(true);
+
+	if (bIgnorePawnOnRelease)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				ReleaseIgnorePawnTimer, this, &AEquipmentBase::EndReleaseIgnorePawn,
+				ReleaseIgnorePawnSeconds, /*bLoop=*/false);
+		}
+	}
+}
+
+void AEquipmentBase::EndReleaseIgnorePawn()
+{
+	if (!IsValid(EquipmentMesh))
+	{
+		return;
+	}
+
+	// 구간이 끝나기 전에 누가 집어 갔으면 콜리전이 꺼져 있다. 여기서 되돌리면 다시 켜진다.
+	if (IsValid(PrimaryCarrier))
+	{
+		return;
+	}
+
+	// 이미 어딘가에 붙었으면(Deployed 이후) 그 상태의 콜리전을 그대로 둔다.
+	if (State == EEquipmentState::Deployed
+		|| State == EEquipmentState::Active
+		|| State == EEquipmentState::Spent)
+	{
+		return;
+	}
+
+	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
 }
 
 void AEquipmentBase::OnRep_PrimaryCarrier()

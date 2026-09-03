@@ -39,6 +39,9 @@ namespace LootCollisionProfiles
 
 	/** 중량형 소지 중 — 물리 OFF(Kinematic), 채널 응답은 Carried 와 동일 */
 	static const FName CarriedHeavy(TEXT("CarriedHeavyLoot"));
+
+	/** 막 놓거나 던진 직후 — Simulating 과 같고 사람만 Ignore */
+	static const FName Released(TEXT("ReleasedLoot"));
 }
 
 /**
@@ -1097,16 +1100,35 @@ void ALootBase::ApplyCarryState()
 		// 어태치된 채로는 물리가 돌지 않는다. 반드시 먼저 떼어낸다.
 		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
-		LootMesh->SetCollisionProfileName(LootCollisionProfiles::Simulating);
+		// 사람 손에서 놓인 것이면 잠깐 사람을 통과시킨다. 레벨에 배치된 노획물이
+		// BeginPlay 로 여기 들어올 때는 이전 운반자가 없으므로 해당되지 않는다.
+		//
+		// 프로파일을 처음부터 이것으로 켜는 것이 중요하다. 물리가 켜지는 첫 프레임에
+		// 이미 몸과 겹쳐 있고, 문제가 나는 것이 정확히 그 프레임이다.
+		// Simulating 으로 켰다가 나중에 바꾸면 늦는다.
+		const bool bIgnorePawnOnRelease =
+			IsValid(PreviousCarrier) && ReleaseIgnorePawnSeconds > 0.f;
+
+		LootMesh->SetCollisionProfileName(bIgnorePawnOnRelease
+			? LootCollisionProfiles::Released
+			: LootCollisionProfiles::Simulating);
 
 		// 물리를 켜기 전에 몸 밖으로 빼낸다. 순서가 바뀌면 소용없다.
 		// 위치 보정은 서버가 정하고 클라이언트는 복제로 받는다.
+		//
+		// 통과 구간이 있어도 이건 그대로 둔다. 겹친 자리에서 그냥 놓으면 통과 구간이
+		// 끝나는 순간 몸 안에서 다시 밀려나므로, 빼낼 수 있으면 빼내는 편이 낫다.
 		if (HasAuthority())
 		{
 			ResolveReleaseOverlap(PreviousCarrier);
 		}
 
 		LootMesh->SetSimulatePhysics(true);
+
+		if (bIgnorePawnOnRelease)
+		{
+			BeginReleaseIgnorePawn();
+		}
 
 		// 임펄스는 물리를 켠 뒤에야 먹는다.
 		// 던지기는 OnThrown 이 직접 훨씬 큰 임펄스를 주므로 여기서는 건드리지 않는다.
@@ -1301,6 +1323,42 @@ void ALootBase::ApplyDropImpulse(const APawn* Carrier)
 			LootMesh->SetPhysicsAngularVelocityInDegrees(SpinAxis * PhysicsData.DropSpinSpeed);
 		}
 	}
+}
+
+void ALootBase::BeginReleaseIgnorePawn()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// 구간 중에 다시 놓이면(집었다 바로 버리기) 여기로 다시 온다. SetTimer 가 같은 핸들을
+	// 덮어쓰므로 시간이 새로 시작된다. 이전 타이머가 남아 먼저 되돌리는 일은 없다.
+	World->GetTimerManager().SetTimer(
+		ReleaseIgnorePawnTimer, this, &ALootBase::EndReleaseIgnorePawn,
+		ReleaseIgnorePawnSeconds, /*bLoop=*/false);
+}
+
+void ALootBase::EndReleaseIgnorePawn()
+{
+	if (!IsValid(LootMesh))
+	{
+		return;
+	}
+
+	// 구간이 끝나기 전에 누가 집어 갔으면 아무것도 하지 않는다.
+	// 여기서 되돌리면 소지 중 프로파일(CarriedLoot)을 덮어써서 운반자가 자기 물건에 막힌다.
+	//
+	// 카트는 확인하지 않는다. AHandCart 는 실린 노획물의 프로파일을 건드리지 않으므로
+	// 적재 중에도 Simulating 이 맞는 값이고, 여기서 걸러 버리면 통과 구간에 카트로
+	// 들어간 물건이 되돌아올 계기를 영영 잃는다.
+	if (IsValid(PrimaryCarrier.Get()))
+	{
+		return;
+	}
+
+	LootMesh->SetCollisionProfileName(LootCollisionProfiles::Simulating);
 }
 
 void ALootBase::SetCarrierMoveIgnore(APawn* Carrier, bool bIgnore)
