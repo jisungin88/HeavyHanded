@@ -169,7 +169,19 @@ void ULootDurabilityComponent::HandleLootImpact(const FLootImpactEvent& Event)
 				*OwnerLoot->GetName(), ImpactCount, Data.MaxImpactCount, Event.ImpulseMagnitude));
 	}
 
-	if (ImpactCount >= Data.MaxImpactCount)
+	const bool bWillBreak = (ImpactCount >= Data.MaxImpactCount);
+
+	// 금이 갈 때마다 값이 깎인다. 깨지고 나서야 손해를 아는 것이 아니라, 들고 가는 동안
+	// "지금 밴에 넣을까 하나 더 주우러 갈까" 를 고민하게 만드는 것이 목적이다.
+	//
+	// 파괴되는 충격에서는 건너뛴다. 어차피 바로 아래 Break 가 100% 손실로 0 을 만드는데
+	// 여기서 한 번 더 깎으면 같은 프레임에 OnValueChanged 가 두 번 나가 HUD 가 깜빡인다.
+	if (!bWillBreak && Data.ValueLossPerImpact > 0.f)
+	{
+		OwnerLoot->ApplyValueLoss(Data.ValueLossPerImpact);
+	}
+
+	if (bWillBreak)
 	{
 		Break(Event);
 	}
