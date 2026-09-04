@@ -127,6 +127,19 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_NoisiestDetail;
 
+	/**
+	 * 그 판이 끝났을 때의 경계도 ("최종 경계도  100%  (경보)").
+	 *
+	 * [왜 유발자 줄과 따로 두는가] 유발자 줄의 %는 **그 사람에게 귀속된 몫**이라
+	 *   주인 없는 소음(노획물끼리 부딪는 소리 등)은 안 잡힌다. 그래서 경보로 끝난 판에서도
+	 *   유발자 %가 100 보다 한참 낮게 나온다 — 버그가 아니라 다른 값이다.
+	 *   플레이어가 인게임 HUD 에서 본 숫자는 이쪽이므로 둘을 같이 띄운다.
+	 *
+	 * [단계 이름을 같이 쓴다] 결과 화면에는 게이지 바가 없어 색으로 단계를 구분할 수 없다.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Result", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_FinalAlert;
+
 	// ── 목록을 행 위젯으로 그릴 때 ──
 	//
 	// 컨테이너와 행 클래스가 둘 다 있으면 행 위젯으로 그리고, 하나라도 없으면
