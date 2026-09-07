@@ -3,14 +3,15 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"        // TActorIterator — 디버그 치트(hh.Hazard.BreakWall)에서만 쓴다
+#include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
-// 아직 이 파일 하나만 쓰는 로그라 헤더에 EXTERN 을 두지 않는다 (CLAUDE.md 9절 기본 규칙).
-// Hazard 클래스가 늘어나 여러 파일이 공유하게 되면 그때 공유 헤더로 옮긴다.
-DEFINE_LOG_CATEGORY_STATIC(LogHazard, Log, All);
+// AMovementTrap 이 추가되며 이 카테고리를 두 파일이 공유하게 돼 HazardLog.h 로 옮겼다.
+DEFINE_LOG_CATEGORY(LogHazard);
 
 ABreakableWall::ABreakableWall()
 {
@@ -187,3 +188,45 @@ void ABreakableWall::HideWall()
 		Primitive->SetCanEverAffectNavigation(false);
 	}
 }
+
+// ──────────────────────────────────────────────────────────────
+// [디버그 전용] 점착 폭탄/브루트 돌진이 아직 이 벽을 모른다(StickyBomb.cpp 연결은
+// 물리·아이템 담당 파일이라 별도 협의 후 진행). 그 전까지 파괴 판정·연출·복제만
+// 먼저 검증하기 위한 치트. 쉬핑 빌드에서는 코드째 빠진다.
+// ──────────────────────────────────────────────────────────────
+#if !UE_BUILD_SHIPPING
+
+static void HazardBreakWallCommand(UWorld* World)
+{
+	if (!World)
+	{
+		return;
+	}
+
+	if (World->IsNetMode(NM_Client))
+	{
+		UE_LOG(LogHazard, Warning, TEXT("파괴는 서버 권위입니다. 클라이언트에서는 실행되지 않습니다."));
+		return;
+	}
+
+	int32 BrokenCount = 0;
+
+	for (TActorIterator<ABreakableWall> It(World); It; ++It)
+	{
+		// ImpactRadius 0 — 브루트 돌진과 같은 "직접 타격" 취급으로 거리 판정 없이 부순다
+		if (It->TryBreak(nullptr, It->GetActorLocation(), 0.f))
+		{
+			++BrokenCount;
+		}
+	}
+
+	UE_LOG(LogHazard, Log, TEXT("hh.Hazard.BreakWall — %d개 부쉈습니다."), BrokenCount);
+}
+
+static FAutoConsoleCommandWithWorld GHazardBreakWallCommand(
+	  TEXT("hh.Hazard.BreakWall"),
+	  TEXT("맵의 모든 BreakableWall 을 강제로 부순다 (점착 폭탄/브루트 연결 전 테스트용)"),
+	  FConsoleCommandWithWorldDelegate::CreateStatic(&HazardBreakWallCommand),
+	  ECVF_Cheat);
+
+#endif   // !UE_BUILD_SHIPPING

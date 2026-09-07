@@ -9,6 +9,7 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Break,     "Noise.Loot.Break");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Spill,     "Noise.Loot.Spill");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_HeavyDrop, "Noise.Loot.HeavyDrop");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Hazard_Trap,    "Noise.Hazard.Trap");
 
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Prep,   "Phase.Prep");
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Heist,  "Phase.Heist");
