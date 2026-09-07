@@ -655,10 +655,19 @@ void AShelterPlayerController::IngameTravel()
 
 void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)
 {
+	if (bError)
+	{
+		UE_LOG(LogTemp, Error, TEXT("%s"), *Message);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	}
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 10.0f, bError ? FColor::Red : FColor::Yellow, Message);
 	}
+
 }
 
 

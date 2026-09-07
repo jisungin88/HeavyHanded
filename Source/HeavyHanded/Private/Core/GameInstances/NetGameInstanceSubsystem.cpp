@@ -17,3 +17,21 @@ int32 UNetGameInstanceSubsystem::GetRoomMaxPlayer() const
 {
 	return MaxPlayers;
 }
+
+
+
+
+
+void UNetGameInstanceSubsystem::DebugInstMessage(const FString& Message, bool bError)
+{
+	DebugLogs.Add(Message);
+
+	if (bError)
+	{
+		UE_LOG(LogTemp, Error, TEXT("%s"), *Message);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	}
+}

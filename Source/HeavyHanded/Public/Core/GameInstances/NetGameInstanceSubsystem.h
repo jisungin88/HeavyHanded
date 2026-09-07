@@ -37,4 +37,19 @@ public:
 	int32 GetRoomMaxPlayer() const;
 
 
+	// ------------------------------ 디버그용---------------------------
+
+public:
+	void DebugMessage(const FString& Message, bool bError);
+
+	const TArray<FString>& GetDebugLogs() const
+	{
+		return DebugLogs;
+	}
+
+private:
+	UPROPERTY()
+	TArray<FString> DebugLogs;
+
+
 };
