@@ -148,17 +148,16 @@ void UGAB_Interact::TickReviveChannel()
     const bool bValid = IsValid(Target) && IsValid(Reviver);
     const bool bInRange = bValid && FVector::Dist(Reviver->GetActorLocation(), Target->GetActorLocation()) <= InteractionRange;
     const bool bStillDowned = bValid && Target->IsDowned();
+    // 리바이버 본인이 채널링 도중 다운되면(경비 접촉 등) 손을 뻗은 채로 계속 진행되는
+    // 것을 막는다 — 대상/거리 재검사와 같은 자리에서 매 0.1초 같이 확인한다.
+    const bool bReviverOk = bValid && !Reviver->IsDowned();
 
-    if (!bValid || !bInRange || !bStillDowned)
+    if (!bValid || !bInRange || !bStillDowned || !bReviverOk)
     {
-        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
-        if (bValid)
-        {
-            Target->SetReviveProgress(0.f);
-        }
-        ReviveChannelElapsed = 0.f;
+        UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (유효=%d 사거리=%d 다운유지=%d 리바이버멀쩡=%d)"),
+            bValid, bInRange, bStillDowned, bReviverOk);
 
-        UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (유효=%d 사거리=%d 다운유지=%d)"), bValid, bInRange, bStillDowned);
+        EndReviveChannel();
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
     }
@@ -168,8 +167,6 @@ void UGAB_Interact::TickReviveChannel()
 
     if (ReviveChannelElapsed >= ReviveChannelDuration)
     {
-        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
-
         // 기존 즉시 실행 분기에 있던 제거 코드 그대로. 상호작용을 건 쪽이 대상의 GE 클래스를
         // 알 필요가 없도록 소스이펙트가 아닌 태그로 지운다.
         if (UAbilitySystemComponent* TargetASC = Target->GetAbilitySystemComponent())
@@ -177,10 +174,79 @@ void UGAB_Interact::TickReviveChannel()
             TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(HHTags::State_Downed));
             UE_LOG(LogInteract, Log, TEXT("%s 를 다운 상태에서 복구시켰다."), *Target->GetName());
         }
-        Target->SetReviveProgress(0.f);
-        ReviveChannelElapsed = 0.f;
 
+        EndReviveChannel();
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+    }
+}
+
+void UGAB_Interact::EndReviveChannel()
+{
+    GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+
+    if (ABaseCharacter* Target = ReviveChannelTarget.Get())
+    {
+        Target->SetReviveProgress(0.f);
+    }
+
+    // 포즈 복귀 — 서버(권위) 인스턴스는 자기 몽타주에 직접 건다. 이 함수는 항상 서버에서만
+    // 불린다(ReviveChannelTimerHandle 자체가 PerformInteraction 이 서버 전용으로만 세팅하므로,
+    // 이 함수를 부르는 모든 경로가 그 전제 위에 있다). HoldStart 에 걸어둔 자기 루프를 풀어
+    // HoldEnd 로 흘려보낸다 — 정상 완료든 강제 취소든 이 함수 하나만 거치면 항상 회수로
+    // 이어지므로, 새 종료 경로가 생겨도 여기에만 추가하면 된다.
+    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+    {
+        ASC->CurrentMontageSetNextSectionName(HoldStartSectionName, HoldEndSectionName);
+    }
+
+    // 리바이버 본인 클라이언트에게도 홀드가 끝났음을 알린다 — OnRep_ReviveChannelActive 가
+    // 그쪽의 로컬 예측 몽타주 인스턴스에 같은 걸 걸어준다(1인칭 본인 팔 동기화).
+    if (ABaseCharacter* Reviver = ReviveChannelReviver.Get())
+    {
+        Reviver->SetReviveChannelActive(false);
+    }
+
+    ReviveChannelElapsed = 0.f;
+    ReviveChannelTarget.Reset();
+    ReviveChannelReviver.Reset();
+}
+
+void UGAB_Interact::CancelReviveChannel()
+{
+    // ABaseCharacter::Server_CancelRevive_Implementation 이 서버 ASC 에서 찾아 호출한다.
+    // 방어적으로 한 번 더 권위를 확인한다 — 이 함수가 다른 경로로 잘못 불려도 클라에서
+    // 서버 전용 타이머를 건드리는 일이 없게 한다.
+    if (!GetCurrentActorInfo() || !GetCurrentActorInfo()->IsNetAuthority())
+    {
+        return;
+    }
+
+    if (!ReviveChannelTimerHandle.IsValid())
+    {
+        // 채널링 중이 아니었다 — 일반 상호작용(줍기/문 등) 릴리즈가 보낸 호출이거나
+        // 이미 다른 사유로 끝난 뒤 늦게 도착한 것. 조용히 무시한다.
+        UE_LOG(LogInteract, Verbose, TEXT("CancelReviveChannel: 채널링 중이 아니라 무시한다."));
+        return;
+    }
+
+    UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (클라이언트 입력 릴리즈, RPC 경유)"));
+
+    EndReviveChannel();
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+}
+
+void UGAB_Interact::SetLocalHoldState(bool bHold)
+{
+    // 서버(권위) 인스턴스는 PerformInteraction/EndReviveChannel 에서 이미 자기 몽타주에
+    // 직접 걸었다 — 여기로 온다면 다른 경로로 잘못 불린 것이므로 무시한다.
+    if (GetCurrentActorInfo() && GetCurrentActorInfo()->IsNetAuthority())
+    {
+        return;
+    }
+
+    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+    {
+        ASC->CurrentMontageSetNextSectionName(HoldStartSectionName, bHold ? HoldStartSectionName : HoldEndSectionName);
     }
 }
 
@@ -188,16 +254,26 @@ void UGAB_Interact::InputReleased(const FGameplayAbilitySpecHandle Handle, const
 {
     Super::InputReleased(Handle, ActorInfo, ActivationInfo);
 
+    ABaseCharacter* Character = ActorInfo ? Cast<ABaseCharacter>(ActorInfo->AvatarActor.Get()) : nullptr;
+
     if (ReviveChannelTimerHandle.IsValid())
     {
-        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
-        if (ABaseCharacter* Target = ReviveChannelTarget.Get())
-        {
-            Target->SetReviveProgress(0.f);
-        }
-        ReviveChannelElapsed = 0.f;
-
+        // 권위 인스턴스 — 이 타이머는 PerformInteraction 이 서버에서만 세팅하므로,
+        // 여기 걸려 있다는 것 자체가 "이 머신이 곧 서버(리스닝 서버 호스트 본인이
+        // 부활시키는 중)"라는 뜻이다. 왕복 없이 바로 끝낸다.
+        EndReviveChannel();
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+    }
+    else if (ActorInfo && !ActorInfo->IsNetAuthority() && Character)
+    {
+        // 비권위(클라이언트 예측) 인스턴스. 여기의 ReviveChannelTimerHandle 은
+        // PerformInteraction 이 서버 전용이라 애초에 걸린 적이 없어 항상 무효다 —
+        // 즉 이 분기만으로는 "진짜 부활 채널링 중이었는가"를 알 수 없고, 일반
+        // 상호작용(줍기/문) 릴리즈에서도 매번 여기로 온다. 서버가 CancelReviveChannel
+        // 안에서 실제 채널링 여부를 다시 판단해 무해하게 무시하므로 여기서 걸러낼
+        // 필요는 없다 — GAB_Throw 가 쓰던 GameplayEvent 경유 대신, 서버의 진짜
+        // 채널링 인스턴스를 직접 지목하는 전용 RPC 를 쓴다.
+        Character->Server_CancelRevive();
     }
 }
 
@@ -208,12 +284,7 @@ void UGAB_Interact::EndAbility(const FGameplayAbilitySpecHandle Handle, const FG
     // 정상 경로에서 이미 정리된 뒤라면 아래 IsValid() 가 걸러줘서 중복 실행되지 않는다.
     if (ReviveChannelTimerHandle.IsValid())
     {
-        GetWorld()->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
-        if (ABaseCharacter* Target = ReviveChannelTarget.Get())
-        {
-            Target->SetReviveProgress(0.f);
-        }
-        ReviveChannelElapsed = 0.f;
+        EndReviveChannel();
     }
 
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
@@ -307,14 +378,44 @@ void UGAB_Interact::PerformInteraction()
 
         // 0. 대상이 다운 상태인 경우 — 부활. 즉시 처리하지 않고 0.1초 반복 타이머로 채널링을
         //    시작한다. 실제 태그 제거(RemoveActiveEffectsWithGrantedTags)는 TickReviveChannel 이
-        //    ReviveChannelDuration 을 다 채웠을 때 실행한다.
+        //    ReviveChannelDuration 을 다 채웠을 때 실행한다. 손 뻗은 포즈 유지는 몽타주
+        //    HoldStart 섹션 자기 루프(GAB_Throw 와 같은 패턴)로 처리한다.
         if (IsDownedTarget(HitActor))
         {
             if (ABaseCharacter* TargetChar = Cast<ABaseCharacter>(HitActor))
             {
+                // 채널을 걸기 전에 "이미 릴리즈가 먼저 도착해 있었는가"부터 확인한다.
+                // Server_CancelRevive(캐릭터 채널)와 어빌리티 활성화 RPC(ASC/PlayerState
+                // 채널)는 서로 다른 액터 채널이라 도착 순서가 보장되지 않는다 — E 를 아주
+                // 짧게 누르고 떼면 취소가 활성화보다 먼저 도착할 수 있는데, 그 순간엔 아직
+                // 채널도 안 걸려 있어(ReviveChannelTimerHandle 무효) CancelReviveChannel 이
+                // 조용히 넘어가고 신호가 사라졌었다 — 그래서 채널링을 하지도 않았는데 끝까지
+                // 진행되는 버그가 났다. Server_CancelRevive_Implementation 이 인스턴스 유무와
+                // 무관하게 캐릭터에 먼저 기록해 둔 시각을 여기서 확인해 그 경우를 잡아낸다.
+                if (Character->ConsumeRecentReviveCancelRequest())
+                {
+                    UE_LOG(LogInteract, Log, TEXT("부활 채널링을 시작하지 않는다 (시작 전에 릴리즈가 먼저 도착)"));
+                    return;
+                }
+
                 ReviveChannelTarget = TargetChar;
                 ReviveChannelReviver = Character;
                 ReviveChannelElapsed = 0.f;
+
+                // 뻗은 자세를 유지한다 — HoldStart 의 다음 섹션을 자기 자신으로 걸어
+                // 자동으로 HoldEnd(회수)로 안 넘어가게 막는다. 일반 상호작용(줍기/문)은
+                // 이 호출 자체가 없어서 몽타주에 에디터로 지정해 둔 기본 다음 섹션(HoldEnd)을
+                // 그대로 타고 곧장 회수까지 흘러간다 — GAB_Throw::BeginHoldLoop 와 같은 기법.
+                if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+                {
+                    ASC->CurrentMontageSetNextSectionName(HoldStartSectionName, HoldStartSectionName);
+                }
+
+                // 리바이버 본인 클라이언트에도 알린다 — PerformInteraction 은 서버 전용이라
+                // 클라이언트의 로컬 예측 몽타주 인스턴스는 이게 부활인지 모른다. 1인칭이라
+                // 본인 팔 메시가 보이므로, OnRep_ReviveChannelActive 가 클라이언트 쪽에도
+                // 같은 Hold 링크를 걸어주지 않으면 본인 화면에서만 먼저 회수돼버린다.
+                Character->SetReviveChannelActive(true);
 
                 GetWorld()->GetTimerManager().SetTimer(
                     ReviveChannelTimerHandle, this, &UGAB_Interact::TickReviveChannel, 0.1f, /*bLoop*/ true);

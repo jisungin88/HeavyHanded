@@ -1,4 +1,4 @@
-﻿#include "Character/Ability/GA_HeavyCarryAssist.h"
+﻿#include "Character/Ability/GAB_HeavyCarryAssist.h"
 #include "Character/BaseCharacter.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
@@ -8,7 +8,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogHeavyCarry, Log, All);
 
-UGA_HeavyCarryAssist::UGA_HeavyCarryAssist()
+UGAB_HeavyCarryAssist::UGAB_HeavyCarryAssist()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerExecution;
 
@@ -32,7 +32,7 @@ UGA_HeavyCarryAssist::UGA_HeavyCarryAssist()
 	AbilityTags.AddTag(HHTags::Ability_HeavyCarryAssist);
 }
 
-void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+void UGAB_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
 	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
@@ -80,9 +80,20 @@ void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 
 	if (CoopCarryStateEffectClass)
 	{
+		UE_LOG(LogHeavyCarry, Warning, TEXT("CoopCarryStateEffectClass 적용 시도: %s"), *GetNameSafe(CoopCarryStateEffectClass));
 		Primary->ApplyGameplayEffectToSelf(CoopCarryStateEffectClass);
 		Assistant->ApplyGameplayEffectToSelf(CoopCarryStateEffectClass);
 	}
+	else
+	{
+		UE_LOG(LogHeavyCarry, Error, TEXT("CoopCarryStateEffectClass 가 비어있음!"));
+	}
+
+	/*if (CoopCarryStateEffectClass)
+	{
+		Primary->ApplyGameplayEffectToSelf(CoopCarryStateEffectClass);
+		Assistant->ApplyGameplayEffectToSelf(CoopCarryStateEffectClass);
+	}*/
 
 	UE_LOG(LogHeavyCarry, Log, TEXT("%s 가 %s 의 %s 운반을 돕기 시작"),
 		*GetNameSafe(Assistant), *GetNameSafe(Primary), *GetNameSafe(Item));
@@ -91,18 +102,18 @@ void UGA_HeavyCarryAssist::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 		this, Assistant, PrimaryCarrier, CarriedItem,
 		MaxAssistDistance, TugOpposingDotThreshold, TugTensionBuildRate, TugTensionDecayRate, TugTensionKnockbackThreshold);
 
-	MonitorTask->OnEnded.AddDynamic(this, &UGA_HeavyCarryAssist::HandleAssistEnded);
+	MonitorTask->OnEnded.AddDynamic(this, &UGAB_HeavyCarryAssist::HandleAssistEnded);
 	MonitorTask->ReadyForActivation();
 
 	// 주 운반자가 물건을 놓는 순간(BaseCharacter::SetHeldActor) 즉시 통지받아
 	// MonitorTask 의 다음 틱 폴링을 기다리지 않고 바로 정리한다.
 	UAbilityTask_WaitGameplayEvent* WaitReleaseTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
 		this, HHTags::Event_Loot_Dropped, nullptr, /*OnlyTriggerOnce*/ true);
-	WaitReleaseTask->EventReceived.AddDynamic(this, &UGA_HeavyCarryAssist::HandleImmediatePrimaryRelease);
+	WaitReleaseTask->EventReceived.AddDynamic(this, &UGAB_HeavyCarryAssist::HandleImmediatePrimaryRelease);
 	WaitReleaseTask->ReadyForActivation();
 }
 
-void UGA_HeavyCarryAssist::HandleAssistEnded(EHeavyCarryEndReason Reason)
+void UGAB_HeavyCarryAssist::HandleAssistEnded(EHeavyCarryEndReason Reason)
 {
 	CleanupCrossReferences();
 
@@ -138,9 +149,9 @@ void UGA_HeavyCarryAssist::HandleAssistEnded(EHeavyCarryEndReason Reason)
 		UAbilityTask_PlayMontageAndWait* MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
 			this, NAME_None, KnockbackStaggerMontage);
 
-		MontageTask->OnCompleted.AddDynamic(this, &UGA_HeavyCarryAssist::OnStaggerMontageFinished);
-		MontageTask->OnInterrupted.AddDynamic(this, &UGA_HeavyCarryAssist::OnStaggerMontageFinished);
-		MontageTask->OnCancelled.AddDynamic(this, &UGA_HeavyCarryAssist::OnStaggerMontageFinished);
+		MontageTask->OnCompleted.AddDynamic(this, &UGAB_HeavyCarryAssist::OnStaggerMontageFinished);
+		MontageTask->OnInterrupted.AddDynamic(this, &UGAB_HeavyCarryAssist::OnStaggerMontageFinished);
+		MontageTask->OnCancelled.AddDynamic(this, &UGAB_HeavyCarryAssist::OnStaggerMontageFinished);
 		MontageTask->ReadyForActivation();
 	}
 	else
@@ -149,7 +160,7 @@ void UGA_HeavyCarryAssist::HandleAssistEnded(EHeavyCarryEndReason Reason)
 	}
 }
 
-void UGA_HeavyCarryAssist::OnStaggerMontageFinished()
+void UGAB_HeavyCarryAssist::OnStaggerMontageFinished()
 {
 	if (Assistant && StaggeredMovementLockEffectClass)
 	{
@@ -159,7 +170,7 @@ void UGA_HeavyCarryAssist::OnStaggerMontageFinished()
 	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
-void UGA_HeavyCarryAssist::HandleImmediatePrimaryRelease(FGameplayEventData Payload)
+void UGAB_HeavyCarryAssist::HandleImmediatePrimaryRelease(FGameplayEventData Payload)
 {
 	// 다른 아이템을 놓은 이벤트라면 무시한다 (이론상 발생하지 않지만 방어적으로 확인).
 	if (Payload.Target.Get() != CarriedItem.Get())
@@ -173,7 +184,7 @@ void UGA_HeavyCarryAssist::HandleImmediatePrimaryRelease(FGameplayEventData Payl
 	}
 }
 
-void UGA_HeavyCarryAssist::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+void UGAB_HeavyCarryAssist::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
 	// 정상 경로(HandleAssistEnded)를 거치지 않고 여기로 바로 들어온 경우
 	// (자발적 해제로 인한 CancelAbilities, 캐릭터 사망, 접속 종료 등) — 직접 정리한다.
@@ -189,7 +200,7 @@ void UGA_HeavyCarryAssist::EndAbility(const FGameplayAbilitySpecHandle Handle, c
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
-void UGA_HeavyCarryAssist::CleanupCrossReferences()
+void UGAB_HeavyCarryAssist::CleanupCrossReferences()
 {
 	// 이미 정리됐으면 다시 돌지 않는다 — 특히 솔로 페널티 GE가 중복 적용되는 것을 막는다.
 	if (bCrossReferencesCleaned)

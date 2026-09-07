@@ -19,6 +19,7 @@
 #include "Loot/LootBase.h"               // ComputeHeavyCarryTransform, GetSoloDragPitchDegrees
 #include "Loot/LootHeavyComponent.h"     // GetGripSocketA/B
 #include "Noise/NoiseEmitterComponent.h" // Sprint 소음 발행
+#include "Character/Ability/GAB_Interact.h" // Server_CancelRevive 가 이 캐릭터의 GAB_Interact 인스턴스를 찾아 호출한다
 
 // 운반 동기화 진단용. 이 경로는 실패해도 예외가 없고 "클라에서 아이템이 그대로 있다"
 // 로만 드러나서, 어디까지 도달했는지 로그 없이는 알 수 없다.
@@ -224,7 +225,7 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 
 		if (IA_Jump)
 		{
-			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &ACharacter::Jump);
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &ABaseCharacter::TryJump);
 			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 		}
 
@@ -419,6 +420,11 @@ void ABaseCharacter::StartCrouch(const FInputActionValue& Value)
 		return;
 	}
 
+	if (IsDowned())  // ← 추가
+	{
+		return;
+	}
+
 	Crouch();
     Server_ApplyGameplayEffect(CrouchGameplayEffectClass, true);
 }
@@ -431,6 +437,16 @@ void ABaseCharacter::StopCrouch(const FInputActionValue& Value)
 
 void ABaseCharacter::StartSprint(const FInputActionValue& Value)
 {
+	if (IsCarryingHeavyItem())
+	{
+		return;
+	}
+
+	if (IsDowned())  // ← 추가
+	{
+		return;
+	}
+
     Server_ApplyGameplayEffect(SprintGameplayEffectClass, true);
 }
 
@@ -456,6 +472,64 @@ void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGame
         // 제거할 때 핸들 방식이거나 소스 이펙트 방식 사용
         ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
     }
+}
+
+bool ABaseCharacter::Server_CancelRevive_Validate()
+{
+    // 파라미터가 없어 악의적으로 조작할 값 자체가 없다 — 실제로 채널링 중이었는지는
+    // 정상 범위의 판단이라 여기가 아니라 _Implementation(→ CancelReviveChannel)에서
+    // 조용히 무시한다.
+    return true;
+}
+
+void ABaseCharacter::Server_CancelRevive_Implementation()
+{
+    // 이 RPC(캐릭터 액터 채널)와 어빌리티 활성화 RPC(ASC는 PlayerState 소유라 그쪽 채널)는
+    // 서로 다른 액터 채널이라 도착 순서가 보장되지 않는다. E 를 아주 짧게 누르고 떼면
+    // 이 취소가 활성화보다 먼저 도착할 수 있는데, 그 순간엔 아직 어빌리티가 Active 는커녕
+    // 인스턴스조차 없을 수도 있다(InstancedPerActor 는 최초 활성화 전엔 인스턴스가 없다).
+    // 그래서 인스턴스 유무·활성 여부와 무관하게 "취소 요청이 있었다"는 사실 자체를
+    // 캐릭터(항상 존재)에 먼저 기록해 둔다 — GAB_Interact::PerformInteraction 이 채널을
+    // 막 시작하려는 순간 이 시각을 확인해서, 이미 늦은 취소라면 아예 시작하지 않는다.
+    ReviveCancelRequestedTime = GetWorld()->GetTimeSeconds();
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC)
+    {
+        return;
+    }
+
+    // InstancedPerActor 라 캐릭터당 GAB_Interact 스펙·인스턴스가 정확히 하나다.
+    FGameplayAbilitySpec* Spec = ASC->FindAbilitySpecFromClass(UGAB_Interact::StaticClass());
+    if (!Spec)
+    {
+        return;
+    }
+
+    // 이미 채널링 중인(가장 흔한) 경우 여기서 바로 끝낸다. 아직 시작 전이면
+    // CancelReviveChannel 이 조용히 넘어가고, 위에서 기록한 시각을 PerformInteraction 이
+    // 대신 확인한다.
+    if (UGAB_Interact* Interact = Cast<UGAB_Interact>(Spec->GetPrimaryInstance()))
+    {
+        Interact->CancelReviveChannel();
+    }
+}
+
+bool ABaseCharacter::ConsumeRecentReviveCancelRequest()
+{
+    if (ReviveCancelRequestedTime < 0.0)
+    {
+        return false;
+    }
+
+    const double Elapsed = GetWorld()->GetTimeSeconds() - ReviveCancelRequestedTime;
+    ReviveCancelRequestedTime = -1.0; // 결과와 무관하게 한 번 확인하면 소비한다.
+
+    // 이 시간 창(0.3초)보다 오래된 건 이번 입력과 무관한 옛 취소로 본다 — 너무 크게
+    // 잡으면 관계없는 이전 상호작용(줍기 등)의 릴리즈가 다음 부활 시도를 막아버리고,
+    // 너무 작게 잡으면 실제 RPC 도착 순서 뒤바뀜을 놓친다. 같은 커넥션의 서로 다른
+    // 액터 채널 간 도착 편차치고는 충분히 넉넉한 값이다.
+    return Elapsed <= 0.3;
 }
 
 void ABaseCharacter::AbilityInputPressed(int32 InputID)
@@ -489,6 +563,7 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABaseCharacter, HeavyCarryState);
 	// 08.18 end
 	DOREPLIFETIME(ABaseCharacter, ReviveProgress);
+	DOREPLIFETIME(ABaseCharacter, bReviveChannelActive);
 }
 
 bool ABaseCharacter::CanCarryActor(const AActor* Target) const
@@ -803,6 +878,20 @@ void ABaseCharacter::OnRep_AssistingPrimaryCarrier()
 	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_AssistingPrimaryCarrier: %s"), *GetNameSafe(AssistingPrimaryCarrier));
 }
 
+void ABaseCharacter::TryJump()
+{
+	if (IsCarryingHeavyItem())
+	{
+		return;
+	}
+
+	if (IsDowned())
+	{
+		return;
+	}
+	Jump();
+}
+
 bool ABaseCharacter::IsCarryingHeavyItem() const
 {
 	// "중량형인가" 는 Loot.Type.Heavy 태그로 판정한다.
@@ -849,7 +938,7 @@ void ABaseCharacter::UpdateHeavyCarryTransform()
 
 	UPrimitiveComponent* GripRoot = Carryable->GetPhysicsRoot();
 	USkeletalMeshComponent* MyMesh = GetMesh();
-	if (!GripRoot || !MyMesh || !MyMesh->DoesSocketExist(CarrySocketName))
+	if (!GripRoot || !MyMesh || !MyMesh->DoesSocketExist(HeavyCarrySocketName))
 	{
 		return;
 	}
@@ -863,16 +952,16 @@ void ABaseCharacter::UpdateHeavyCarryTransform()
 
 	const FVector LocalGripA = GripRoot->GetSocketTransform(SocketA, RTS_Component).GetLocation();
 	const FVector LocalGripB = GripRoot->GetSocketTransform(SocketB, RTS_Component).GetLocation();
-	const FVector PrimaryHandWorld = MyMesh->GetSocketLocation(CarrySocketName);
+	const FVector PrimaryHandWorld = MyMesh->GetSocketLocation(HeavyCarrySocketName);
 
 	// 보조 운반자가 있고, 그쪽 손 소켓도 유효할 때만 2인 캐리로 계산한다.
 	FVector SecondaryHandWorld = FVector::ZeroVector;
 	const bool bHasAssistant = IsValid(HeavyCarryAssistant)
 		&& HeavyCarryAssistant->GetMesh() != nullptr
-		&& HeavyCarryAssistant->GetMesh()->DoesSocketExist(HeavyCarryAssistant->CarrySocketName);
+		&& HeavyCarryAssistant->GetMesh()->DoesSocketExist(HeavyCarryAssistant->HeavyCarrySocketName);
 	if (bHasAssistant)
 	{
-		SecondaryHandWorld = HeavyCarryAssistant->GetMesh()->GetSocketLocation(HeavyCarryAssistant->CarrySocketName);
+		SecondaryHandWorld = HeavyCarryAssistant->GetMesh()->GetSocketLocation(HeavyCarryAssistant->HeavyCarrySocketName);
 	}
 
 	const FTransform NewTransform = ALootBase::ComputeHeavyCarryTransform(
@@ -900,4 +989,43 @@ void ABaseCharacter::SetReviveProgress(float NewProgress)
 void ABaseCharacter::OnRep_ReviveProgress()
 {
 	// 지금은 빈 훅 — UI는 나중에 연결한다.
+}
+
+void ABaseCharacter::SetReviveChannelActive(bool bActive)
+{
+	// 권위 판정은 API 안에 둔다 — 서버 전용 호출부(PerformInteraction/EndReviveChannel)가
+	// 실수로라도 클라에서 불릴 일은 없지만, 방어적으로 한 번 더 막는다.
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	bReviveChannelActive = bActive;
+}
+
+void ABaseCharacter::OnRep_ReviveChannelActive()
+{
+	// 시뮬레이티드 프록시(남이 보는 내 모습)는 서버가 리플리케이트하는 몽타주 상태를
+	// 그대로 따라가므로 이 훅이 필요 없다 — 로컬 컨트롤러가 있는 클라이언트 전용이다.
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!ASC)
+	{
+		return;
+	}
+
+	FGameplayAbilitySpec* Spec = ASC->FindAbilitySpecFromClass(UGAB_Interact::StaticClass());
+	if (!Spec)
+	{
+		return;
+	}
+
+	if (UGAB_Interact* Interact = Cast<UGAB_Interact>(Spec->GetPrimaryInstance()))
+	{
+		Interact->SetLocalHoldState(bReviveChannelActive);
+	}
 }

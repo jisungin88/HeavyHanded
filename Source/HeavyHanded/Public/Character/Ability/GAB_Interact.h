@@ -18,6 +18,18 @@ public:
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
     virtual void InputReleased(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo) override;
 
+    // 서버 전용 진입점. ABaseCharacter::Server_CancelRevive_Implementation 이 이 캐릭터의
+    // GAB_Interact 인스턴스(InstancedPerActor 라 하나뿐)를 찾아서 호출한다.
+    // 실제로 채널링 중이 아니었으면(일반 상호작용 릴리즈에서도 호출될 수 있다) 조용히 무시한다.
+    void CancelReviveChannel();
+
+    // ABaseCharacter::OnRep_ReviveChannelActive 가 부른다. 리바이버 본인 클라이언트의
+    // 로컬 예측 몽타주 인스턴스에 서버와 같은 Hold 링크를 걸어준다 — 1인칭이라 본인
+    // 팔 메시가 보이므로, 서버가 PerformInteraction/EndReviveChannel 에서 자기 인스턴스에
+    // 건 것과 똑같은 걸 클라이언트 쪽에도 걸어줘야 한다. 서버(권위) 인스턴스에서 호출되면
+    // 아무것도 하지 않는다 — 그쪽은 이미 직접 처리했다.
+    void SetLocalHoldState(bool bHold);
+
 protected:
     // 시선 기준 상호작용 사거리. 눈 위치에서 바라보는 방향으로 이만큼 훑는다.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = "0.0", Units = "cm"))
@@ -30,6 +42,17 @@ protected:
     // 다운 대상 부활에 필요한 채널링 시간 (E를 이만큼 누르고 있어야 한다)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Revive", meta = (ClampMin = "0.0", Units = "s"))
     float ReviveChannelDuration = 3.0f;
+
+    // 조준 유지 중 정지 루프를 도는 구간 이름 (SkillMontage 안에 존재해야 함).
+    // GAB_Throw 와 같은 이름 규칙 — 일반 상호작용(줍기/문)에서는 몽타주가 기본
+    // 다음 섹션(에디터에서 지정)을 타고 HoldEnd 로 곧장 흘러간다. 코드가 손대는 건
+    // 부활 채널링 시작/종료 시점뿐이다.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Revive")
+    FName HoldStartSectionName = TEXT("HoldStart");
+
+    // 손을 뗐거나(일반 상호작용) 채널이 끝났을 때(부활) 이어질 회수 구간 이름.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Revive")
+    FName HoldEndSectionName = TEXT("HoldEnd");
 
     // 상호작용 레이캐스트 및 로직 수행 함수
     void PerformInteraction();
@@ -63,4 +86,10 @@ private:
     float ReviveChannelElapsed = 0.f;
     TWeakObjectPtr<class ABaseCharacter> ReviveChannelTarget;
     TWeakObjectPtr<class ABaseCharacter> ReviveChannelReviver;
+
+    // 채널 종료 지점 통합. 정상 완료 · 거리 이탈 · 대상 회복 · 리바이버 다운 · 입력 릴리즈 ·
+    // 서버 RPC 취소까지 전부 이 함수 하나로 모은다 — 타이머 정리, 진행률 리셋,
+    // 몽타주 Hold 해제(포즈 복귀)를 여기 한 곳에서만 하므로 새 종료 경로가 생겨도
+    // 이 함수만 부르면 포즈가 빠지지 않는 사고를 막을 수 있다.
+    void EndReviveChannel();
 };
