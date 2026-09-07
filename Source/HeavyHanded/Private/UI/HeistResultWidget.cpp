@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerState.h"
 #include "TimerManager.h"
 
+#include "Alert/AlertComponent.h"   // 최종 경계도를 상한으로 쓴다 (NoisePercentToShow)
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistPhase.h"
@@ -63,6 +64,37 @@ namespace
 		default:
 			return LOCTEXT("ResultSubFailure", "아무도 돌아오지 못했다");
 		}
+	}
+
+	/**
+	 * "경계도 N% 유발" 에 찍을 정수 퍼센트.
+	 *
+	 * [스케일] GetNoisiestPlayer() 가 주는 기여량은 경계도와 같은 0~1 이다.
+	 *   100 을 안 곱하면 경계도가 꽉 찬 판에서도 화면에 1% 로 찍힌다.
+	 *
+	 * [최종 경계도를 넘지 않게 한다] 기여량은 누적이라 자연 감소분까지 포함한다.
+	 *   소음을 냈다 가라앉혔다 반복한 판에서는 137% 같은 값이 나오는데, 바로 위에
+	 *   "최종 경계도 100%" 를 같이 띄우므로 두 줄이 서로 다른 말을 하게 된다.
+	 */
+	int32 NoisePercentToShow(float Contribution, float FinalGauge01)
+	{
+		const float Shown = FMath::Min(Contribution, FinalGauge01);
+		return FMath::RoundToInt(FMath::Clamp(Shown, 0.f, 1.f) * 100.f);
+	}
+
+	/**
+	 * 그 판의 최종 경계도. 인게임 HUD 가 마지막에 보여준 값과 같은 것이어야 한다.
+	 *
+	 * [결과 화면 시점에도 값이 살아 있다] ResetAlert() 는 본 작업 진입에서만 불리고
+	 *   경보는 래치라, 100% 로 끝난 판은 결과 화면에서도 100% 그대로다.
+	 *
+	 * [클라에서도 읽힌다] 서버 전용 데이터가 아니다 — 양자화 복제본이 OnRep 에서
+	 *   AlertGauge 를 채우므로 참가자 창에서도 같은 값이 나온다.
+	 */
+	float GetFinalAlertGauge01(const UObject* WorldContext)
+	{
+		const UAlertComponent* Alert = UAlertComponent::Get(WorldContext);
+		return Alert ? FMath::Clamp(Alert->GetAlertGauge01(), 0.f, 1.f) : 0.f;
 	}
 
 	/** 적재 목록 한 줄을 만들기 위한 묶음. 같은 노획물 여러 개를 한 줄로 합친다 */
@@ -199,6 +231,14 @@ void UHeistResultWidget::NativePreConstruct()
 		Txt_Noisiest->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
+	// 최종 경계도는 수치 셋과 같은 급으로 읽혀야 한다. 색은 단계에 따라
+	// PopulateResult() 에서 다시 칠하므로 여기서는 모양만 잡는다
+	if (Txt_FinalAlert)
+	{
+		Txt_FinalAlert->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
+		Txt_FinalAlert->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+	}
+
 	// 부연 · 달성률은 보조 정보다
 	for (UTextBlock* Sub : { Txt_NoisiestDetail.Get(), Txt_TargetRatio.Get() })
 	{
@@ -232,6 +272,7 @@ void UHeistResultWidget::NativeConstruct()
 		Txt_Money     ? nullptr : TEXT("Txt_Money"),
 		Txt_LootCount ? nullptr : TEXT("Txt_LootCount"),
 		Txt_Noisiest  ? nullptr : TEXT("Txt_Noisiest"),
+		Txt_FinalAlert? nullptr : TEXT("Txt_FinalAlert"),
 		Txt_LootList  ? nullptr : TEXT("Txt_LootList"),
 		Txt_PlayerList? nullptr : TEXT("Txt_PlayerList"),
 		Txt_Confirm   ? nullptr : TEXT("Txt_Confirm"),
@@ -389,6 +430,25 @@ void UHeistResultWidget::PopulateResult()
 											 FText::AsNumber(GS->GetLoadedEntries().Num())));
 	}
 
+	// 인게임 HUD 가 마지막에 보여준 경계도. 유발자 줄과 단위가 같아야 하므로 같이 구한다
+	const float FinalGauge01 = GetFinalAlertGauge01(this);
+
+	if (Txt_FinalAlert)
+	{
+		const UAlertComponent* Alert = UAlertComponent::Get(this);
+		const EAlertLevel FinalLevel = Alert ? Alert->GetAlertLevel() : EAlertLevel::Calm;
+
+		// 색만으로 단계를 구분하지 않는다 — 결과 화면에는 게이지 바가 없어
+		// 단계 이름을 글자로 같이 띄우지 않으면 100% 가 무슨 상태인지 알 수 없다
+		Txt_FinalAlert->SetText(FText::Format(
+			LOCTEXT("ResultFinalAlert", "최종 경계도  {0}%  ({1})"),
+			FText::AsNumber(FMath::RoundToInt(FinalGauge01 * 100.f)),
+			UUISettings::GetAlertLevelText(FinalLevel)));
+
+		Txt_FinalAlert->SetColorAndOpacity(
+			FSlateColor(UUISettings::Get()->GetAlertLevelColor(FinalLevel)));
+	}
+
 	if (Txt_Noisiest)
 	{
 		// 기획서 8장이 "반드시 넣는다" 고 못박은 항목이다.
@@ -408,7 +468,7 @@ void UHeistResultWidget::PopulateResult()
 			// 집계되는 값은 누적 경계도 기여량뿐이다 (Txt_NoisiestDetail 주석)
 			Txt_NoisiestDetail->SetText(Noisiest
 				? FText::Format(LOCTEXT("ResultNoisiestDetail", "경계도 {0}% 유발 — 이 작업 최다"),
-								FText::AsNumber(FMath::RoundToInt(Contribution)))
+								FText::AsNumber(NoisePercentToShow(Contribution, FinalGauge01)))
 				: LOCTEXT("ResultNoisiestDetailNone", "아무도 소음을 내지 않았다"));
 		}
 	}
@@ -591,11 +651,12 @@ void UHeistResultWidget::PopulatePlayerRows()
 
 		const float Ratio = (Total > 0) ? static_cast<float>(Line.Value) / static_cast<float>(Total) : 0.f;
 
-		// 금액이 아니라 퍼센트를 쓴다 — 시안이 그렇고, 바와 같은 값을 두 번 말해야
-		// 바가 무엇을 재는 것인지 읽힌다. 절대 금액은 적재 목록에 이미 있다
+		// 퍼센트가 아니라 금액을 쓴다 — 시안은 퍼센트였지만 플레이어가 알고 싶은 것은
+		// "내가 얼마를 실어 왔는가" 이고, 퍼센트는 남이 얼마를 벌었는지에 따라 같은 성과가
+		// 다른 숫자로 나온다. 특히 전멸한 판은 전원이 "0%" 라 아무 말도 하지 않는다.
+		// 바는 그대로 점유율을 재므로 두 값이 서로 다른 것을 말한다
 		Row->SetRow(FText::FromString(Line.Name),
-					FText::Format(LOCTEXT("ResultShare", "{0}%"),
-								  FText::AsNumber(FMath::RoundToInt(Ratio * 100.f))),
+					HeavyUIText::Money(Line.Value),
 					Ratio,
 					/*bDimmed=*/false);
 

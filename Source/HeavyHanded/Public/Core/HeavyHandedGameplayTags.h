@@ -28,6 +28,9 @@ namespace HHTags
 	//   놓든 던지든 결국 바닥에 부딪히고, 그 충돌이 이미 Noise.Loot.Impact 로
 	//   임펄스에 비례한 소리를 낸다. 태그를 하나 더 얹으면 같은 사건이 두 번 들린다.
 
+	/** 덫 작동. 기획서 3장 "트랩 작동" — 대, +15%, 30m. AMovementTrap(Hazards)이 참조한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Hazard_Trap);
+
 	// ── 코어 루프 페이즈 (지성인 / Config/Tags/Phase.ini) ──
 	//
 	// AHeistGameState 가 하나를 들고 전원에게 복제한다. 판정은 전부 서버(AHeistGameMode)다.
