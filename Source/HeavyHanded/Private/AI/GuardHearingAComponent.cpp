@@ -4,7 +4,10 @@
 #include "AI/GuardHearingAComponent.h"
 
 #include "Perception/AIPerceptionComponent.h"
+
+//#include "Perception/AISense_Hearing.h"
 #include "Perception/AISenseConfig_Hearing.h"
+
 
 
 #include "AIController.h"
@@ -98,12 +101,23 @@ void UGuardHearingAComponent::BeginPlay()
 	
 }
 
-
+/*
 // Called every frame
 void UGuardHearingAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// ...
+
+
+	// 사용시 생성자에 true 필요
+	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
+	// off to improve performance if you don't need them.
+	PrimaryComponentTick.bCanEverTick = true;
+
+	// ...
+
+
 }
 
+*/

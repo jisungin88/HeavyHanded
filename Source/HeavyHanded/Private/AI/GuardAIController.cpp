@@ -21,15 +21,6 @@
 #include "AITypes.h"
 #include "Perception/AIPerceptionComponent.h"
 
-// 이동!
-/// #include "Perception/AISense_Sight.h"
-///#include "Perception/AISenseConfig_Sight.h"
-
-
-
-#include "Perception/AISense_Hearing.h"
-#include "Perception/AISenseConfig_Hearing.h"
-
 // Navigation
 #include "NavigationSystem.h"
 
@@ -62,58 +53,24 @@
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
+// 1. 생성자
 AGuardAIController::AGuardAIController()
 {
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
-
-
 
 	// AC 추가 0908
 	GuardSightComp = CreateDefaultSubobject<UGuardSightAComponent>(TEXT("GuardSight"));
 	GuardHearingComp = CreateDefaultSubobject<UGuardHearingAComponent>(TEXT("GuardHearingComp"));
 
 
-
-	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
-	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
-	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
-
-	//이동 ------------------------- // 작동 확인시 삭제할 것 -----------------------------
-	///SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-	//HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-	// -------------------------------------------------------------------------------------
-
-
 	// AAIController가 IGenericTeamAgentInterface를 이미 구현하고 있어(TeamID 멤버) 여기서는
 	// 그 값만 채운다. 모든 경비를 같은 팀으로 묶어 서로 "우호"로 판정되게 한다.
 	SetGenericTeamId(FGenericTeamId(1));
 
-	// 플레이어는 IGenericTeamAgentInterface를 구현하지 않아 FGenericTeamId::NoTeam(255)로
-	// 남는다. 경비 입장에서 그런 상대는 "중립"으로 판정되므로 bDetectNeutrals를 켜야
-	// 플레이어를 감지한다. 경비끼리는 위에서 같은 팀으로 묶어 "우호"로 판정되는데,
-	// bDetectFriendlies는 꺼서 서로를 감지 대상에서 제외한다 — 켜두면 경비 2명을 배치했을 때
-	// 서로를 시야로 잡고 쫓아다니며 교착 상태에 빠진다.
-
-
-
-
-
-	// 이동
-	/// SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-	/// SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	/// SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-	//HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-	//HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	//HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
-
-
-
-	// 이동
-	///PerceptionComp->ConfigureSense(*SightConfig);
-	///PerceptionComp->ConfigureSense(*HearingConfig);
 }
 
+// 2. 초기화
 void AGuardAIController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -127,6 +84,101 @@ void AGuardAIController::BeginPlay()
 		GameStateSetHandle =
 			World->GameStateSetEvent.AddUObject(this, &AGuardAIController::BindToGameState);
 	}
+}
+
+// 3. 빙의 후 초기화
+void AGuardAIController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+
+	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
+	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
+	ApplyGuardStats(InPawn);
+
+
+
+	if (!IsValid(BehaviorTreeAsset))
+	{
+		UE_LOG(LogGuardAI, Error,
+			TEXT("[%s] BehaviorTreeAsset 이 비어 있다. BT 시작과 Perception 바인딩을 모두 건너뛴다. "
+				"BP_GuardAIController 의 Guard|AI > Behavior Tree Asset 을 확인할 것."),
+			*GetNameSafe(InPawn));
+		return;
+	}
+
+
+	//Behavior Tree / Blackboard 준비
+	// -------------------------------------------------------------------------------------------------------
+	UBlackboardComponent* BlackboardComp = nullptr;
+	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
+
+	if (!IsValid(BlackboardComp))
+	{
+		UE_LOG(LogGuardAI, Error,
+			TEXT("[%s] Blackboard 생성 실패. BT_Guards 에 Blackboard Asset 이 물려 있는지 확인할 것."),
+			*GetNameSafe(InPawn));
+	}
+
+	// SearchStartTime/LastSeenTime 기본값이 0.0이면, 게임 시작 직후 몇 초 동안
+	// "한 번도 감지 안 했는데 타임아웃 조건이 우연히 참"이 되는 문제가 생길 수 있다.
+	// 아주 먼 과거 값으로 초기화해 실제로 감지되기 전까지는 항상 타임아웃이 만료된 상태로 둔다.
+	if (IsValid(BlackboardComp))
+	{
+		constexpr float FarPast = -100000.f;
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, FarPast);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, FarPast);
+	}
+
+
+
+	// Perception 이벤트, PerceptionMeter 연결
+	// -------------------------------------------------------------------------------------------------------
+	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
+
+	// 빙의한 폰의 PerceptionMeterComponent(소음 인지 게이지)를 찾아 OnPerceptionFull 을 구독한다.
+	// 멤버 PerceptionMeter 에도 캐싱해 둬야 한다 - HandlePerceptionFull 에서 게이지를
+	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
+	// 빠뜨리면 항상 nullptr 이라 리셋이 절대 호출되지 않는다. 그러면 래치가 안 풀려
+	// 게이지가 100%에서 그대로 굳어 두 번째 소음부터는 OnPerceptionFull 이 다시 터지지 않는다.
+	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn))
+	{
+		PerceptionMeter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>();
+		if (PerceptionMeter)
+		{
+			PerceptionMeter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
+		}
+		else
+		{
+			UE_LOG(LogGuardAI, Error, TEXT("[%s] PerceptionMeterComponent 를 찾지 못했다. GuardCharacter 파생 폰인지 확인할 것."),
+				*GetNameSafe(InPawn));
+		}
+	}
+
+
+	// 머리 위 감지 게이지 타이머 등록
+	// -------------------------------------------------------------------------------------------------------
+
+
+	// 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
+	// BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
+	// 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
+	GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
+		&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
+
+
+
+	// 첫 순찰 지점 선택
+	// -------------------------------------------------------------------------------------------------------
+	// 시작 시 첫 순찰 지점을 미리 채워둔다
+	SelectNextPatrolPoint();
+
+
+	// Behavior Tree 시작
+	// -------------------------------------------------------------------------------------------------------
+	// BP_GuardAIController 는 data only 블루프린트라 그래프에서 대신 호출할 곳이 없고,
+	// bStartAILogicOnPossess 도 BrainComponent 가 있어야 의미가 있다(그 컴포넌트를
+	// 만들어주는 게 바로 이 호출이다). 여기서 부르지 않으면 BT 가 아예 시작되지 않는다.
+	RunBehaviorTree(BehaviorTreeAsset);
 }
 
 void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -144,6 +196,9 @@ void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	Super::EndPlay(EndPlayReason);
 }
+
+
+
 
 void AGuardAIController::BindToGameState(AGameStateBase* GameState)
 {
@@ -184,6 +239,8 @@ void AGuardAIController::UnbindFromGameState()
 	BoundGameState = nullptr;
 }
 
+
+
 void AGuardAIController::HandleHeistPhaseChanged(
 	FGameplayTag NewPhase, FGameplayTag /*OldPhase*/, EHeistPhaseReason /*Reason*/)
 {
@@ -210,90 +267,15 @@ void AGuardAIController::StopForMatchEnd()
 	// 화면에는 멈춰 선 경비가 보이는데 숫자만 움직이는 상태가 된다
 	if (PerceptionComp)
 	{
-		// 이동필요
 		GuardSightComp->SetSightEnabled(false);
-		////////// PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
-		PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), false);
+		GuardHearingComp->SetHearingEnabled(false);
 	}
 
 	// 머리 위 게이지 갱신 타이머도 멈춘다. 게이지는 더 이상 변하지 않는다
 	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
 }
 
-void AGuardAIController::OnPossess(APawn* InPawn)
-{
-	Super::OnPossess(InPawn);
 
-	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
-	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
-	ApplyGuardStats(InPawn);
-
-
-
-	if (!IsValid(BehaviorTreeAsset))
-	{
-		UE_LOG(LogGuardAI, Error,
-			TEXT("[%s] BehaviorTreeAsset 이 비어 있다. BT 시작과 Perception 바인딩을 모두 건너뛴다. "
-				 "BP_GuardAIController 의 Guard|AI > Behavior Tree Asset 을 확인할 것."),
-			*GetNameSafe(InPawn));
-		return;
-	}
-
-	UBlackboardComponent* BlackboardComp = nullptr;
-	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
-
-	if (!IsValid(BlackboardComp))
-	{
-		UE_LOG(LogGuardAI, Error,
-			TEXT("[%s] Blackboard 생성 실패. BT_Guards 에 Blackboard Asset 이 물려 있는지 확인할 것."),
-			*GetNameSafe(InPawn));
-	}
-
-	// SearchStartTime/LastSeenTime 기본값이 0.0이면, 게임 시작 직후 몇 초 동안
-	// "한 번도 감지 안 했는데 타임아웃 조건이 우연히 참"이 되는 문제가 생길 수 있다.
-	// 아주 먼 과거 값으로 초기화해 실제로 감지되기 전까지는 항상 타임아웃이 만료된 상태로 둔다.
-	if (IsValid(BlackboardComp))
-	{
-		constexpr float FarPast = -100000.f;
-		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, FarPast);
-		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, FarPast);
-	}
-
-	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
-
-	// 빙의한 폰의 PerceptionMeterComponent(소음 인지 게이지)를 찾아 OnPerceptionFull 을 구독한다.
-	// 멤버 PerceptionMeter 에도 캐싱해 둬야 한다 - HandlePerceptionFull 에서 게이지를
-	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
-	// 빠뜨리면 항상 nullptr 이라 리셋이 절대 호출되지 않는다. 그러면 래치가 안 풀려
-	// 게이지가 100%에서 그대로 굳어 두 번째 소음부터는 OnPerceptionFull 이 다시 터지지 않는다.
-	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn))
-	{
-		PerceptionMeter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>();
-		if (PerceptionMeter)
-		{
-			PerceptionMeter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
-		}
-		else
-		{
-			UE_LOG(LogGuardAI, Error, TEXT("[%s] PerceptionMeterComponent 를 찾지 못했다. GuardCharacter 파생 폰인지 확인할 것."),
-				*GetNameSafe(InPawn));
-		}
-	}
-
-	// 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
-	// BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
-	// 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
-	GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
-		&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
-
-	// 시작 시 첫 순찰 지점을 미리 채워둔다
-	SelectNextPatrolPoint();
-
-	// BP_GuardAIController 는 data only 블루프린트라 그래프에서 대신 호출할 곳이 없고,
-	// bStartAILogicOnPossess 도 BrainComponent 가 있어야 의미가 있다(그 컴포넌트를
-	// 만들어주는 게 바로 이 호출이다). 여기서 부르지 않으면 BT 가 아예 시작되지 않는다.
-	RunBehaviorTree(BehaviorTreeAsset);
-}
 
 void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
@@ -311,85 +293,11 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
 
+
+	// if였던 것은 sight를 우선순위로 처리 (BP)
 	GuardSightComp->OnTargetPerceptionUpdatedSight(Actor, Stimulus, BlackboardComp);
 	GuardHearingComp->OnTargetPerceptionUpdatedHearing(Actor, Stimulus, BlackboardComp);
 
-	/*
-	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
-	{
-		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
-		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
-		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
-		const float NowSeconds = GetWorld()->GetTimeSeconds();
-
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			if (SightLostAtTime >= 0.f)
-			{
-				UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (직전 상실이 %.2f초 지속)"),
-					*GetNameSafe(GetPawn()), *GetNameSafe(Actor), NowSeconds - SightLostAtTime);
-			}
-			else
-			{
-				UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (최초)"),
-					*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
-			}
-
-			SightLostAtTime = -1.f;
-		}
-		else
-		{
-			SightLostAtTime = NowSeconds;
-
-			UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 상실: %s"),
-				*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
-		}
-
-		// 브로드캐스트는 false->true 전환 1회로 제한한다 - 덮어쓰기 전에 이전 값을 봐둔다.
-		const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
-
-		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			if (!bWasSeeing)
-			{
-				OnPlayerSpotted.Broadcast(Actor);
-			}
-
-			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
-
-			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
-			// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
-			// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
-			// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
-			// 추격 조건이 영구히 거짓이 된다.
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
-		}
-		// 시야를 잃었다고 해서 여기서 SearchStartTime 을 쓰지 않는다.
-		//
-		// 쓰면 스쳐 지나가듯 한 번 보이기만 해도 조사가 켜진다. Guard.ini 는
-		// Guard.State.Investigate 를 "인지 게이지가 가득 차" 진입하는 상태로 정의한다.
-		// 그 조건은 BTService_UpdateDetectionGauge 가 게이지 100 인 동안 매 틱
-		// SearchStartTime 을 밀어주는 것으로 이미 만족된다 - 시야를 잃는 순간
-		// 그 값이 얼어붙어 자연스럽게 "수색 시작 시각"이 된다.
-	}
-	*/
-
-	/*
-	//else
-	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
-	{
-		// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
-		// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
-		}
-	}
-	*/
 }
 
 void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
@@ -419,9 +327,6 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 		PerceptionMeter->ResetPerception();
 	}
 }
-
-
-
 
 bool AGuardAIController::SelectNextSearchPoint()
 {
@@ -604,13 +509,6 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 
 	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
-
-	// 이동필요 > 작동 확인시 삭제할 것 -----------------------------------------------
-	// SightConfig->SightRadius = Row->SightRadius;
-	// SightConfig->LoseSightRadius = Row->LoseSightRadius;
-	// SightConfig->PeripheralVisionAngleDegrees = Row->PeripheralVisionAngleDegrees;
-	// HearingConfig->HearingRange = Row->HearingRange;
-	// --------------------------------------------------------------------------------
 
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
