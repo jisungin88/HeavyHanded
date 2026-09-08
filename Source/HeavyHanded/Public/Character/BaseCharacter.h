@@ -148,6 +148,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Abilities")
 	TArray<TSubclassOf<UGameplayAbility>> EventTriggeredAbilities;
 
+	void TryJump();
+
 public:
 
 
@@ -225,6 +227,18 @@ public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 
+	// 비권위(클라이언트) GAB_Interact 인스턴스가 부활 채널링 도중 E 를 뗐음을 서버에 알린다.
+	// GAB_Interact(다른 클래스)가 직접 호출해야 해서 public 이다. 실제로 채널링 중이
+	// 아니었어도(일반 상호작용 릴리즈에서도 호출될 수 있음) 서버가 조용히 무시하므로
+	// 안전하다 — UGAB_Interact::CancelReviveChannel 참조.
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_CancelRevive();
+
+	// GAB_Interact::PerformInteraction(서버)이 부활 채널을 막 시작하려는 순간 호출한다.
+	// 최근 0.3초 안에 Server_CancelRevive 가 도착해 있었으면 true 를 돌려주고 소비(리셋)한다 —
+	// 어빌리티 활성화 RPC보다 취소 RPC가 먼저 도착한 경우(아주 짧게 눌렀다 뗌)를 잡아낸다.
+	bool ConsumeRecentReviveCancelRequest();
+
 protected:
 	// ★ [통합됨] 에디터 디테일 패널에서 입력과 스킬을 1:1로 매핑하는 리스트 (DefaultAbilities 삭제됨)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "GAS|Abilities")
@@ -252,9 +266,26 @@ protected:
 	UFUNCTION()
 	void OnRep_ReviveProgress();
 
+	// 부활 채널링 중인가 — 대상이 아니라 리바이버(구조자) 본인에게 붙는다.
+	//
+	// [왜 필요한가] GAB_Interact::PerformInteraction 은 서버 전용이라, 부활로 판정된
+	// 사실을 리바이버 본인의 클라이언트(로컬 예측 인스턴스)는 모른다. 1인칭이라 본인
+	// 팔 메시가 보이므로, 서버가 자기 몽타주에 건 HoldStart 자기 루프를 클라이언트
+	// 쪽에도 걸어줘야 한다 — 이 프로퍼티의 복제(OnRep)가 그 신호다. 시뮬레이티드
+	// 프록시(남이 보는 내 모습)는 서버가 리플리케이트하는 몽타주 상태를 그대로 따라가므로
+	// 이 값이 필요 없다 — OnRep 안에서 IsLocallyControlled() 로 걸러낸다.
+	UPROPERTY(ReplicatedUsing = OnRep_ReviveChannelActive)
+	bool bReviveChannelActive = false;
+
+	UFUNCTION()
+	void OnRep_ReviveChannelActive();
+
 	// 물건을 붙일 손 소켓 이름.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction")
 	FName CarrySocketName = TEXT("Hand_R_Socket");
+
+	UPROPERTY(EditDefaultsOnly, Category = "Interaction")
+	FName HeavyCarrySocketName = FName("Heavy_Socket");
 
 	/**
 	 * 중량형을 들고 있는 동안(솔로·협동 둘 다) 마우스 좌우 회전 입력에 곱하는 배율.
@@ -325,6 +356,11 @@ private:
 
 	float RecentlyThrownTime = -1.f;
 
+	// Server_CancelRevive 가 기록하는 "부활 취소 요청" 시각. 서버 전용, 복제하지 않는다.
+	// 어빌리티 활성화 RPC(ASC/PlayerState 채널)와 이 취소 RPC(캐릭터 채널)의 도착 순서가
+	// 뒤바뀌는 경우(아주 짧게 눌렀다 뗌)를 잡기 위한 값이다.
+	double ReviveCancelRequestedTime = -1.0;
+
 public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool IsCarryingHeavyItem() const;
@@ -342,6 +378,10 @@ public:
 	// GAB_Interact 의 부활 채널링 진행률(0~1). UI는 나중에 연결 — 지금은 값만 존재한다.
 	UFUNCTION(BlueprintCallable, Category = "State")
 	void SetReviveProgress(float NewProgress);
+
+	// GAB_Interact::PerformInteraction/EndReviveChannel(둘 다 서버 전용)이 부른다.
+	// 서버 권한 밖에서 불려도 조용히 무시한다 — 권위 판정은 API 안에 둔다는 원칙.
+	void SetReviveChannelActive(bool bActive);
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

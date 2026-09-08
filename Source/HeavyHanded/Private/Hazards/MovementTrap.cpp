@@ -127,6 +127,14 @@ void AMovementTrap::ReleaseTarget(TWeakObjectPtr<ABaseCharacter> TargetPtr)
 
 void AMovementTrap::Rearm()
 {
+	if (bDestroyAfterTrigger)
+	{
+		// 바나나 껍질 같은 소모성 함정 — 다시 무장하는 대신 사라진다.
+		// bReplicates = true 라서 서버의 Destroy() 가 클라에도 정상적으로 반영된다
+		Destroy();
+		return;
+	}
+
 	bArmed = true;
 }
 

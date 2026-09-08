@@ -12,6 +12,8 @@ class ABaseCharacter;
 
 /**
  * 밟으면 한동안 움직이지 못하게 하는 덫. (기획서 3장 "트랩 작동" — 대, +15%, 30m)
+ * bDestroyAfterTrigger 로 곰덫(재사용)과 바나나 껍질(1회 소모) 둘 다 이 클래스 하나로 만든다 —
+ * 메커니즘이 완전히 같아서(밟으면 잠깐 못 움직인다) BP 값만 다르게 두는 쪽을 택했다.
  *
  * [GAS 가 아니라 UCharacterMovementComponent 를 직접 잠근다]
  *   이 프로젝트의 기존 이동 잠금(UGA_HeavyCarryAssist::StaggeredMovementLockEffectClass)은
@@ -75,10 +77,19 @@ protected:
 	/**
 	 * 풀려난 뒤 다시 작동하기까지의 대기 시간. 0 이면 풀려나자마자 재무장한다.
 	 * 같은 대상이 그 자리에 계속 서 있어도 재중첩(BeginOverlap) 없이는 재발동하지 않는다.
+	 * bDestroyAfterTrigger 가 true 면 이 값은 안 쓰인다 — 재무장하지 않고 사라지기 때문이다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Trap",
-		meta = (ClampMin = "0.0", Units = "s"))
+		meta = (ClampMin = "0.0", Units = "s", EditCondition = "!bDestroyAfterTrigger"))
 	float ResetDelay = 2.f;
+
+	/**
+	 * true 면 한 번 걸린 뒤 대상을 풀어주고 재무장하지 않은 채 스스로 사라진다.
+	 * 바나나 껍질처럼 한 번 쓰면 없어지는 소모성 함정에 켠다. false(기본)면 곰덫처럼
+	 * ResetDelay 뒤 다시 작동한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Trap")
+	bool bDestroyAfterTrigger = false;
 
 	// ---- 연출 (BP 는 에셋만 고른다) ----
 

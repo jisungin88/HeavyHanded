@@ -3,19 +3,19 @@
 #include "CoreMinimal.h"
 #include "Abilities/GameplayAbility.h"
 #include "Character/Ability/AT_MonitorHeavyCarry.h"
-#include "GA_HeavyCarryAssist.generated.h"
+#include "GAB_HeavyCarryAssist.generated.h"
 
 class ABaseCharacter;
 
 // 무거운 물건에 두 번째로 E 를 눌렀을 때 GAB_Interact 가 이벤트로 발동시키는 어빌리티.
 // 입력으로 직접 누를 수 없다 (AbilityInputBindings 에 등록하지 않는다).
 UCLASS()
-class HEAVYHANDED_API UGA_HeavyCarryAssist : public UGameplayAbility
+class HEAVYHANDED_API UGAB_HeavyCarryAssist : public UGameplayAbility
 {
 	GENERATED_BODY()
 
 public:
-	UGA_HeavyCarryAssist();
+	UGAB_HeavyCarryAssist();
 
 	virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData) override;
 
