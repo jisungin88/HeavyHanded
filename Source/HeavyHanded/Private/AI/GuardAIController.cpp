@@ -7,6 +7,7 @@
 
 #include "AI/GuardSightAComponent.h"
 #include "AI/GuardHearingAComponent.h"
+#include "AI/GuardPatrolAComponent.h"
 
 
 // Guard Character
@@ -51,6 +52,7 @@
 
 
 
+
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
 // 1. 생성자
@@ -59,7 +61,10 @@ AGuardAIController::AGuardAIController()
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
 
+
 	// AC 추가 0908
+	GuardPatrolComp = CreateDefaultSubobject<UGuardPatrolAComponent>(TEXT("GuardPatrol"));
+
 	GuardSightComp = CreateDefaultSubobject<UGuardSightAComponent>(TEXT("GuardSight"));
 	GuardHearingComp = CreateDefaultSubobject<UGuardHearingAComponent>(TEXT("GuardHearingComp"));
 
@@ -167,10 +172,11 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 
 
+
 	// 첫 순찰 지점 선택
 	// -------------------------------------------------------------------------------------------------------
 	// 시작 시 첫 순찰 지점을 미리 채워둔다
-	SelectNextPatrolPoint();
+	// SelectNextPatrolPoint(); 	// 이동 필요
 
 
 	// Behavior Tree 시작
@@ -328,82 +334,71 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 	}
 }
 
-bool AGuardAIController::SelectNextSearchPoint()
+
+
+void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 {
-	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
-	const APawn* GuardPawn = GetPawn();
-
-	if (!IsValid(BlackboardComp) || !IsValid(GuardPawn))
-	{
-		return false;
-	}
-
-	// 조사 지점은 LastKnownLocation(시야 전용 키)이 아니라 InvestigateLocation에서 읽는다.
-	//
-	// SearchStartTime을 갱신하는 곳이 세 군데다: 시야 기반 UBTService_UpdateDetectionGauge
-	// (게이지 100% 도달), 소리 기반 HandlePerceptionFull(인지 게이지 100%),
-	// 그리고 OnTargetPerceptionUpdated의 Hearing 분기(자극 1건). 셋 다 SearchStartTime을
-	// 쓰는 바로 그 자리에서 InvestigateLocation도 같이 채워 넣으므로, 여기서 다시
-	// LastKnownLocation을 읽으면 "시야로 진입한 조사"만 성립하고 소리로 들어온 조사는
-	// LastKnownLocation이 비어 있어 매번 실패한다 — 실제로 경비를 한 번도 안 들켰는데
-	// 소리만으로 게이지를 채우면 "마지막 목격 위치가 없어 수색을 시작할 수 없다" 로 막혔었다.
-	const FVector SearchAnchor = BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation);
-	if (!FAISystem::IsValidLocation(SearchAnchor))
+	const UGuardSettings* Settings = UGuardSettings::Get();
+	const UDataTable* StatsTable = Settings->GuardStats.LoadSynchronous();
+	if (!IsValid(StatsTable))
 	{
 		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] 조사 지점이 없어 수색을 시작할 수 없다."), *GetNameSafe(GuardPawn));
-		return false;
+			TEXT("[%s] Project Settings > Guard > Guard Stats 가 비어 있다. 폴백값을 그대로 쓴다."),
+			*GetNameSafe(InPawn));
+		return;
 	}
 
-	// SearchStartTime 이 바뀌었으면 새 조사다. 훑기 진행도를 초기화한다.
-	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
-	if (!FMath::IsNearlyEqual(SearchStartTime, HandledSearchStartTime))
+	// RowName == EGuardType 의 짧은 이름 문자열. UEnum::GetNameStringByValue 는
+	// "EGuardType::Standard" 처럼 열거형 이름까지 붙어 나와 DataTable RowName 관례와
+	// 어긋나므로, 여기서는 명시적으로 매핑한다.
+	FName RowName;
+	switch (GuardType)
 	{
-		HandledSearchStartTime = SearchStartTime;
-		CurrentSearchStep = -1;
+	case EGuardType::Standard: RowName = TEXT("Standard"); break;
+	case EGuardType::Dog:      RowName = TEXT("Dog");      break;
+	case EGuardType::Armed:    RowName = TEXT("Armed");    break;
+	default:                   RowName = TEXT("Standard"); break;
 	}
 
-	++CurrentSearchStep;
-
-	// 0번째는 조사 지점 자체(마지막 목격 지점 또는 소리 지점). 여기부터 확인하는 게 자연스럽다.
-	if (CurrentSearchStep == 0)
+	const FGuardStatsRow* Row = StatsTable->FindRow<FGuardStatsRow>(RowName, TEXT("AGuardAIController::ApplyGuardStats"));
+	if (!Row)
 	{
-		// 이미 InvestigateLocation에 들어있는 값과 같지만, Blackboard 갱신 시점을
-		// 명시적으로 남겨 다른 리스너(위젯 등)가 "조사 0단계 진입"을 관찰할 수 있게 한다.
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SearchAnchor);
-
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 시작 - 조사 지점 %s"),
-			*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString());
-		return true;
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] DT_GuardStats 에 행 '%s' 가 없다. 폴백값을 그대로 쓴다."),
+			*GetNameSafe(InPawn), *RowName.ToString());
+		return;
 	}
 
-	if (CurrentSearchStep > SearchSweepCount)
+
+	GuardPatrolComp->SetPatrolStats(Row->PatrolArrivalRadius, Row->SearchSweepCount, Row->SearchSweepRadius);
+
+	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
+	GuardHearingComp->SetHearingRange(Row->HearingRange);
+
+	HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
+
+	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
+	PerceptionComp->RequestStimuliListenerUpdate();
+
+	if (ACharacter* GuardCharacterPawn = Cast<ACharacter>(InPawn))
 	{
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 종료 - %d개 지점을 훑었다. 순찰로 복귀."),
-			*GetNameSafe(GuardPawn), SearchSweepCount);
-		return false;
+		if (UCharacterMovementComponent* MovementComp = GuardCharacterPawn->GetCharacterMovement())
+		{
+			MovementComp->MaxWalkSpeed = Row->MoveSpeed;
+		}
 	}
 
-	// 조사 지점 주변에서 실제로 도달 가능한 지점만 고른다.
-	// 무작위 오프셋을 그냥 더하면 벽 너머나 NavMesh 밖이 나와 Move To 가 실패한다.
-	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
-	FNavLocation SweepPoint;
-
-	if (IsValid(NavSys) && NavSys->GetRandomReachablePointInRadius(SearchAnchor, SearchSweepRadius, SweepPoint))
+	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
+	// 뒤에 찾는다) - 여기서는 InPawn 에서 직접 다시 찾는다.
+	if (AGuardCharacter* GuardPawnForMeter = Cast<AGuardCharacter>(InPawn))
 	{
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SweepPoint.Location);
-
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 %d/%d - %s"),
-			*GetNameSafe(GuardPawn), CurrentSearchStep, SearchSweepCount,
-			*SweepPoint.Location.ToCompactString());
-		return true;
+		if (UPerceptionMeterComponent* Meter = GuardPawnForMeter->FindComponentByClass<UPerceptionMeterComponent>())
+		{
+			Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
+		}
 	}
-
-	UE_LOG(LogGuardAI, Warning,
-		TEXT("[%s] 조사 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
-		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), SearchSweepRadius);
-	return false;
 }
+
 
 float AGuardAIController::GetWorldAlertLevel() const
 {
@@ -467,257 +462,25 @@ void AGuardAIController::UpdateHeadGaugeWidget()
 	GaugeWidget->SetGaugePercent(GaugePercent);
 }
 
-void AGuardAIController::ApplyGuardStats(APawn* InPawn)
+
+
+
+
+bool AGuardAIController::SelectNextSearchPoint()
 {
-	const UGuardSettings* Settings = UGuardSettings::Get();
-	const UDataTable* StatsTable = Settings->GuardStats.LoadSynchronous();
-	if (!IsValid(StatsTable))
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] Project Settings > Guard > Guard Stats 가 비어 있다. 폴백값을 그대로 쓴다."),
-			*GetNameSafe(InPawn));
-		return;
-	}
-
-	// RowName == EGuardType 의 짧은 이름 문자열. UEnum::GetNameStringByValue 는
-	// "EGuardType::Standard" 처럼 열거형 이름까지 붙어 나와 DataTable RowName 관례와
-	// 어긋나므로, 여기서는 명시적으로 매핑한다.
-	FName RowName;
-	switch (GuardType)
-	{
-	case EGuardType::Standard: RowName = TEXT("Standard"); break;
-	case EGuardType::Dog:      RowName = TEXT("Dog");      break;
-	case EGuardType::Armed:    RowName = TEXT("Armed");    break;
-	default:                   RowName = TEXT("Standard"); break;
-	}
-
-	const FGuardStatsRow* Row = StatsTable->FindRow<FGuardStatsRow>(RowName, TEXT("AGuardAIController::ApplyGuardStats"));
-	if (!Row)
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] DT_GuardStats 에 행 '%s' 가 없다. 폴백값을 그대로 쓴다."),
-			*GetNameSafe(InPawn), *RowName.ToString());
-		return;
-	}
-
-	PatrolArrivalRadius = Row->PatrolArrivalRadius;
-	SearchSweepCount = Row->SearchSweepCount;
-	SearchSweepRadius = Row->SearchSweepRadius;
-	HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
-
-
-
-	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
-	GuardHearingComp->SetHearingRange(Row->HearingRange);
-
-
-	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
-	PerceptionComp->RequestStimuliListenerUpdate();
-
-	if (ACharacter* GuardCharacterPawn = Cast<ACharacter>(InPawn))
-	{
-		if (UCharacterMovementComponent* MovementComp = GuardCharacterPawn->GetCharacterMovement())
-		{
-			MovementComp->MaxWalkSpeed = Row->MoveSpeed;
-		}
-	}
-
-	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
-	// 뒤에 찾는다) - 여기서는 InPawn 에서 직접 다시 찾는다.
-	if (AGuardCharacter* GuardPawnForMeter = Cast<AGuardCharacter>(InPawn))
-	{
-		if (UPerceptionMeterComponent* Meter = GuardPawnForMeter->FindComponentByClass<UPerceptionMeterComponent>())
-		{
-			Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
-		}
-	}
+	// 이동했음
+	return GuardPatrolComp->SelectNextSearchPoint2();
 }
 
-int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
-{
-	const int32 PointCount = GuardPawn->GetPatrolPointCount();
-	if (PointCount <= 1)
-	{
-		return 0;
-	}
+// int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
+// {
+//	// 이동했음
+// }
 
-	// 반경 안의 이웃 경비를 자신을 포함해 모은다. 레벨에 배치된 경비 수가 적어
-	// 매 OnPossess(경비당 한 번)마다 전체 순회해도 부담이 없다.
-	TArray<const AGuardCharacter*> Cluster;
-	Cluster.Add(GuardPawn);
 
-	const float RadiusSq = FMath::Square(InitialPatrolSeparationRadius);
-	for (TActorIterator<AGuardCharacter> It(GetWorld()); It; ++It)
-	{
-		AGuardCharacter* Other = *It;
-		if (!IsValid(Other) || Other == GuardPawn)
-		{
-			continue;
-		}
-
-		if (FVector::DistSquared(GuardPawn->GetActorLocation(), Other->GetActorLocation()) <= RadiusSq)
-		{
-			Cluster.Add(Other);
-		}
-	}
-
-	if (Cluster.Num() <= 1)
-	{
-		return 0;
-	}
-
-	// 두 경비가 서로를 이웃으로 보면 똑같은 반경 조건을 검사하므로 정렬 결과도 똑같이 나온다 -
-	// 그래야 "내 순번"이 양쪽에서 일관되게 계산된다. GetUniqueID는 인스턴스마다 고정이라
-	// 정렬 기준으로 안전하다.
-	Cluster.Sort([](const AGuardCharacter& A, const AGuardCharacter& B)
-	{
-		return A.GetUniqueID() < B.GetUniqueID();
-	});
-
-	const int32 MyRank = Cluster.IndexOfByKey(GuardPawn);
-	const int32 StartIndex = FMath::RoundToInt(static_cast<float>(MyRank) * PointCount / Cluster.Num()) % PointCount;
-
-	// PingPong 은 bPatrolMovingForward 기본값이 true(정방향)라, 시작 지점을 마지막 인덱스로
-	// 고르면 도착 직후 곧장 같은 지점을 다시 고르고서야 역방향으로 꺾인다. 미리 뒤집어 둔다.
-	if (GuardPawn->PatrolPattern == EPatrolPattern::PingPong && StartIndex == PointCount - 1)
-	{
-		bPatrolMovingForward = false;
-	}
-
-	UE_LOG(LogGuardAI, Log,
-		TEXT("[%s] %.0fcm 안에 이웃 경비 %d명이 있어(내 순번 %d/%d) %d번 지점에서 순찰을 시작한다 (기본 0번 대신)."),
-		*GetNameSafe(GuardPawn), InitialPatrolSeparationRadius, Cluster.Num() - 1, MyRank, Cluster.Num(), StartIndex);
-
-	return StartIndex;
-}
 
 void AGuardAIController::SelectNextPatrolPoint()
 {
-	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
-	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
-
-	if (!IsValid(GuardPawn))
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] AGuardCharacter 가 아니라 순찰 지점을 읽을 수 없다 (현재 폰: %s)."),
-			*GetName(), *GetNameSafe(GetPawn()));
-		return;
-	}
-
-	if (!IsValid(BlackboardComp))
-	{
-		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Blackboard 가 없어 PatrolLocation 을 쓸 수 없다."), *GetName());
-		return;
-	}
-
-	const int32 PointCount = GuardPawn->GetPatrolPointCount();
-	if (PointCount == 0)
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] PatrolPoints 가 비어 있다. EditInstanceOnly 라 레벨에 '배치된' 액터에만 값이 붙는다 "
-				 "— 스폰된 경비라면 여기서 항상 비어 있다."),
-			*GetNameSafe(GuardPawn));
-		return;
-	}
-
-	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않는다.
-	//
-	// 이 함수는 순찰 브랜치에 진입할 때마다 호출되는데, 시야 획득으로 순찰이
-	// abort 되고 상실 후 재개되는 것도 "새 진입"이다. 진입마다 전진시키면A
-	// 경비가 플레이어를 한 번 볼 때마다 순찰 지점을 하나씩 건너뛴다.
-	if (CurrentPatrolIndex >= 0)
-	{
-		FVector CurrentTarget;
-		if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, CurrentTarget))
-		{
-			// Z 는 무시한다 - 지점 액터가 바닥에서 떠 있어도 도착 판정이 되도록.
-			const float DistToCurrent = FVector::Dist2D(GuardPawn->GetActorLocation(), CurrentTarget);
-			if (DistToCurrent > PatrolArrivalRadius)
-			{
-				// 가던 길을 계속 간다. Blackboard 값은 다시 써준다 —
-				// 조사 브랜치를 거치는 동안 다른 값으로 덮였을 수 있다.
-				BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, CurrentTarget);
-				return;
-			}
-		}
-	}
-
-	// 첫 호출(-1). 근처에 다른 경비가 있으면 그 경비에게서 가장 먼 지점에서, 없으면 0번에서 시작.
-	if (CurrentPatrolIndex < 0)
-	{
-		CurrentPatrolIndex = SelectInitialPatrolIndex(GuardPawn);
-	}
-	else if (PointCount == 1)
-	{
-		CurrentPatrolIndex = 0;
-	}
-	else
-	{
-		switch (GuardPawn->PatrolPattern)
-		{
-		case EPatrolPattern::Loop:
-			CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PointCount;
-			break;
-
-		case EPatrolPattern::PingPong:
-			if (bPatrolMovingForward)
-			{
-				CurrentPatrolIndex++;
-				if (CurrentPatrolIndex >= PointCount - 1)
-				{
-					CurrentPatrolIndex = PointCount - 1;
-					bPatrolMovingForward = false; // 끝에 도달 -> 역방향으로 전환
-				}
-			}
-			else
-			{
-				CurrentPatrolIndex--;
-				if (CurrentPatrolIndex <= 0)
-				{
-					CurrentPatrolIndex = 0;
-					bPatrolMovingForward = true; // 처음으로 복귀 -> 정방향으로 전환
-				}
-			}
-			break;
-
-		case EPatrolPattern::Random:
-			{
-				// 직전 지점을 제외하고 뽑아서, 같은 자리에 멈춰있는 것처럼 보이는 걸 방지.
-				int32 NextIndex = CurrentPatrolIndex;
-				while (NextIndex == CurrentPatrolIndex)
-				{
-					NextIndex = FMath::RandRange(0, PointCount - 1);
-				}
-				CurrentPatrolIndex = NextIndex;
-			}
-			break;
-		}
-	}
-
-	FVector NextLocation;
-	if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, NextLocation))
-	{
-		BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, NextLocation);
-
-		// 정상 동작이면 순찰 지점에 도착할 때마다 한 번씩만 찍힌다.
-		// 호출 간격(dt)이 프레임 단위이고 폰이 제자리면 브랜치가 abort/restart 를
-		// 반복하는 것이고, dt 가 수 초 단위면 실제로 걸어서 도착하고 있는 것이다.
-		const float Now = GetWorld()->GetTimeSeconds();
-		const float DeltaSinceLast = (LastPatrolSelectTime < 0.f) ? -1.f : (Now - LastPatrolSelectTime);
-		LastPatrolSelectTime = Now;
-
-		const FVector PawnLocation = GuardPawn->GetActorLocation();
-
-		// UE_LOG(LogGuardAI, Log,
-		// 	TEXT("[%s] 순찰 지점 %d 선택: %s | dt=%.3fs | 폰 위치 %s | 남은 거리 %.0f"),
-		// 	*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString(),
-		// 	DeltaSinceLast, *PawnLocation.ToCompactString(),
-		// 	FVector::Dist(PawnLocation, NextLocation));
-	}
-	else
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] 순찰 지점 %d 의 위치를 얻지 못했다 (배열 항목이 비어 있는지 확인)."),
-			*GetNameSafe(GuardPawn), CurrentPatrolIndex);
-	}
+	// 이동했음
+	GuardPatrolComp->SelectNextPatrolPoint2();
 }
