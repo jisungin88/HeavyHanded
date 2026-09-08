@@ -10,6 +10,7 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_Spill,     "Noise.Loot.Spill");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Loot_HeavyDrop, "Noise.Loot.HeavyDrop");
 	UE_DEFINE_GAMEPLAY_TAG(Noise_Hazard_Trap,    "Noise.Hazard.Trap");
+	UE_DEFINE_GAMEPLAY_TAG(Noise_Equipment_Decoy, "Noise.Equipment.Decoy");
 
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Prep,   "Phase.Prep");
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Heist,  "Phase.Heist");
@@ -42,4 +43,5 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Event_Loot_Dropped,      "Event.Loot.Dropped");
 
 	UE_DEFINE_GAMEPLAY_TAG(Equipment_StickyBomb, "Equipment.StickyBomb");
+	UE_DEFINE_GAMEPLAY_TAG(Equipment_Decoy,      "Equipment.Decoy");
 }

@@ -434,6 +434,20 @@ void AEquipmentBase::Activate()
 	{
 		World->GetTimerManager().SetTimer(EffectTimer, this,
 			&AEquipmentBase::Finish, EffectDuration, false);
+
+		// 발동한 뒤에도 계속 소리를 내는 장비가 있다 — 미끼가 그것이다.
+		// 이 소리가 경비의 InvestigateLocation 이 되어 경비를 끌어온다.
+		//
+		// EffectDuration 이 0 인 장비(폭탄)에는 걸지 않는다. Active 구간이 한 프레임도
+		// 없어서 타이머가 첫 발화 전에 Finish 에서 지워지고, 태그만 지정돼 있으면
+		// "왜 소리가 안 나지" 로 헷갈린다.
+		if (ActiveNoiseTag.IsValid())
+		{
+			EmitActiveNoise();
+
+			World->GetTimerManager().SetTimer(ActiveNoiseTimer, this,
+				&AEquipmentBase::EmitActiveNoise, ActiveNoiseInterval, /*bLoop=*/true);
+		}
 	}
 	else
 	{
@@ -447,6 +461,9 @@ void AEquipmentBase::Finish()
 	{
 		return;
 	}
+
+	// 효과가 끝났으면 소리도 그친다. 미끼가 20초 뒤에도 계속 울면 경비가 영영 붙잡힌다.
+	GetWorldTimerManager().ClearTimer(ActiveNoiseTimer);
 
 	SetEquipmentState(EEquipmentState::Spent);
 	OnSpent();
@@ -490,6 +507,24 @@ void AEquipmentBase::EmitDeployNoise()
 	{
 		// 권위 검사는 ReportTaggedNoise 안에 있다. 클라이언트에서 불려도 조용히 무시된다.
 		NoiseEmitter->ReportTaggedNoise(DeployNoiseTag);
+	}
+}
+
+void AEquipmentBase::EmitActiveNoise()
+{
+	// EmitDeployNoise 와 같은 이유의 검사다. 효과가 끝난 프레임에 타이머가 이미 큐에
+	// 들어가 있으면 ClearTimer 로는 못 막고 이 검사만 남는다.
+	if (State != EEquipmentState::Active)
+	{
+		return;
+	}
+
+	if (IsValid(NoiseEmitter) && ActiveNoiseTag.IsValid())
+	{
+		// NoiseEmitter 를 거치는 것이 중요하다. 소음 파트의 스팸 필터가 여기서 돌면서,
+		// 같은 자리에서 반복되는 소리의 경계도 기여를 알아서 깎는다.
+		// UNoiseSubsystem::ReportNoise 를 직접 부르면 그 판단을 건너뛰게 된다.
+		NoiseEmitter->ReportTaggedNoise(ActiveNoiseTag);
 	}
 }
 

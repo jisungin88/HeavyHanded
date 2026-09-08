@@ -18,6 +18,9 @@ namespace HHTags
 	/** 파손형 노획물이 깨질 때 나가는 태그 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Break);
 
+	/** 미끼가 놓인 자리에서 반복해 내는 소리. 경비를 그쪽으로 끌어오는 근거다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Equipment_Decoy);
+
 	/** 불안정형이 기울어져 내용물을 쏟을 때. 충돌이 아니라 내 판정으로 나가는 소리다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Spill);
 
@@ -172,4 +175,7 @@ namespace HHTags
 
 	/** 점착 폭탄. 던져서 붙이고 몇 초 뒤 폭발해 대형 금고 문을 부순다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_StickyBomb);
+
+	/** 미끼(개껌·소음탄). 던져 놓으면 그 자리에서 소리를 내 경비를 끌어온다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Decoy);
 }
