@@ -48,8 +48,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
 
-	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
-	UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
+	// UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	// UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
 
 	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
 	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서
@@ -58,8 +58,8 @@ public:
 	UWidgetComponent* GetDetectionGaugeWidgetComponent() const { return DetectionGaugeWidgetComponent; }
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
-	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
+	//UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	//TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;

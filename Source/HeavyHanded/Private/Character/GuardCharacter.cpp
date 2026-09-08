@@ -1,7 +1,7 @@
 ﻿#include "Character/GuardCharacter.h"
 #include "AI/GuardTypes.h"
 
-#include "Noise/PerceptionMeterComponent.h"
+//#include "Noise/PerceptionMeterComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -9,7 +9,7 @@
 AGuardCharacter::AGuardCharacter()
 {
 	//???? < AI 컨트롤러에도 있음
-	PerceptionMeter = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
+	// PerceptionMeter = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
 
 	// 팀 어피니에이션(GuardAIController::SetGenericTeamId)으로 서로를 "감지"는 안 하게 됐지만,
 	// 순찰 경로가 겹치면 캡슐끼리 물리적으로 계속 밀며 그 자리에 멈춰(마주보는 것처럼 보임) 있고,
