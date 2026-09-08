@@ -96,11 +96,36 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
+
+	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn);
+
+	if (!IsValid(GuardPawn))
+	{
+		// 에러 로그
+		return;
+	}
+
+
+	// PerceptionComp 넘겨주기 (추후 수정 필요)
+	GuardSightComp->InitializeSightPerception(PerceptionComp);
+	GuardHearingComp->InitializeHearingPerception(PerceptionComp);
+
+	// 시야, 청각 활성화 여부 결정 (테스트용)
+	GuardSightComp->SetSightEnabled(GuardPawn->bEnableSight);
+	GuardHearingComp->SetHearingEnabled(GuardPawn->bEnableHearing);
+
+
+
+	// 경비 스탯 초기화
+	// -------------------------------------------------------------------------------------------------------
 	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
 	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
 	ApplyGuardStats(InPawn);
 
 
+
+	// Behavior Tree / Blackboard 준비
+	// -------------------------------------------------------------------------------------------------------
 
 	if (!IsValid(BehaviorTreeAsset))
 	{
@@ -111,9 +136,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
-
-	//Behavior Tree / Blackboard 준비
-	// -------------------------------------------------------------------------------------------------------
 	UBlackboardComponent* BlackboardComp = nullptr;
 	UseBlackboard(BehaviorTreeAsset->BlackboardAsset, BlackboardComp);
 
@@ -145,7 +167,7 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
 	// 빠뜨리면 항상 nullptr 이라 리셋이 절대 호출되지 않는다. 그러면 래치가 안 풀려
 	// 게이지가 100%에서 그대로 굳어 두 번째 소음부터는 OnPerceptionFull 이 다시 터지지 않는다.
-	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn))
+	if (GuardPawn)
 	{
 		PerceptionMeter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>();
 		if (PerceptionMeter)
@@ -177,6 +199,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// -------------------------------------------------------------------------------------------------------
 	// 시작 시 첫 순찰 지점을 미리 채워둔다
 	// SelectNextPatrolPoint(); 	// 이동 필요
+	// 아래 함수로 변경했음
+	SelectNextAction(EGuardAIState::Patrol);
 
 
 	// Behavior Tree 시작
@@ -273,6 +297,8 @@ void AGuardAIController::StopForMatchEnd()
 	// 화면에는 멈춰 선 경비가 보이는데 숫자만 움직이는 상태가 된다
 	if (PerceptionComp)
 	{
+		// 순찰도 꺼야할지
+
 		GuardSightComp->SetSightEnabled(false);
 		GuardHearingComp->SetHearingEnabled(false);
 	}
@@ -400,6 +426,32 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 }
 
 
+bool AGuardAIController::SelectNextAction(EGuardAIState State)
+{
+
+	if (!IsValid(GuardPatrolComp))
+	{
+		// 에러 로그
+		return false;
+	}
+
+	switch (State)
+	{
+	case EGuardAIState::Patrol:
+		GuardPatrolComp->SelectNextPatrolPoint2();
+		return true;
+
+	case EGuardAIState::Search:
+		return GuardPatrolComp->SelectNextSearchPoint2();
+
+	case EGuardAIState::Chase:
+		return true;
+	}
+
+	return false;
+}
+
+
 float AGuardAIController::GetWorldAlertLevel() const
 {
 	// UAlertComponent 는 GameState 에 런타임 부착되며 0~1 게이지를 들고 있다.
@@ -464,13 +516,14 @@ void AGuardAIController::UpdateHeadGaugeWidget()
 
 
 
+// 작동 확인 후 삭제할 것
+/*
 
-
-bool AGuardAIController::SelectNextSearchPoint()
-{
-	// 이동했음
-	return GuardPatrolComp->SelectNextSearchPoint2();
-}
+// bool AGuardAIController::SelectNextSearchPoint()
+// {
+// 	// 이동했음
+// 	return GuardPatrolComp->SelectNextSearchPoint2();
+// }
 
 // int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
 // {
@@ -479,8 +532,10 @@ bool AGuardAIController::SelectNextSearchPoint()
 
 
 
-void AGuardAIController::SelectNextPatrolPoint()
-{
-	// 이동했음
-	GuardPatrolComp->SelectNextPatrolPoint2();
-}
+// void AGuardAIController::SelectNextPatrolPoint()
+// {
+// 	// 이동했음
+// 
+// }
+
+*/

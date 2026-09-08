@@ -22,6 +22,9 @@ public:
 	// Sets default values for this component's properties
 	UGuardHearingAComponent();
 
+	void InitializeHearingPerception(UAIPerceptionComponent* InPerceptionComp);
+
+
 
 	UFUNCTION()
 	void OnTargetPerceptionUpdatedHearing
@@ -43,8 +46,8 @@ protected:
 	// 각각 디버그용 // lee
 	// 청각 감지 사용 여부.
 	// BP에서 Guard 종류별로 청각을 켜고 끌 수 있다.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardHearing")
-	bool bEnableHearing = true;
+	// UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardHearing")
+	// bool bEnableHearing = true;
 
 
 	/*

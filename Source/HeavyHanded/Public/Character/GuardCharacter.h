@@ -17,6 +17,13 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 public:
 	AGuardCharacter();
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception")
+	bool bEnableSight = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception")
+	bool bEnableHearing = true;
+
+
 	// IGenericTeamAgentInterface 기본 구현(GenericTeamAgentInterface.h)은 감지 대상 액터
 	// 자신이 이 인터페이스를 구현했는지만 보고, 그 액터의 컨트롤러까지는 확인하지 않는다.
 	// AGuardAIController::SetGenericTeamId 로 컨트롤러에 팀을 심어도 폰(=Sight 가 실제로

@@ -31,6 +31,8 @@ public:
 	// Sets default values for this component's properties
 	UGuardSightAComponent();
 
+	void InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp);
+
 	//UPROPERTY(BlueprintAssignable, Category = "Guard|Perception")
 	///FOnPlayerSpotted OnPlayerSpotted;
 
@@ -56,8 +58,8 @@ public:
 	// 각각 디버그용 // lee
 	// 시야 감지 사용 여부.
 	// BP에서 Guard 종류별로 시야를 켜고 끌 수 있다.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardSight")
-	bool bEnableSight = true;
+	// UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardSight")
+	// bool bEnableSight = true;
 
 
 	void SetSightConfig(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle);

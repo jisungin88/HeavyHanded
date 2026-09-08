@@ -41,6 +41,17 @@ UGuardSightAComponent::UGuardSightAComponent()
 
 }
 
+void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+{
+	PerceptionComp = InPerceptionComp;
+
+	if (IsValid(PerceptionComp) && IsValid(SightConfig))
+	{
+		PerceptionComp->ConfigureSense(*SightConfig);
+	}
+
+}
+
 
 
 // Called when the game starts
@@ -51,19 +62,19 @@ void UGuardSightAComponent::BeginPlay()
 	// ...
 
 
-	if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	{
-		PerceptionComp = AIController->GetPerceptionComponent();
-
-		if (!PerceptionComp)
-		{
-			// PerceptionComp 존재하지 않음 로그
-			return;
-		}
-			PerceptionComp->ConfigureSense(*SightConfig);
-			SetSightEnabled(bEnableSight);
-			///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	}
+	//if (AAIController* AIController = Cast<AAIController>(GetOwner()))
+	//{
+	//	PerceptionComp = AIController->GetPerceptionComponent();
+	//
+	//	if (!PerceptionComp)
+	//	{
+	//		// PerceptionComp 존재하지 않음 로그
+	//		return;
+	//	}
+	//		PerceptionComp->ConfigureSense(*SightConfig);
+	//		// SetSightEnabled(bEnableSight); // AI 컨트롤러에서 설정하도록 변경
+	//		///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
+	//}
 
 
 }
@@ -87,7 +98,7 @@ void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 {
 	//if (!PerceptionComp) return;
 
-	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), bEnableSight);
+	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), isEnable);
 }
 
 

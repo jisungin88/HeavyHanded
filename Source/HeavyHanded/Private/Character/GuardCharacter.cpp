@@ -8,6 +8,7 @@
 
 AGuardCharacter::AGuardCharacter()
 {
+	//???? < AI 컨트롤러에도 있음
 	PerceptionMeter = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
 
 	// 팀 어피니에이션(GuardAIController::SetGenericTeamId)으로 서로를 "감지"는 안 하게 됐지만,

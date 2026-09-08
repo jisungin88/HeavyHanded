@@ -45,6 +45,16 @@ UGuardHearingAComponent::UGuardHearingAComponent()
 
 }
 
+void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent* InPerceptionComp)
+{
+	PerceptionComp = InPerceptionComp;
+
+	if (IsValid(PerceptionComp) && IsValid(HearingConfig))
+	{
+		PerceptionComp->ConfigureSense(*HearingConfig);
+	}
+}
+
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
 
@@ -71,7 +81,7 @@ void UGuardHearingAComponent::SetHearingRange(float InHearingRange)
 
 void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 {
-	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), bEnableHearing);
+	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), isEnable);
 }
 
 
@@ -83,19 +93,19 @@ void UGuardHearingAComponent::BeginPlay()
 	// ...
 
 
-	if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	{
-		PerceptionComp = AIController->GetPerceptionComponent();
-
-		if (!PerceptionComp)
-		{
-			// PerceptionComp 존재하지 않음 로그
-			return;
-		}
-		PerceptionComp->ConfigureSense(*HearingConfig);
-		SetHearingEnabled(bEnableHearing);
-		///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	}
+	//if (AAIController* AIController = Cast<AAIController>(GetOwner()))
+	//{
+	//	PerceptionComp = AIController->GetPerceptionComponent();
+	//
+	//	if (!PerceptionComp)
+	//	{
+	//		// PerceptionComp 존재하지 않음 로그
+	//		return;
+	//	}
+	//	PerceptionComp->ConfigureSense(*HearingConfig); // PerceptionComp 굳이? (인자로 해도 되지 않을지 여부)
+	//	// SetHearingEnabled(bEnableHearing); // AI 컨트롤러에서 설정하도록 변경
+	//	/// PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
+	//}
 
 
 	
