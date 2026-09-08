@@ -178,4 +178,7 @@ namespace HHTags
 
 	/** 미끼(개껌·소음탄). 던져 놓으면 그 자리에서 소리를 내 경비를 끌어온다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Decoy);
+
+	/** 응급 키트. 던져서 다운된 동료를 즉시 일으킨다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_MedKit);
 }
