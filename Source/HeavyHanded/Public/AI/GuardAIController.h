@@ -10,13 +10,20 @@
 class UBehaviorTree;
 class UBlackboardComponent;
 class UAIPerceptionComponent;
-class UAISenseConfig_Sight;
-class UAISenseConfig_Hearing;
 class UPerceptionMeterComponent;
+
+//class UAISenseConfig_Sight; // 이동
+// class UAISenseConfig_Hearing; // 이동
+
 class AActor;
 class AGameStateBase;
 class AGuardCharacter;
 class AHeistGameState;
+
+
+class UGuardSightAComponent;
+class UGuardHearingAComponent;
+
 
 // 시야를 놓쳤다가 (혹은 최초로) 플레이어를 다시 포착한 순간에만 발화한다.
 // 시야를 유지하는 동안 매 프레임 다시 쏘지 않는다 - false->true 전환 1회.
@@ -30,18 +37,31 @@ class AGuardAIController : public AAIController
 public:
 	AGuardAIController();
 
+	// 경비 개체 종류. 스폰 시 BP_GuardVariant_* 쪽에서 설정.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	EGuardType GuardType = EGuardType::Standard;
+
+
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<class UGuardSightAComponent> GuardSightComp;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<class UGuardHearingAComponent> GuardHearingComp;
+
+
+public:
 	// 시야로 플레이어를 새로 포착한 순간(false->true 전환)에만 발화. 연출용(효과음 등).
 	// 서버 권위 - OnTargetPerceptionUpdated 와 동일하게 HasAuthority() 인 곳에서만 브로드캐스트한다.
 	UPROPERTY(BlueprintAssignable, Category = "Guard|Perception")
 	FOnPlayerSpotted OnPlayerSpotted;
 
-	// 경비 개체 종류. 스폰 시 BP_GuardVariant_* 쪽에서 설정.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
-	EGuardType GuardType = EGuardType::Standard;
 
 	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반).
 	// BTDecorator_CheckWorldAlert 등이 참조.
 	float GetWorldAlertLevel() const;
+
+
 
 	// 다음 순찰 지점을 골라 Blackboard의 PatrolLocation에 써넣는다.
 	// Patrol 브랜치 진입 시 BTTask_SelectNextPatrolPoint가 호출한다.
@@ -94,6 +114,8 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0.0", Units = "cm"))
 	float SearchSweepRadius = 600.f;
 
+
+
 	// Blackboard의 DetectionGauge(0~100)를 그대로 노출한다. 플레이어 화면의 게이지 위젯이
 	// 디버그 모드 없이 이 값을 읽어가도록 하기 위한 UI용 게터.
 	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
@@ -143,17 +165,48 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|AI")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
+
+	/*
+
 	// 시야/청각 파라미터. 반경·시야각 등 실제 수치는 DT_GuardStats(FGuardStatsRow)에서
 	// OnPossess 때 GuardType 에 맞는 행으로 덮어쓴다(ApplyGuardStats). 여기 생성자 기본값은
 	// 테이블 조회가 실패했을 때의 폴백이며, 멤버로 들고 있어야 디테일 패널에도 노출된다.
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
-	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
-	TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
+	// 이동
+	///UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
+	///TObjectPtr<UAISenseConfig_Sight> SightConfig;
+
+	// 이동
+	//UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception")
+	//TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
+
+
+	// ---------------------------
+
+	// 이동
+	/// // 각각 디버그용 // lee
+	/// // 시야 감지 사용 여부.
+	/// // BP에서 Guard 종류별로 시야를 켜고 끌 수 있다.
+	/// UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Guard|AI|Perception")
+	/// bool bEnableSight = true;
+
+	// 각각 디버그용 // lee
+	// 청각 감지 사용 여부.
+	// BP에서 Guard 종류별로 청각을 켜고 끌 수 있다.
+	// UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Guard|AI|Perception")
+	// bool bEnableHearing = true;
+
+	*/
+
+	
+	// ---------------------------
+
+
+
 
 private:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|AI|Perception", meta = (AllowPrivateAccess = "true"))
+	//Guard|AI|Perception
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Perception", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 	// OnPossess 때 빙의한 폰에서 가져와 바인딩해 둔다. HandlePerceptionFull 에서 ResetPerception 에 쓴다
@@ -170,9 +223,12 @@ private:
 	// 음수는 "아직 한 번도 고른 적 없음".
 	float LastPatrolSelectTime = -1.f;
 
-	// 진단용. 시야를 잃은 시각. 되찾을 때 상실이 몇 초 지속됐는지 찍는다.
-	// 음수는 "현재 상실 상태가 아님".
-	float SightLostAtTime = -1.f;
+
+	// 이동
+	/// // 진단용. 시야를 잃은 시각. 되찾을 때 상실이 몇 초 지속됐는지 찍는다.
+	/// // 음수는 "현재 상실 상태가 아님".
+	/// float SightLostAtTime = -1.f;
+
 
 	// 최초 순찰 시작 지점을 고른다. InitialPatrolSeparationRadius 안의 이웃 경비(자기 포함)를
 	// 모아 안정적인 순서로 정렬한 뒤, 그 안에서 자기 순번에 비례해 지점 인덱스를 고르게
