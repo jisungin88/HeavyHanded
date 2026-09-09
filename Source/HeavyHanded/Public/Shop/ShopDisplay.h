@@ -13,7 +13,7 @@ class UStaticMeshComponent;
 
 /**
  * 산 뒤에 그 물건이 어떻게 되는가.
- * 이 두 가지가 상점의 전부다 — 8종 중 6종이 StageSpawn 이고, 신발과 완충 장갑만 PersonalPassive 다.
+ * 이 두 가지가 상점의 전부다 — 7종 중 6종이 StageSpawn 이고, 고무창 신발만 PersonalPassive 다.
  */
 UENUM(BlueprintType)
 enum class EShopPurchaseKind : uint8
@@ -45,13 +45,13 @@ enum class EShopPurchaseResult : uint8
 
 /**
  * 은신처 상점의 진열대 하나. 물건 하나를 놓아 두고, 보고 E 를 누르면 판다.
- * (기획서 7장 — 은신처 구매 장비 8종, 팀 공용 골드)
+ * (기획서 7장 — 은신처 구매 장비, 팀 공용 골드)
  *
- * [8종을 한 클래스로 처리한다]
+ * [전 종류를 한 클래스로 처리한다]
  *   이 클래스에는 어떤 장비의 이름도 나오지 않는다. 진열대가 아는 것은 태그 · 가격 ·
  *   산 뒤에 무엇을 하는가(PurchaseKind) 뿐이고, 신발이냐 미끼냐는 BP 인스턴스가 정한다.
- *   그래서 장비를 추가할 때 C++ 은 늘어나지 않는다 — 완충 장갑은 이 클래스를 상속한
- *   BP 에 컴포넌트 클래스만 바꿔 꽂으면 끝이다.
+ *   그래서 장비를 추가할 때 C++ 은 늘어나지 않는다 — 이 클래스를 상속한 BP 에
+ *   태그 · 가격 · 메시만 꽂으면 팔린다.
  *
  * [왜 AEquipmentBase 가 아닌가]
  *   진열대는 집히지도 던져지지도 소비되지도 않는다. 사도 그 자리에 그대로 남아 있고,
@@ -116,7 +116,7 @@ protected:
 	EShopPurchaseKind PurchaseKind = EShopPurchaseKind::StageSpawn;
 
 	/**
-	 * 1인당 1회만 팔 것인가. 신발 · 완충 장갑처럼 두 번 사도 소용이 없는 물건에 켠다.
+	 * 1인당 1회만 팔 것인가. 고무창 신발처럼 두 번 사도 소용이 없는 물건에 켠다.
 	 * 미끼나 응급 키트는 여러 개 살 수 있어야 하므로 꺼 둔다.
 	 *
 	 * ⚠ 이 기록은 은신처 레벨과 함께 사라진다. Buyers 주석을 볼 것.
@@ -128,7 +128,7 @@ protected:
 	 * PersonalPassive 일 때 산 사람의 폰에 붙일 컴포넌트. 예: URubberShoesComponent.
 	 *
 	 * 진열대가 신발을 모르게 하는 장치다. 여기에 클래스를 꽂는 대신 코드에 신발 분기를
-	 * 넣으면, 완충 장갑 때 또 넣고 그다음 패시브 때 또 넣게 된다.
+	 * 넣으면 다음 패시브 때 또 넣게 되고, 그때부터 장비마다 C++ 이 늘어난다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Personal")
 	TSubclassOf<UActorComponent> EquipmentComponentClass;
