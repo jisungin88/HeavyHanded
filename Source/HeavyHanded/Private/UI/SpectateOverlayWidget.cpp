@@ -1,4 +1,4 @@
-#include "UI/SpectateOverlayWidget.h"
+﻿#include "UI/SpectateOverlayWidget.h"
 
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerState.h"
@@ -28,6 +28,9 @@ void USpectateOverlayWidget::Bind()
 	Bound = PC ? PC->GetSpectatorComponent() : nullptr;
 	if (!Bound)
 	{
+		// 관전 컴포넌트가 없는 맵(은신처·타이틀)이다. 여기서 그냥 돌아가면
+		// WBP 디자이너에 찍힌 가시성이 그대로 남아 관전이 아닌데도 오버레이가 떠 있다
+		Refresh(false, nullptr);
 		return;
 	}
 

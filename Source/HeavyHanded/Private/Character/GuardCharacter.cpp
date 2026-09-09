@@ -38,6 +38,8 @@ bool AGuardCharacter::GetPatrolLocation(int32 Index, FVector& OutLocation) const
 	if (PatrolPoints.Num() == 0)
 	{
 		return false;
+
+
 	}
 
 	const int32 SafeIndex = Index % PatrolPoints.Num();

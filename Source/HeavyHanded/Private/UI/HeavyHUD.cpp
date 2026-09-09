@@ -320,6 +320,16 @@ void AHeavyHUD::CreateAndAddSpectateOverlay()
 		return;
 	}
 
+	// 이 HUD 는 은신처(GM_ShelterGameMode)에서도 쓰인다. 거기 PC 는 AHeistPlayerController 가
+	// 아니라 관전 컴포넌트가 없고, 관전 상태를 알 방법이 없으니 오버레이를 만들지 않는다
+	const AHeistPlayerController* HeistPC = Cast<AHeistPlayerController>(OwningPC);
+	if (!HeistPC || !HeistPC->GetSpectatorComponent())
+	{
+		UE_LOG(LogHeavyUI, Log,
+						 TEXT("%s: 관전 컴포넌트가 없는 레벨이라 관전 오버레이를 만들지 않는다"), *GetName());
+		return;
+	}
+
 	SpectateOverlayWidget = CreateWidget<UUserWidget>(OwningPC, SpectateOverlayClass);
 	if (!SpectateOverlayWidget)
 	{

@@ -45,6 +45,29 @@ bool URunProgressSubsystem::EnsureServerAuthority(const TCHAR* Operation) const
 	return false;
 }
 
+void URunProgressSubsystem::SetNickname(const FUniqueNetIdRepl& PlayerId, const FString& Nickname)
+{
+	if (!EnsureServerAuthority(TEXT("SetNickname")))
+	{
+		return;
+	}
+
+	if (!PlayerId.IsValid() || Nickname.IsEmpty())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("닉네임 기록 거부 — 플레이어 또는 이름이 유효하지 않습니다."));
+		return;
+	}
+
+	Nicknames.Add(PlayerId, Nickname);
+	UE_LOG(LogHeist, Log, TEXT("닉네임 기록 — %s → %s"), *PlayerId.ToDebugString(), *Nickname);
+}
+
+FString URunProgressSubsystem::GetNickname(const FUniqueNetIdRepl& PlayerId) const
+{
+	const FString* Found = Nicknames.Find(PlayerId);
+	return Found ? *Found : FString();
+}
+
 // ──────────────────────────────────────────────────────────────
 // 팀 공용 골드
 // ──────────────────────────────────────────────────────────────

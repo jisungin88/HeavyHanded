@@ -46,6 +46,36 @@ public:
 	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 
 	/**
+	 * 폰을 스폰한다. 엔진 기본 구현과 다른 점은 충돌 처리 하나뿐이다 —
+	 * **겹치더라도 반드시 스폰한다.**
+	 *
+	 * [왜 필요한가] ChoosePlayerStart 가 전원에게 같은 진입점을 돌려주는데,
+	 *   APawn 의 기본값은 AdjustIfPossibleButDontSpawnIfColliding 이다 (Pawn.cpp).
+	 *   그래서 먼저 도착한 사람이 자리를 잡으면 **뒤에 온 사람은 폰이 아예 안 생긴다.**
+	 *   로그에 SpawnActor failed because of collision 한 줄만 남고 그 사람만 조종할 폰이 없다.
+	 *   누가 먼저 오느냐는 로딩 속도가 정하므로 매번 다른 사람이 당한다.
+	 *
+	 *   겹쳐서 스폰해도 캡슐끼리 밀어내 곧 흩어진다. ShelterPlayerController::SpawnJobPawn 이
+	 *   이미 같은 이유로 AdjustIfPossibleButAlwaysSpawn 을 쓴다.
+	 */
+	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(
+		AController* NewPlayer, const FTransform& SpawnTransform) override;
+
+private:
+	/**
+	 * 진입점 주위에서 비어 있는 자리를 찾는다. 못 찾으면 진입점을 그대로 돌려준다.
+	 *
+	 * 전원이 같은 좌표에서 시작하므로 그대로 스폰하면 캡슐이 서로 파묻힌다.
+	 * 겹친 캡슐은 다음 프레임에 큰 힘으로 밀려나서 벽이나 바닥을 뚫고 튀어나간다 —
+	 * "스폰은 됐는데 두 명이 겹쳐 있다" 로 시작해 "한 명이 맵 밖에 있다" 로 끝난다.
+	 *
+	 * 간격은 폰 캡슐 반경에서 끌어온다. 별도 상수를 두면 캐릭터 크기가 바뀔 때 같이 안 따라온다.
+	 */
+	FVector FindFreeEntrySlot(const FVector& EntryLocation, const UClass* PawnClass) const;
+
+public:
+
+	/**
 	 * 페이즈를 즉시 다음으로 넘긴다. 접속 대기 중이면 기다리지 않고 준비 시간을 시작한다.
 	 * 치트(hh.Phase.Next)의 진입점이라 사유가 Cheat 로 기록된다.
 	 */
@@ -120,6 +150,8 @@ private:
 	 * (const 가 아닌 것은 AGameMode::GetNumPlayers() 가 non-const 이기 때문이다)
 	 */
 	FHeistStartConditions MakeStartConditions();
+
+	void RestoreNickname(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId);
 
 	/**
 	 * 이 판의 진입점을 정하고 캐시한다. 레벨당 한 번, 첫 스폰보다 먼저.
