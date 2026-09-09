@@ -1,29 +1,64 @@
-﻿#include "AI/GuardAIController.h"
+﻿
+// 헤더 정리 0907
+// Guard AI
+#include "AI/GuardAIController.h"
+#include "AI/GuardBlackboardKeys.h"
+#include "AI/GuardSettings.h"
+
+#include "AI/GuardSightAComponent.h"
+#include "AI/GuardHearingAComponent.h"
+
+
+// Guard Character
+#include "Character/GuardCharacter.h"
+
+// Behavior Tree / Blackboard
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "Character/GuardCharacter.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Noise/PerceptionMeterComponent.h"
-#include "AI/GuardSettings.h"
-#include "Engine/DataTable.h"
 #include "BrainComponent.h"
+
+// AI Perception
+#include "AITypes.h"
+#include "Perception/AIPerceptionComponent.h"
+
+// 이동!
+/// #include "Perception/AISense_Sight.h"
+///#include "Perception/AISenseConfig_Sight.h"
+
+
+
+#include "Perception/AISense_Hearing.h"
+#include "Perception/AISenseConfig_Hearing.h"
+
+// Navigation
+#include "NavigationSystem.h"
+
+// Gameplay / Game State
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Alert/AlertComponent.h"
+
+// Noise / Perception Meter
+#include "Noise/PerceptionMeterComponent.h"
+
+// Data
+#include "Engine/DataTable.h"
+
+// Character / Movement
+#include "GameFramework/CharacterMovementComponent.h"
+
+// World / Actor
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
-#include "Perception/AISense_Hearing.h"
-#include "Perception/AISense_Sight.h"
-#include "AI/GuardBlackboardKeys.h"
-#include "Alert/AlertComponent.h"
-#include "AITypes.h"
-#include "NavigationSystem.h"
-#include "Components/WidgetComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "UI/DetectionGaugeWidget.h"
 #include "EngineUtils.h"
+
+// UI
+#include "Components/WidgetComponent.h"
+#include "UI/DetectionGaugeWidget.h"
+#include "Kismet/GameplayStatics.h"
+
+
+
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
@@ -32,11 +67,23 @@ AGuardAIController::AGuardAIController()
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
 
+
+
+	// AC 추가 0908
+	GuardSightComp = CreateDefaultSubobject<UGuardSightAComponent>(TEXT("GuardSight"));
+	GuardHearingComp = CreateDefaultSubobject<UGuardHearingAComponent>(TEXT("GuardHearingComp"));
+
+
+
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
-	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+
+	//이동 ------------------------- // 작동 확인시 삭제할 것 -----------------------------
+	///SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+	//HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+	// -------------------------------------------------------------------------------------
+
 
 	// AAIController가 IGenericTeamAgentInterface를 이미 구현하고 있어(TeamID 멤버) 여기서는
 	// 그 값만 채운다. 모든 경비를 같은 팀으로 묶어 서로 "우호"로 판정되게 한다.
@@ -47,15 +94,24 @@ AGuardAIController::AGuardAIController()
 	// 플레이어를 감지한다. 경비끼리는 위에서 같은 팀으로 묶어 "우호"로 판정되는데,
 	// bDetectFriendlies는 꺼서 서로를 감지 대상에서 제외한다 — 켜두면 경비 2명을 배치했을 때
 	// 서로를 시야로 잡고 쫓아다니며 교착 상태에 빠진다.
-	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
 
-	PerceptionComp->ConfigureSense(*SightConfig);
-	PerceptionComp->ConfigureSense(*HearingConfig);
+
+
+
+
+	// 이동
+	/// SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+	/// SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	/// SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	//HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+	//HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+	//HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+
+
+
+	// 이동
+	///PerceptionComp->ConfigureSense(*SightConfig);
+	///PerceptionComp->ConfigureSense(*HearingConfig);
 }
 
 void AGuardAIController::BeginPlay()
@@ -154,7 +210,9 @@ void AGuardAIController::StopForMatchEnd()
 	// 화면에는 멈춰 선 경비가 보이는데 숫자만 움직이는 상태가 된다
 	if (PerceptionComp)
 	{
-		PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
+		// 이동필요
+		GuardSightComp->SetSightEnabled(false);
+		////////// PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
 		PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), false);
 	}
 
@@ -169,6 +227,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
 	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
 	ApplyGuardStats(InPawn);
+
+
 
 	if (!IsValid(BehaviorTreeAsset))
 	{
@@ -251,6 +311,10 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
 
+	GuardSightComp->OnTargetPerceptionUpdatedSight(Actor, Stimulus, BlackboardComp);
+	GuardHearingComp->OnTargetPerceptionUpdatedHearing(Actor, Stimulus, BlackboardComp);
+
+	/*
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
 		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
@@ -310,7 +374,11 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 		// SearchStartTime 을 밀어주는 것으로 이미 만족된다 - 시야를 잃는 순간
 		// 그 값이 얼어붙어 자연스럽게 "수색 시작 시각"이 된다.
 	}
-	else if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
+	*/
+
+	/*
+	//else
+	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
 	{
 		// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
 		// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
@@ -321,6 +389,7 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 		}
 	}
+	*/
 }
 
 void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
@@ -350,6 +419,9 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 		PerceptionMeter->ResetPerception();
 	}
 }
+
+
+
 
 bool AGuardAIController::SelectNextSearchPoint()
 {
@@ -528,10 +600,19 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 	SearchSweepRadius = Row->SearchSweepRadius;
 	HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
 
-	SightConfig->SightRadius = Row->SightRadius;
-	SightConfig->LoseSightRadius = Row->LoseSightRadius;
-	SightConfig->PeripheralVisionAngleDegrees = Row->PeripheralVisionAngleDegrees;
-	HearingConfig->HearingRange = Row->HearingRange;
+
+
+	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
+	GuardHearingComp->SetHearingRange(Row->HearingRange);
+
+	// 이동필요 > 작동 확인시 삭제할 것 -----------------------------------------------
+	// SightConfig->SightRadius = Row->SightRadius;
+	// SightConfig->LoseSightRadius = Row->LoseSightRadius;
+	// SightConfig->PeripheralVisionAngleDegrees = Row->PeripheralVisionAngleDegrees;
+	// HearingConfig->HearingRange = Row->HearingRange;
+	// --------------------------------------------------------------------------------
+
+
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();
 

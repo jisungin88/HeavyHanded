@@ -107,6 +107,13 @@ namespace
 UGAB_Interact::UGAB_Interact()
 {
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+
+    // 부활 채널링 취소를 Server_CancelRevive(Pawn 채널) 하나에만 의존하면 어빌리티 활성화
+    // RPC(ASC/PlayerState 채널)와 도착 순서가 안 보장돼 레이스가 난다(실측 확인됨 — 클라이언트가
+    // 리바이버일 때만 짧게 눌렀다 떼도 3초 채널링이 그대로 진행되던 버그).
+    // 이 플래그를 켜면 엔진이 InputReleased 를 ASC 채널로 자동 전달해(ServerSetInputReleased)
+    // 활성화 RPC와 같은 채널·순서로 서버에 도착한다. GAB_Throw 도 같은 이유로 켜져 있다.
+    bReplicateInputDirectly = true;
 }
 
 void UGAB_Interact::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
@@ -152,10 +159,18 @@ void UGAB_Interact::TickReviveChannel()
     // 것을 막는다 — 대상/거리 재검사와 같은 자리에서 매 0.1초 같이 확인한다.
     const bool bReviverOk = bValid && !Reviver->IsDowned();
 
-    if (!bValid || !bInRange || !bStillDowned || !bReviverOk)
+    // Server_CancelRevive RPC(Pawn 채널) 하나만 믿지 않고, 이 서버 권위 인스턴스의 진짜
+    // 입력 상태를 여기서 직접 다시 확인한다. bReplicateInputDirectly(생성자)가 켜져 있어야
+    // 클라이언트가 뗀 입력이 이 Spec->InputPressed 에 반영된다 — 활성화 RPC와 같은
+    // ASC 채널을 타므로 채널 시작 시점부터 항상 신뢰할 수 있다(엔진이 활성화 처리 시
+    // InputPressed 를 먼저 true 로 세팅한 뒤 진행하기 때문).
+    const FGameplayAbilitySpec* Spec = GetCurrentAbilitySpec();
+    const bool bInputHeld = Spec && Spec->InputPressed;
+
+    if (!bValid || !bInRange || !bStillDowned || !bReviverOk || !bInputHeld)
     {
-        UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (유효=%d 사거리=%d 다운유지=%d 리바이버멀쩡=%d)"),
-            bValid, bInRange, bStillDowned, bReviverOk);
+        UE_LOG(LogInteract, Log, TEXT("부활 채널링 취소 (유효=%d 사거리=%d 다운유지=%d 리바이버멀쩡=%d 입력유지=%d)"),
+            bValid, bInRange, bStillDowned, bReviverOk, bInputHeld);
 
         EndReviveChannel();
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);

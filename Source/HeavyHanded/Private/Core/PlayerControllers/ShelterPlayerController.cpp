@@ -717,14 +717,8 @@ void AShelterPlayerController::IngameTravel()
 	*/
 
 	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
+
 	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
-
-
-
-	//GS->DebugPrintGameplayTags
-
-
-
 	Subsystem->TryDepartToSite(SiteGT);
 
 }

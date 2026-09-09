@@ -335,6 +335,9 @@ void ABaseCharacter::BindAttributeDelegates()
     {
         // MovementSpeed 속성 변화를 감지하는 델리게이트 구독
         ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetMovementSpeedAttribute()).AddUObject(this, &ABaseCharacter::OnMovementSpeedChanged);
+
+        // Stamina 속성 변화를 감지하는 델리게이트 구독 — 고갈(0 도달) 판정에 쓴다.
+        ASC->GetGameplayAttributeValueChangeDelegate(BaseAttrSet->GetStaminaAttribute()).AddUObject(this, &ABaseCharacter::OnStaminaChanged);
     }
 
     // State.Sprinting 태그 추가/제거를 구독한다. SprintGameplayEffectClass 가 이 태그를
@@ -353,6 +356,41 @@ void ABaseCharacter::OnMovementSpeedChanged(const FOnAttributeChangeData& Data)
     }
 }
 
+// Stamina 가 0 에 도달하면(서버 권위) 스프린트를 강제로 끊고 Exhausted 상태로 넘긴다.
+// 델리게이트는 서버·클라 양쪽 ASC 인스턴스에서 다 불릴 수 있어 HasAuthority() 로 먼저 거른다.
+void ABaseCharacter::OnStaminaChanged(const FOnAttributeChangeData& Data)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (Data.NewValue > 0.0f)
+    {
+        return;
+    }
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC || ASC->HasMatchingGameplayTag(HHTags::State_Exhausted))
+    {
+        // 이미 Exhausted 상태면 중복 진입하지 않는다 (쿨다운 타이머가 두 번 걸리는 것을 막는다).
+        return;
+    }
+
+    RemoveGameplayEffectFromSelf(SprintGameplayEffectClass);
+    ApplyGameplayEffectToSelf(ExhaustedGameplayEffectClass);
+
+    GetWorld()->GetTimerManager().SetTimer(
+        ExhaustedCooldownTimerHandle, this, &ABaseCharacter::OnExhaustedCooldownExpired,
+        ExhaustedCooldownSeconds, /*bLoop*/ false);
+}
+
+// ExhaustedCooldownTimerHandle 만료 시 호출 — State.Exhausted 를 해제해 재진입을 허용한다.
+void ABaseCharacter::OnExhaustedCooldownExpired()
+{
+    RemoveGameplayEffectFromSelf(ExhaustedGameplayEffectClass);
+}
+
 void ABaseCharacter::OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount)
 {
     // ReportTaggedNoise 자체도 서버 전용이라, 타이머를 클라이언트에서 돌릴 이유가 없다.
@@ -367,10 +405,18 @@ void ABaseCharacter::OnSprintTagChanged(const FGameplayTag Tag, int32 NewCount)
         GetWorld()->GetTimerManager().SetTimer(
             SprintNoiseTimerHandle, this, &ABaseCharacter::EmitSprintNoise,
             SprintNoiseInterval, /*bLoop*/ true, /*FirstDelay*/ 0.f);
+
+        // 스프린트 중에는 회복하지 않는다.
+        GetWorld()->GetTimerManager().ClearTimer(StaminaRegenTimerHandle);
     }
     else
     {
         GetWorld()->GetTimerManager().ClearTimer(SprintNoiseTimerHandle);
+
+        // 스프린트 종료 즉시(지연 없이) 회복을 시작한다 — 경계도의 30초 무소음 텀과 다르다.
+        GetWorld()->GetTimerManager().SetTimer(
+            StaminaRegenTimerHandle, this, &ABaseCharacter::TickStaminaRegen,
+            StaminaRegenInterval, /*bLoop*/ true, /*FirstDelay*/ 0.f);
     }
 }
 
@@ -390,6 +436,23 @@ void ABaseCharacter::EmitSprintNoise()
     {
         NoiseEmitter->ReportTaggedNoise(RunNoiseTag);
     }
+}
+
+// StaminaRegenTimerHandle 이 반복 호출한다. State.Sprinting 이 없는 동안만 돈다(OnSprintTagChanged 참조).
+void ABaseCharacter::TickStaminaRegen()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+    if (!ASC)
+    {
+        return;
+    }
+
+    ASC->ApplyModToAttribute(UBaseAttributeSet::GetStaminaAttribute(), EGameplayModOp::Additive, StaminaRegenPerTick);
 }
 
 void ABaseCharacter::ApplyGameplayEffectToSelf(TSubclassOf<UGameplayEffect> EffectClass)
@@ -447,6 +510,13 @@ void ABaseCharacter::StartSprint(const FInputActionValue& Value)
 		return;
 	}
 
+	// 클라이언트 예측 차단 — 실제 권위 판정은 Server_ApplyGameplayEffect_Implementation 안에 있다.
+	const UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (ASC && ASC->HasMatchingGameplayTag(HHTags::State_Exhausted))
+	{
+		return;
+	}
+
     Server_ApplyGameplayEffect(SprintGameplayEffectClass, true);
 }
 
@@ -461,6 +531,13 @@ void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGame
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
     if (!ASC || !EffectClass) return;
 
+    // 권위 판정은 API(여기) 안에 둔다 — StartSprint 의 검사는 클라 예측일 뿐, 실제 차단은 여기서 한다.
+    // Crouch 등 다른 EffectClass 호출까지 막으면 안 되므로 Sprint 요청일 때만 검사한다.
+    if (bApply && EffectClass == SprintGameplayEffectClass && ASC->HasMatchingGameplayTag(HHTags::State_Exhausted))
+    {
+        return;
+    }
+
     if (bApply)
     {
         FGameplayEffectContextHandle ContextHandle = ASC->MakeEffectContext();
@@ -471,6 +548,19 @@ void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGame
     {
         // 제거할 때 핸들 방식이거나 소스 이펙트 방식 사용
         ASC->RemoveActiveGameplayEffectBySourceEffect(EffectClass, ASC);
+    }
+
+    // Stamina 소모 GE 는 Period 충돌 때문에 GE_Sprint 와 분리돼 있다 — 항상 같은 시점에 켜고 끈다.
+    if (EffectClass == SprintGameplayEffectClass)
+    {
+        if (bApply)
+        {
+            ApplyGameplayEffectToSelf(StaminaDrainGameplayEffectClass);
+        }
+        else
+        {
+            RemoveGameplayEffectFromSelf(StaminaDrainGameplayEffectClass);
+        }
     }
 }
 
