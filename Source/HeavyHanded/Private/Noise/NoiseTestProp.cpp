@@ -39,8 +39,15 @@ ANoiseTestProp::ANoiseTestProp()
 	// UNoiseEmitterComponent 가 BeginPlay 에서 다시 켜주지만, 여기서도 명시해둔다
 	Body->SetNotifyRigidBodyCollision(true);
 
-	// 중량형 노획물 흉내. 충격량은 질량에 비례하므로 이 값이 소리 크기를 좌우한다
-	Body->SetMassOverrideInKg(NAME_None, 40.f);
+	// 중량형 노획물 흉내. 충격량은 질량에 비례하므로 이 값이 소리 크기를 좌우한다.
+	//
+	// CDO 를 만들 때는 건너뛴다. SetMassOverrideInKg 은 UpdateMassProperties 를 거쳐
+	// GetSimplePhysicalMaterial 을 부르는데, 그 시점에는 GEngine 이 없어 LogPhysics 에러가 나고
+	// 쿡이 실패한다. 실제 인스턴스는 GEngine 이 있는 뒤에 만들어지므로 값은 그대로 들어간다
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		Body->SetMassOverrideInKg(NAME_None, 40.f);
+	}
 
 	NoiseEmitter = CreateDefaultSubobject<UNoiseEmitterComponent>(TEXT("NoiseEmitter"));
 }
