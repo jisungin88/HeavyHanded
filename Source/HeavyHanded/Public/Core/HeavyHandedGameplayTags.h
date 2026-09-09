@@ -110,6 +110,13 @@ namespace HHTags
 	 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Sprinting);
 	/**
+	 * 스태미나 고갈. ABaseCharacter::OnStaminaChanged 가 Stamina<=0 을 감지하면
+	 * SprintGameplayEffectClass 를 떼고 ExhaustedGameplayEffectClass 로 이 태그를 부여한다.
+	 * 붙어 있는 동안 StartSprint/Server_ApplyGameplayEffect 양쪽에서 스프린트 재진입을 막고,
+	 * 쿨다운 타이머(ExhaustedCooldownSeconds) 만료 시 해제된다.
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Exhausted);
+	/**
 	 * 밴 승차 완료. **진리원이 아니라 미러다** — 판정 근거는 GameState 의 승차 명단이고,
 	 * 태그로는 인원을 셀 수 없다. 남이 코어 루프 헤더 없이 물어볼 수 있게 두는 것이다.
 	 *

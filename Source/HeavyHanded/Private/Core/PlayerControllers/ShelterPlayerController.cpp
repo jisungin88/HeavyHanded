@@ -1,14 +1,13 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
-#include "Core/PlayerControllers/ShelterPlayerController.h"
+﻿#include "Core/PlayerControllers/ShelterPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
+#include "Core/HeistLog.h"   // 직업 확정 → 역할 기록 → 폰 스폰을 한 카테고리로 따라간다
 #include "Core/RunProgressSubsystem.h"
 
 #include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h"
+#include "EnhancedInputSubsystems.h"
 
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
@@ -16,11 +15,17 @@
 
 #include "Character/CharacterSettings.h"
 
+#include "EnhancedInputComponent.h"
+#include "InputMappingContext.h"
+#include "UI/Shelter/ShelterHUD.h"
 
+#include "Core/GameModes/ShelterGameMode.h"
 
 void AShelterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
+
+	AddShelterMappingContext();
 
 	UNetGameInstanceSubsystem* NetSubsystem =
 		GetGameInstance()->GetSubsystem<UNetGameInstanceSubsystem>();
@@ -48,7 +53,66 @@ void AShelterPlayerController::BeginPlay()
 
 }
 
+void AShelterPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
 
+	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent);
+	if (!EIC)
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("[은신처] InputComponent 가 UEnhancedInputComponent 가 아닙니다. "
+			       "Project Settings > Input > Default Player Input Class 를 확인하세요."));
+		return;
+	}
+
+	if (!ChatAction)
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("[은신처] ChatAction 이 비어 있어 채팅 키를 붙이지 못했습니다. "
+			       "BP_ShelterPlayerController 의 Class Defaults 에서 IA_Chat 을 지정하세요."));
+		return;
+	}
+
+	EIC->BindAction(ChatAction, ETriggerEvent::Started, this, &AShelterPlayerController::HandleChatKey);
+}
+
+void AShelterPlayerController::AddShelterMappingContext()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	ULocalPlayer* LP = GetLocalPlayer();
+	UEnhancedInputLocalPlayerSubsystem* Sub =
+		LP ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP) : nullptr;
+
+	if (!Sub || !ShelterMappingContext)
+	{
+		UE_LOG(LogHeist, Warning,
+					  TEXT("[은신처] 입력 컨텍스트를 붙이지 못했습니다 (Subsystem=%d, IMC=%d). "
+							   "BP_ShelterPlayerController 의 Class Defaults 에서 IMC_Shelter 를 지정하세요."),
+					  Sub != nullptr, ShelterMappingContext != nullptr);
+		return;
+	}
+
+	Sub->AddMappingContext(ShelterMappingContext, ShelterInputPriority);
+}
+
+void AShelterPlayerController::HandleChatKey()
+{
+	AShelterHUD* HUD = Cast<AShelterHUD>(GetHUD());
+	if (!HUD)
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("[은신처] HUD 가 AShelterHUD 가 아닙니다. "
+			       "GM_ShelterGameMode 의 HUDClass 를 확인하세요."));
+		return;
+	}
+
+	HUD->SetChatFocused(true);
+}
 
 /**
  * 내 PlayerState. **아직 안 왔으면 nullptr 이다** — 호출부가 반드시 검사할 것.
@@ -184,25 +248,13 @@ void AShelterPlayerController::Server_SendChatMessage_Implementation(const FStri
 		return;
 	}
 
-	int32 PlayerIndex = 0;
-
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	AShelterPlayerState* PS = GetPlayerState<AShelterPlayerState>();
+	if (!PS)
 	{
-		AShelterPlayerController* PC =
-			Cast<AShelterPlayerController>(It->Get());
-
-		if (PC)
-		{
-			if (PC == this)
-			{
-				break;
-			}
-
-			++PlayerIndex;
-		}
+		return;
 	}
 
-	FString PlayerName = FString::Printf(TEXT("Player_%d"),PlayerIndex);
+	FString PlayerName = PS->GetPlayerName();
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -279,7 +331,12 @@ void AShelterPlayerController::ServerClearJob_Implementation()
 	GameState->ClearJob(MyPlayerState);
 }
 
-void AShelterPlayerController::serverConfirmedJob_Implementation()
+bool AShelterPlayerController::serverConfirmedJob_Validate(const FString& Nickname)
+{
+	return Nickname.Len() <= AShelterGameState::MaxNicknameLength * 4;
+}
+
+void AShelterPlayerController::serverConfirmedJob_Implementation(const FString& Nickname)
 {
 	/*
 	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
@@ -314,7 +371,6 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 	SpawnJobPawn(RoleTag);
 
 	*/
-
 
 	// 0903 디버그용
 
@@ -353,7 +409,22 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 		return;
 	}
 
-	DebugMessage(TEXT("4. PlayerId 가져옴"));
+	DebugMessage(FString::Printf(TEXT("4. PlayerId 가져옴 — %s"), *PlayerId.ToDebugString()));
+
+	AShelterGameMode* GM = GetWorld()->GetAuthGameMode<AShelterGameMode>();
+	if (!GM)
+	{
+		DebugMessage(TEXT("ERROR: ShelterGameMode 를 찾지 못함"), true);
+		return;
+	}
+
+	ENicknameError NickError = ENicknameError::None;
+	if (!GM->TryApplyNickname(this, Nickname, NickError))
+	{
+		DebugMessage(FString::Printf(TEXT("닉네임 거절 — %s"), *UEnum::GetValueAsString(NickError)), true);
+		ShelterPS->ReportNicknameError(NickError);
+		return;
+	}
 
 	FGameplayTag RoleTag = RoleTagFromJobType(ShelterPS->SelectedJob);
 
@@ -363,7 +434,8 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 		return;
 	}
 
-	DebugMessage(TEXT("5. RoleTag 생성 완료"));
+	DebugMessage(FString::Printf(TEXT("5. RoleTag 생성 완료 — %s (직업 %s)"),
+		*RoleTag.ToString(), *UEnum::GetValueAsString(ShelterPS->SelectedJob)));
 
 	DebugMessage(TEXT("6. TrySelectRole 호출 전"));
 
@@ -377,8 +449,14 @@ void AShelterPlayerController::serverConfirmedJob_Implementation()
 
 	DebugMessage(TEXT("9. SpawnJobPawn 호출 완료"));
 
-	// 확정이 끝났으니 클라에 팝업을 닫으라고 알린다. 호스트는 이 RPC 가 로컬에서 즉시 실행돼
-	// 동일하게 닫힌다. 여기까지 왔다는 건 위 가드를 다 통과했다는 뜻이라 안전하게 닫아도 된다
+	// 여기까지 왔다는 건 위 가드를 다 통과했다는 뜻이다. 이 시점에서만 "확정"이 선다.
+	//
+	// RPC 가 아니라 복제 프로퍼티인 이유 — 확정 여부는 연출이 아니라 상태다.
+	// RPC 는 그 순간 받은 사람에게만 도달하므로, 접속 타이밍이나 재입장에서
+	// 클라이언트만 선택 화면에 남는 사고가 난다 (문서 02 / CLAUDE.md 3절)
+	ShelterPS->SetJobConfirmed(true);
+
+	// 팝업 닫기 연출용. 페이지 전환 자체는 위 bJobConfirmed 복제가 담당한다
 	ClientHideJobSelect();
 
 	DebugMessage(TEXT("10. ClientHideJobSelect 호출 완료"));
@@ -453,10 +531,10 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 	if (!bFoundPlayerStart)
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] PlayerStart NOT FOUND / JobTag = %s"), *JobTag.ToString()));
-		}
+		// 화면에만 남기면 Shipping 에서 사라지고, 4인 테스트에서는 누구 것인지도 알 수 없다
+		DebugMessage(FString::Printf(
+			TEXT("SpawnJobPawn 중단 — 태그 %s 가 붙은 PlayerStart 가 레벨에 없습니다."),
+			*JobTag.ToString()), true);
 
 		return;
 	}
@@ -472,10 +550,9 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 	if (!NewPawn)
 	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,FString::Printf(TEXT("Error : [SpawnJobPawn] Failed to spawn Pawn [%s]"), *GetNameSafe(PawnClass)));
-		}
+		DebugMessage(FString::Printf(
+			TEXT("SpawnJobPawn 중단 — 폰 스폰 실패. 클래스 %s / 위치 %s"),
+			*GetNameSafe(PawnClass), *JobSpawnLocation.ToCompactString()), true);
 
 		return;
 	}
@@ -484,10 +561,9 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 	// 5. PlayerController가 새로운 Pawn 빙의
 	Possess(NewPawn);
 
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,FString::Printf(TEXT("2.[SpawnJobPawn] SUCCESS / PC=%s / Job=%s / Pawn=%s"), *GetName(), *JobTag.ToString(), *NewPawn->GetName()));
-	}
+	// 성공도 로그에 남긴다. "저 사람만 폰이 없다" 를 확인하려면 성공한 쪽도 세어야 한다
+	DebugMessage(FString::Printf(TEXT("SpawnJobPawn 성공 — 직업 %s / 폰 %s"),
+		*JobTag.ToString(), *NewPawn->GetName()));
 
 
 }
@@ -649,20 +725,25 @@ void AShelterPlayerController::IngameTravel()
 
 void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)
 {
+	// 화면 메시지만으로는 원인을 못 잡는다 — Shipping 에서는 아예 안 뜨고,
+	// 여러 명이 동시에 확정하면 누가 보낸 단계인지도 구분되지 않는다.
+	// 그래서 로그에도 남기고, 컨트롤러 이름을 같이 찍는다.
+	//
+	// LogHeist 를 쓰는 것은 이 흐름이 역할 확정 → RunProgress → 폰 스폰으로 이어져서,
+	// "저 사람은 왜 폰이 없나" 를 한 필터로 따라갈 수 있어야 하기 때문이다
 	if (bError)
 	{
-		UE_LOG(LogTemp, Error, TEXT("%s"), *Message);
+		UE_LOG(LogHeist, Warning, TEXT("[직업확정] %s — %s"), *GetName(), *Message);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+		UE_LOG(LogHeist, Log, TEXT("[직업확정] %s — %s"), *GetName(), *Message);
 	}
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 10.0f, bError ? FColor::Red : FColor::Yellow, Message);
 	}
-
 }
 
 

@@ -1,10 +1,13 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Core/PlayerStates/ShelterPlayerState.h"
 #include "Templates/SubclassOf.h"      // TSubclassOf<ALootBase> 를 값으로 받는다 — 전방 선언 불가
 
 class AActor;
 class ALootBase;
+
+enum class ENicknameError : uint8;
 
 /**
  * UI 가 화면에 쓰는 문구를 만드는 공용 함수들.
@@ -40,4 +43,6 @@ namespace HeavyUIText
 
 	/** 금액을 "$3,750" 으로. 천 단위 구분은 로케일이 정한다 */
 	HEAVYHANDED_API FText Money(int32 Amount);
+
+	HEAVYHANDED_API FText NicknameError(ENicknameError Error);
 }

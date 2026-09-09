@@ -10,7 +10,7 @@
 #include "ShelterGameState.generated.h"
 
 /**
- * 
+ *
  */
 
 
@@ -35,11 +35,6 @@ enum class ESiteTag : uint8
 // .h
 
 
-
-
-
-
-
  // Delegate 선언
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLobbyPlayerCountChanged, int32, PlayerCount);
 
@@ -47,6 +42,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart)
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
+
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -85,6 +81,8 @@ public:
 	UFUNCTION()
 	void OnRep_JobStateChanged();
 
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Roster")
+	void NotifyRosterDirty();
 
 
 	// 해당 직업을 이미 누군가 선택했는지 검사
@@ -167,4 +165,17 @@ public:
 	// Replication에 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	//-----------------------닉네임
+public:
+	static constexpr int32 MinNicknameLength = 2;
+	static constexpr int32 MaxNicknameLength = 12;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	static FString SanitizeNickname(const FString& Raw);
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	static ENicknameError ValidateNicknameFormat(const FString& Clean);
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	bool IsNicknameTaken(const FString& Clean, const APlayerState* Exclude) const;
 };
