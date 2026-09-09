@@ -193,6 +193,13 @@ public:
 	/** 새 방(세션)을 연다. 팀 골드까지 포함해 전부 비운다. (서버 전용) */
 	void ResetCampaign();
 
+	//-------------닉네임
+
+	void SetNickname(const FUniqueNetIdRepl& PlayerId, const FString& Nickname);
+
+	FString GetNickname(const FUniqueNetIdRepl& PlayerId) const;
+
+
 private:
 	/** 쓰기 연산의 공통 관문. 서버가 아니면 경고를 남기고 막는다 */
 	bool EnsureServerAuthority(const TCHAR* Operation) const;
@@ -204,6 +211,9 @@ private:
 	/** 로비에서 확정된 참가자 */
 	UPROPERTY()
 	TArray<FUniqueNetIdRepl> ConfirmedRoster;
+
+	/** 플레이어별 닉네임 */
+	TMap<FUniqueNetIdRepl, FString> Nicknames;
 
 	/**
 	 * 플레이어별 선택 역할. 캠페인 단위.

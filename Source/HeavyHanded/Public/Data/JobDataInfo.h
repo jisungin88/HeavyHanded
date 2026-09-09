@@ -51,7 +51,10 @@ struct FJobInfo : public FTableRowBase
 	FText JobDescription;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TObjectPtr<UTexture2D> JobIcon = nullptr;
+	TObjectPtr<UTexture2D> Portrait = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UTexture2D> SelectImg = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FSkillInfo> Skills;

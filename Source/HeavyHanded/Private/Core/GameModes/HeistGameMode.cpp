@@ -485,6 +485,8 @@ FString AHeistGameMode::InitNewPlayer(APlayerController* NewPlayerController, co
 		return ErrorMessage;
 	}
 
+	RestoreNickname(NewPlayerController, UniqueId);
+
 	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
 	if (!Run || !Run->IsArrested(UniqueId))
 	{
@@ -573,6 +575,30 @@ FHeistStartConditions AHeistGameMode::MakeStartConditions()
 	Conditions.QuietSeconds = UHeistSettings::Get()->PlayerJoinQuietSeconds;
 
 	return Conditions;
+}
+
+void AHeistGameMode::RestoreNickname(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId)
+{
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		return;
+	}
+
+	const FString SavedNick = Run->GetNickname(UniqueId);
+	if (SavedNick.IsEmpty())
+	{
+		return;
+	}
+
+	if (!NewPlayerController || !NewPlayerController->PlayerState)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("닉네임 복원 실패 — PlayerState 가 없습니다: %s"), *SavedNick);
+		return;
+	}
+
+	ChangeName(NewPlayerController, SavedNick, false);
+	UE_LOG(LogHeist, Log, TEXT("닉네임 복원 — %s"), *SavedNick);
 }
 
 void AHeistGameMode::TickStartWait()

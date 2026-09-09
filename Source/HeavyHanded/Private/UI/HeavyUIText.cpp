@@ -109,4 +109,19 @@ FText HeavyUIText::Money(int32 Amount)
 	return FText::Format(LOCTEXT("MoneyFormat", "${0}"), FText::AsNumber(Amount));
 }
 
+FText HeavyUIText::NicknameError(ENicknameError Error)
+{
+	switch (Error)
+	{
+	case ENicknameError::TooShort:
+		return NSLOCTEXT("HeavyUI", "NickTooShort", "이름은 2자 이상이어야 합니다");
+	case ENicknameError::TooLong:
+		return NSLOCTEXT("HeavyUI", "NickTooLong", "이름은 12자 이하이어야 합니다");
+	case ENicknameError::Taken:
+		return NSLOCTEXT("HeavyUI", "NickTaken", "이미 사용 중인 이름입니다");
+	default:
+		return FText::GetEmpty();
+	}
+}
+
 #undef LOCTEXT_NAMESPACE

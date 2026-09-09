@@ -151,6 +151,8 @@ private:
 	 */
 	FHeistStartConditions MakeStartConditions();
 
+	void RestoreNickname(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId);
+
 	/**
 	 * 이 판의 진입점을 정하고 캐시한다. 레벨당 한 번, 첫 스폰보다 먼저.
 	 * ChoosePlayerStart 는 사람마다 불리므로 매번 판정하면 **사람마다 다른 곳에서 시작한다.**

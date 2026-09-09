@@ -425,6 +425,15 @@ void AShelterGameState::OnRep_JobStateChanged()
 	OnJobStateChanged.Broadcast();
 }
 
+void AShelterGameState::NotifyRosterDirty()
+{
+	if (HasAuthority())
+	{
+		++JobStateChanged;
+	}
+
+	OnJobStateChanged.Broadcast();
+}
 
 
 TArray<AShelterPlayerState*> AShelterGameState::GetShelterPlayerStates() const
@@ -528,4 +537,61 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 
 	DOREPLIFETIME(AShelterGameState, SiteTag);
 	DOREPLIFETIME(AShelterGameState, EntryTag);
+}
+
+FString AShelterGameState::SanitizeNickname(const FString& Raw)
+{
+	const FString Trimmed = Raw.TrimStartAndEnd();
+
+	FString Result;
+	Result.Reserve(Trimmed.Len());
+	for (int32 i = 0; i < Trimmed.Len(); ++i)
+	{
+		if (Trimmed[i] >= 0x20)
+		{
+			Result.AppendChar(Trimmed[i]);
+		}
+	}
+
+	return Result;
+}
+
+ENicknameError AShelterGameState::ValidateNicknameFormat(const FString& Clean)
+{
+	if (Clean.IsEmpty())
+	{
+		return ENicknameError::Empty;
+	}
+	else if (Clean.Len() > MaxNicknameLength)
+	{
+		return ENicknameError::TooLong;
+	}
+	else if (Clean.Len() < MinNicknameLength)
+	{
+		return ENicknameError::TooShort;
+	}
+	return ENicknameError::None;
+}
+
+bool AShelterGameState::IsNicknameTaken(const FString& Clean, const APlayerState* Exclude) const
+{
+	if (Clean.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const APlayerState* PS : PlayerArray)
+	{
+		if (!PS || PS == Exclude)
+		{
+			continue;
+		}
+
+		if (PS->GetPlayerName().Equals(Clean, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
