@@ -1,0 +1,215 @@
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl — TSet 원소로 값 보유
+#include "GameplayTagContainer.h"              // FGameplayTag — 값으로 보유
+#include "Interfaces/Interactable.h"           // 부모 인터페이스 — 전방 선언 불가
+#include "ShopDisplay.generated.h"
+
+class APawn;
+class USoundBase;
+class UStaticMeshComponent;
+
+/**
+ * 산 뒤에 그 물건이 어떻게 되는가.
+ * 이 두 가지가 상점의 전부다 — 8종 중 6종이 StageSpawn 이고, 신발과 완충 장갑만 PersonalPassive 다.
+ */
+UENUM(BlueprintType)
+enum class EShopPurchaseKind : uint8
+{
+	/** 구매 목록에만 들어간다. 다음 스테이지의 스폰 구역이 아이템 액터로 만든다 */
+	StageSpawn,
+
+	/** 산 사람에게 즉시 컴포넌트를 붙인다. 물건으로 나오지 않고 그 사람에게 붙어 있다 */
+	PersonalPassive
+};
+
+/**
+ * 구매 시도의 결과. 플레이어에게 보여줄 수준으로만 나눈다.
+ *
+ * 문자열이 아니라 열거형인 것은 이것이 RPC 로 나가기 때문이다 — 문자열을 실어 보내면
+ * 매 시도마다 그만큼이 회선을 타고, 나중에 UI 가 붙을 때 문구를 UI 쪽에서 정할 수 없다.
+ * 서버에만 남기는 자세한 사유(설정 오류 등)는 이 열거형에 넣지 않고 로그로만 남긴다.
+ */
+UENUM(BlueprintType)
+enum class EShopPurchaseResult : uint8
+{
+	Purchased,
+	AlreadyOwned,
+	NotEnoughGold,
+
+	/** 설정 오류 · 신원 확인 실패 · 지급 실패. 플레이어가 할 수 있는 것이 없는 경우 */
+	Unavailable
+};
+
+/**
+ * 은신처 상점의 진열대 하나. 물건 하나를 놓아 두고, 보고 E 를 누르면 판다.
+ * (기획서 7장 — 은신처 구매 장비 8종, 팀 공용 골드)
+ *
+ * [8종을 한 클래스로 처리한다]
+ *   이 클래스에는 어떤 장비의 이름도 나오지 않는다. 진열대가 아는 것은 태그 · 가격 ·
+ *   산 뒤에 무엇을 하는가(PurchaseKind) 뿐이고, 신발이냐 미끼냐는 BP 인스턴스가 정한다.
+ *   그래서 장비를 추가할 때 C++ 은 늘어나지 않는다 — 완충 장갑은 이 클래스를 상속한
+ *   BP 에 컴포넌트 클래스만 바꿔 꽂으면 끝이다.
+ *
+ * [왜 AEquipmentBase 가 아닌가]
+ *   진열대는 집히지도 던져지지도 소비되지도 않는다. 사도 그 자리에 그대로 남아 있고,
+ *   실제 물건은 다음 스테이지의 스폰 구역에서 생긴다. AEquipmentBase 의 상태 기계
+ *   (Idle -> Carried -> InFlight -> Deployed -> Active -> Spent)를 하나도 쓰지 않는다.
+ *
+ * [상호작용 경로를 새로 만들지 않았다]
+ *   IInteractable 만 구현하면 UGAB_Interact 가 대상 종류를 모른 채 OnInteract 를 부른다
+ *   (GAB_Interact.cpp 의 "문·상점·상자·밴" 분기 — 인터페이스 주석에 '상점 열기' 가
+ *   처음부터 적혀 있다). 플레이어 파트에 요청할 것이 없었다.
+ *
+ * [판정은 전부 서버다]
+ *   골드는 URunProgressSubsystem 이 들고 있고 복제되지 않는다. 클라이언트에서 깎으면
+ *   그 창에서만 잔액이 줄어들고 서버는 모른다.
+ */
+UCLASS()
+class HEAVYHANDED_API AShopDisplay : public AActor, public IInteractable
+{
+	GENERATED_BODY()
+
+public:
+	AShopDisplay();
+
+	/**
+	 * IInteractable — 진열 메시에 시선이 닿은 채 E 를 누르면 UGAB_Interact 가 부른다. (서버 전용)
+	 * 구매 판정이 들어오는 유일한 입구다.
+	 */
+	virtual void OnInteract_Implementation(APawn* Interactor) override;
+
+protected:
+	virtual void BeginPlay() override;
+
+	/**
+	 * 진열 메시. 크기 · 위치 · 회전은 뷰포트에서 정한다.
+	 *
+	 * 콜리전은 **Visibility 만 Block** 이다. Pawn 을 막으면 좁은 은신처에서 진열대에
+	 * 몸이 계속 걸리고, 물리를 켜면 지나가다 밀어서 진열이 흐트러진다.
+	 * AVanZone::BoardAimTarget 이 같은 이유로 같은 설정을 쓴다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shop")
+	TObjectPtr<UStaticMeshComponent> DisplayMesh;
+
+	/**
+	 * 무엇을 파는가. Config/Tags/Equipment.ini 의 Equipment.* 중 하나.
+	 * PurchaseKind 가 StageSpawn 이면 이 태그가 그대로 구매 목록에 들어가고,
+	 * 작업 레벨의 스폰 구역이 이 태그로 어떤 액터를 만들지 결정한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
+	FGameplayTag ItemTag;
+
+	/**
+	 * 가격($). 팀 공용 골드에서 나간다.
+	 *
+	 * 여기 손으로 넣는 것은 임시다. Equipment.ini 의 DevComment 에 정가가 적혀 있지만
+	 * 그건 주석이라 코드가 읽지 못한다 — 수치 DataAsset 을 분리할 때 그쪽으로 옮긴다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop", meta = (ClampMin = "0"))
+	int32 Price = 0;
+
+	/** 산 뒤에 어떻게 되는가 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
+	EShopPurchaseKind PurchaseKind = EShopPurchaseKind::StageSpawn;
+
+	/**
+	 * 1인당 1회만 팔 것인가. 신발 · 완충 장갑처럼 두 번 사도 소용이 없는 물건에 켠다.
+	 * 미끼나 응급 키트는 여러 개 살 수 있어야 하므로 꺼 둔다.
+	 *
+	 * ⚠ 이 기록은 은신처 레벨과 함께 사라진다. Buyers 주석을 볼 것.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
+	bool bOncePerPlayer = false;
+
+	/**
+	 * PersonalPassive 일 때 산 사람의 폰에 붙일 컴포넌트. 예: URubberShoesComponent.
+	 *
+	 * 진열대가 신발을 모르게 하는 장치다. 여기에 클래스를 꽂는 대신 코드에 신발 분기를
+	 * 넣으면, 완충 장갑 때 또 넣고 그다음 패시브 때 또 넣게 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Personal")
+	TSubclassOf<UActorComponent> EquipmentComponentClass;
+
+	/** 구매 성공음. 전원에게 이 진열대 위치에서 재생된다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Feedback")
+	TObjectPtr<USoundBase> PurchaseSound;
+
+	/** 거절음(잔액 부족 · 이미 보유). 성공음과 반드시 구별되는 소리로 둘 것 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Feedback")
+	TObjectPtr<USoundBase> DeniedSound;
+
+	/**
+	 * 구매의 성공과 거절을 사유와 함께 진열대 위에 띄운다. (테스트용)
+	 * 상점 UI 가 붙기 전까지는 "왜 안 사졌는가" 를 알 방법이 이것뿐이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Debug")
+	bool bShowShopDebug = false;
+
+	/**
+	 * 개인 장비를 지급한다. 성공하면 true. (서버 전용)
+	 * **false 를 돌려주면 호출부가 골드를 되돌린다** — 실패를 삼키면 $ 만 사라진다.
+	 *
+	 * 기본 구현은 EquipmentComponentClass 를 폰에 붙이는 것이다. 컴포넌트로 표현되지 않는
+	 * 패시브가 나오면 BP 에서 이 함수만 덮어쓰면 된다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, Category = "Shop")
+	bool GrantPersonalEquipment(APawn* Buyer);
+	virtual bool GrantPersonalEquipment_Implementation(APawn* Buyer);
+
+	/**
+	 * 구매 결과를 소리와 진열대 위 표시로 알린다. **모든 머신에서 돈다.**
+	 *
+	 * 소리가 전원에게 들리는 것은 의도다 — 은신처는 좁고, 누가 무엇을 샀는지 서로 아는 것이
+	 * 팀 공용 지갑에서는 오히려 맞다. 그리고 판정이 서버에서만 도는 탓에 클라이언트 창에는
+	 * 아무 흔적도 남지 않던 문제(2026-09-09)를 이것이 함께 해결한다.
+	 *
+	 * Unreliable 인 것은 연출이기 때문이다. **놓쳐도 되는 것만 여기 실어야 한다** —
+	 * 정식 UI 피드백은 이것에 기대지 말 것.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_ReportResult(EShopPurchaseResult Result, int32 GoldAfter);
+
+private:
+	/** 이 사람이 여기서 이미 샀는가 */
+	bool HasBought(const FUniqueNetIdRepl& PlayerId) const;
+
+	/**
+	 * 결과를 세 갈래로 알린다. (서버 전용 — 판정이 끝난 자리에서 한 번만 부른다)
+	 *   자세한 사유(ServerDetail) → 서버 로그. 개발자용이라 클라이언트로 보내지 않는다
+	 *   결과                       → 구매자 본인의 PlayerController (Reliable)
+	 *   소리 · 화면 표시           → 전원 (Unreliable)
+	 *
+	 * 진열대에서 Client RPC 를 직접 부를 수 없다는 것이 이 구조의 이유다 — Client RPC 는
+	 * 액터의 Owner 커넥션으로 가는데 레벨에 배치된 진열대는 Owner 가 없어서 아무 데도 가지
+	 * 않는다. 그래서 엔진이 이미 갖고 있는 APlayerController::ClientMessage 를 통로로 쓴다.
+	 */
+	void ReportResult(EShopPurchaseResult Result, APawn* Interactor, const FString& ServerDetail);
+
+	/** 플레이어에게 보여줄 한 줄. 결과 열거형에서만 만든다 */
+	FString MakePlayerMessage(EShopPurchaseResult Result, int32 GoldAfter) const;
+
+	void ShowShopDebug(const FString& Message, const FColor& Color) const;
+
+	/** 설정이 비어 있는 진열대를 켤 때 경고한다. 돈만 받고 아무것도 안 주는 사고를 막는다 */
+	void WarnIfMisconfigured() const;
+
+	/**
+	 * 여기서 이미 산 사람들. bOncePerPlayer 일 때만 쓴다.
+	 *
+	 * ⚠ **레벨을 떠나면 사라진다.** 스테이지를 다녀오면 다시 살 수 있게 되고,
+	 * PersonalPassive 로 붙인 컴포넌트도 폰이 새로 만들어지면서 같이 사라진다.
+	 * 레벨을 건너 살아남으려면 URunProgressSubsystem(코어 루프 파트 / 지성인)에
+	 * 개인 장비 보유 기록이 필요하다 — 필요한 것은 함수 두 개다:
+	 *
+	 *     void AddPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag);
+	 *     bool HasPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag) const;
+	 *
+	 * 역할 선택(SelectedRoles)과 같은 패턴이고 캠페인 단위여야 한다 — 8천 달러짜리
+	 * 신발이 한 판만 유지되면 살 이유가 없다. 요청은 스폰 구역 작업과 같은 시점에 한다
+	 * (스테이지 시작에 물건을 만드는 그 코드가 개인 장비도 같이 다시 붙이면 된다).
+	 */
+	TSet<FUniqueNetIdRepl> Buyers;
+};
