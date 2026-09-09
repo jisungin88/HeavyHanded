@@ -62,7 +62,9 @@ void AShopDisplay::OnInteract_Implementation(APawn* Interactor)
 
 	// 0. 설정 검사를 지출보다 먼저 한다.
 	//    무효 태그를 구매 목록에 넣으면 스폰 구역이 조용히 아무것도 만들지 않고 $ 만 사라진다.
-	if (PurchaseKind == EShopPurchaseKind::StageSpawn && !ItemTag.IsValid())
+	//    1인 1회 물건도 마찬가지다 — 보유 기록이 태그를 키로 쓰므로, 태그가 없으면
+	//    제한이 조용히 풀려서 무한히 팔린다.
+	if (!ItemTag.IsValid() && (PurchaseKind == EShopPurchaseKind::StageSpawn || bOncePerPlayer))
 	{
 		ReportResult(EShopPurchaseResult::Unavailable, Interactor, TEXT("ItemTag 가 비어 있다"));
 		return;
@@ -87,7 +89,9 @@ void AShopDisplay::OnInteract_Implementation(APawn* Interactor)
 			return;
 		}
 
-		if (HasBought(BuyerId))
+		// 이 액터가 아니라 URunProgressSubsystem 이 기억한다. 여기 두면 은신처 레벨과
+		// 함께 사라져서, 스테이지를 한 번 다녀오면 신발을 또 살 수 있게 된다.
+		if (Run->HasPersonalEquipment(BuyerId, ItemTag))
 		{
 			ReportResult(EShopPurchaseResult::AlreadyOwned, Interactor, TEXT("이미 보유"));
 			return;
@@ -127,9 +131,11 @@ void AShopDisplay::OnInteract_Implementation(APawn* Interactor)
 	}
 
 	// 4. 기록. 지급이 확정된 뒤에만 남긴다.
+	//    캠페인 단위로 남으므로 스테이지를 다녀와도 유효하고, 작업 레벨의 스폰 구역이
+	//    이 기록을 보고 효과를 다시 붙인다.
 	if (bOncePerPlayer)
 	{
-		Buyers.Add(BuyerId);
+		Run->AddPersonalEquipment(BuyerId, ItemTag);
 	}
 
 	ReportResult(EShopPurchaseResult::Purchased, Interactor,
@@ -234,11 +240,6 @@ void AShopDisplay::Multicast_ReportResult_Implementation(EShopPurchaseResult Res
 
 	// 모든 머신에서 돈다. 그래서 클라이언트 창에서도 진열대 위에 결과가 뜬다.
 	ShowShopDebug(MakePlayerMessage(Result, GoldAfter), bSuccess ? FColor::Green : FColor::Red);
-}
-
-bool AShopDisplay::HasBought(const FUniqueNetIdRepl& PlayerId) const
-{
-	return Buyers.Contains(PlayerId);
 }
 
 void AShopDisplay::ShowShopDebug(const FString& Message, const FColor& Color) const

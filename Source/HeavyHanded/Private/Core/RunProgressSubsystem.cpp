@@ -218,6 +218,59 @@ void URunProgressSubsystem::ConsumePurchasedEquipment()
 }
 
 // ──────────────────────────────────────────────────────────────
+// 개인 장비
+// ──────────────────────────────────────────────────────────────
+
+void URunProgressSubsystem::AddPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag)
+{
+	if (!EnsureServerAuthority(TEXT("AddPersonalEquipment")))
+	{
+		return;
+	}
+
+	if (!PlayerId.IsValid() || !EquipmentTag.IsValid())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("개인 장비 지급 무시 — 플레이어 또는 장비 태그가 유효하지 않습니다."));
+		return;
+	}
+
+	FGameplayTagContainer& Owned = PersonalEquipment.FindOrAdd(PlayerId);
+
+	if (Owned.HasTagExact(EquipmentTag))
+	{
+		// 두 번 사는 것은 상점이 먼저 막는다. 여기까지 왔다는 것은 다른 경로가 있다는 뜻이라
+		// 조용히 넘기지 않고 남긴다 — 컨테이너라 중복이 쌓이지는 않는다
+		UE_LOG(LogHeist, Log, TEXT("개인 장비 지급 무시 — %s 는 이미 %s 를 갖고 있습니다."),
+			*PlayerId.ToDebugString(), *EquipmentTag.ToString());
+		return;
+	}
+
+	Owned.AddTag(EquipmentTag);
+
+	UE_LOG(LogHeist, Log, TEXT("개인 장비 지급 — %s → %s"),
+		*PlayerId.ToDebugString(), *EquipmentTag.ToString());
+}
+
+bool URunProgressSubsystem::HasPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag) const
+{
+	const FGameplayTagContainer* Owned = PersonalEquipment.Find(PlayerId);
+
+	// HasTag 가 아니라 HasTagExact 다. 하위 태그로 번지면 Equipment 루트를 물었을 때
+	// 아무거나 하나만 갖고 있어도 전부 보유로 읽힌다
+	return Owned && Owned->HasTagExact(EquipmentTag);
+}
+
+const FGameplayTagContainer& URunProgressSubsystem::GetPersonalEquipment(const FUniqueNetIdRepl& PlayerId) const
+{
+	if (const FGameplayTagContainer* Owned = PersonalEquipment.Find(PlayerId))
+	{
+		return *Owned;
+	}
+
+	return FGameplayTagContainer::EmptyContainer;
+}
+
+// ──────────────────────────────────────────────────────────────
 // 체포된 팀원
 // ──────────────────────────────────────────────────────────────
 
@@ -483,9 +536,11 @@ void URunProgressSubsystem::BeginNewRun()
 		return;
 	}
 
-	// 팀 골드 · 역할 · 통과한 장소는 건드리지 않는다 — 셋 다 캠페인 단위다.
+	// 팀 골드 · 역할 · 개인 장비 · 통과한 장소는 건드리지 않는다 — 넷 다 캠페인 단위다.
 	// 골드는 판을 건너 누적되고, 역할은 한 번 고르면 바뀌지 않으며,
-	// 진행도는 "이 방에서 어디까지 왔는가" 라 판마다 초기화될 값이 아니다
+	// 진행도는 "이 방에서 어디까지 왔는가" 라 판마다 초기화될 값이 아니다.
+	// 개인 장비(신발 등)는 1인당 1회만 살 수 있어서, 여기서 지우면 매 판 다시 사야 하고
+	// 그러면 "1인당 1회" 규칙 자체가 무의미해진다
 	ConfirmedRoster.Reset();
 	PurchasedEquipment.Reset();
 
@@ -509,6 +564,7 @@ void URunProgressSubsystem::ResetCampaign()
 	ConfirmedRoster.Reset();
 	SelectedRoles.Reset();
 	PurchasedEquipment.Reset();
+	PersonalEquipment.Reset();
 	SelectedEntry = FGameplayTag();
 
 	// 체포와 진행도는 캠페인 단위라 BeginNewRun 이 지우지 않는다. 여기서만 지운다 —

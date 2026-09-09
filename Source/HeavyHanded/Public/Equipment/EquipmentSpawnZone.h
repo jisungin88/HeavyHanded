@@ -30,19 +30,13 @@ class USceneComponent;
  *   4명이 미끼 3개를 놓고 나눠 갖는 것 자체가 협동의 압력이다. 사람별로 나눠 주지 않고
  *   바닥에 놓는다 (Equipment.ini 주석 — "선착순이다").
  *
- * ⚠ [아직 안 되는 것 — 개인 장비 재적용]
+ * [개인 장비도 여기서 다시 붙인다]
  *   고무창 신발은 폰에 붙는 컴포넌트라 ServerTravel 로 폰이 새로 만들어지면 사라진다.
- *   여기서 다시 붙여야 하는데, "누가 신발을 갖고 있는가" 를 물어볼 곳이 없다 —
- *   URunProgressSubsystem 의 PurchasedEquipment 는 태그별 수량이라 사람을 모른다.
+ *   URunProgressSubsystem 이 "누가 무엇을 갖고 있는가" 를 캠페인 단위로 들고 있으므로,
+ *   스테이지 시작에 그것을 훑어 컴포넌트를 다시 붙인다.
  *
- *   [지성인] URunProgressSubsystem 에 함수 두 개가 필요하다. 역할 선택(SelectedRoles)과
- *   같은 패턴이고 **캠페인 단위**여야 한다 ($8,000 신발이 한 판만 남으면 살 이유가 없다):
- *
- *       void AddPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag);
- *       bool HasPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag) const;
- *
- *   그것이 들어오면 ApplyPersonalEquipment() 를 여기에 붙인다. 지금은 은신처 안에서만
- *   신발이 유효하다.
+ *   물건을 만드는 것과 같은 일이다 — 산 것을 실체화하는 것이고, 실체화 방식만
+ *   액터냐 컴포넌트냐로 갈린다. 그래서 두 경로가 같은 자리에 있다.
  */
 UCLASS()
 class HEAVYHANDED_API AEquipmentSpawnZone : public AActor
@@ -92,6 +86,17 @@ protected:
 	TMap<FGameplayTag, TSubclassOf<AActor>> EquipmentClasses;
 
 	/**
+	 * 장비 태그 -> 플레이어 폰에 붙일 컴포넌트. 예: Equipment.RubberShoes -> URubberShoesComponent.
+	 *
+	 * 위 EquipmentClasses 와 나뉘어 있는 것은 실체화 방식이 다르기 때문이다 —
+	 * 저쪽은 바닥에 놓이는 액터고 이쪽은 사람에게 붙는 컴포넌트다.
+	 * 여기 없는 태그는 그냥 지나간다. 그래서 1인 1회 소모품처럼 컴포넌트가 없는 개인 장비도
+	 * 보유 기록만 남고 아무 일도 일어나지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Spawn")
+	TMap<FGameplayTag, TSubclassOf<UActorComponent>> PersonalEquipmentClasses;
+
+	/**
 	 * 배치 지점. 레벨의 TargetPoint 들을 끌어다 놓는다 (AGuardSpawner::PatrolPoints 와 같은 방식).
 	 * 물건이 앵커보다 많으면 앵커를 다시 돌면서 조금씩 비켜 놓는다.
 	 * 비워 두면 이 액터 위치에 원형으로 놓는다.
@@ -128,6 +133,16 @@ protected:
 private:
 	/** 아이템 하나를 만든다. 실패하면 nullptr 이고 사유를 로그로 남긴다 */
 	AActor* SpawnOne(const FGameplayTag& EquipmentTag, UClass* ActorClass, int32 PlacementIndex);
+
+	/**
+	 * 접속한 사람들에게 각자의 개인 장비를 다시 붙인다. (서버 전용)
+	 * 구매 목록과 달리 **소비하지 않는다** — 캠페인 내내 유지되는 소유물이라
+	 * 스테이지마다 다시 붙여야 한다.
+	 */
+	void ApplyPersonalEquipment();
+
+	/** 폰 하나에 컴포넌트를 붙인다. 이미 갖고 있으면 아무 일도 하지 않는다 */
+	void GrantComponentTo(APawn* Pawn, const FGameplayTag& EquipmentTag, UClass* ComponentClass);
 
 	/** PlacementIndex 번째 물건을 놓을 자리. 앵커를 순환하고 한 바퀴마다 비켜 놓는다 */
 	FTransform GetPlacementTransform(int32 PlacementIndex) const;

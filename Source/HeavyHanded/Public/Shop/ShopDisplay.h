@@ -119,7 +119,8 @@ protected:
 	 * 1인당 1회만 팔 것인가. 고무창 신발처럼 두 번 사도 소용이 없는 물건에 켠다.
 	 * 미끼나 응급 키트는 여러 개 살 수 있어야 하므로 꺼 둔다.
 	 *
-	 * ⚠ 이 기록은 은신처 레벨과 함께 사라진다. Buyers 주석을 볼 것.
+	 * 누가 샀는지는 URunProgressSubsystem 이 캠페인 단위로 들고 있다 — 이 액터가 아니라.
+	 * 레벨을 넘어야 하는 사실이기 때문이다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
 	bool bOncePerPlayer = false;
@@ -173,9 +174,6 @@ protected:
 	void Multicast_ReportResult(EShopPurchaseResult Result, int32 GoldAfter);
 
 private:
-	/** 이 사람이 여기서 이미 샀는가 */
-	bool HasBought(const FUniqueNetIdRepl& PlayerId) const;
-
 	/**
 	 * 결과를 세 갈래로 알린다. (서버 전용 — 판정이 끝난 자리에서 한 번만 부른다)
 	 *   자세한 사유(ServerDetail) → 서버 로그. 개발자용이라 클라이언트로 보내지 않는다
@@ -195,21 +193,4 @@ private:
 
 	/** 설정이 비어 있는 진열대를 켤 때 경고한다. 돈만 받고 아무것도 안 주는 사고를 막는다 */
 	void WarnIfMisconfigured() const;
-
-	/**
-	 * 여기서 이미 산 사람들. bOncePerPlayer 일 때만 쓴다.
-	 *
-	 * ⚠ **레벨을 떠나면 사라진다.** 스테이지를 다녀오면 다시 살 수 있게 되고,
-	 * PersonalPassive 로 붙인 컴포넌트도 폰이 새로 만들어지면서 같이 사라진다.
-	 * 레벨을 건너 살아남으려면 URunProgressSubsystem(코어 루프 파트 / 지성인)에
-	 * 개인 장비 보유 기록이 필요하다 — 필요한 것은 함수 두 개다:
-	 *
-	 *     void AddPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag);
-	 *     bool HasPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag) const;
-	 *
-	 * 역할 선택(SelectedRoles)과 같은 패턴이고 캠페인 단위여야 한다 — 8천 달러짜리
-	 * 신발이 한 판만 유지되면 살 이유가 없다. 요청은 스폰 구역 작업과 같은 시점에 한다
-	 * (스테이지 시작에 물건을 만드는 그 코드가 개인 장비도 같이 다시 붙이면 된다).
-	 */
-	TSet<FUniqueNetIdRepl> Buyers;
 };

@@ -8,6 +8,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"                 // TActorIterator — Get / 중복 경고
+#include "GameFramework/GameStateBase.h" // PlayerArray — 개인 장비 재적용
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerState.h"
 #include "Loot/LootLog.h"                // LogLoot — 장비 계열이 다 이걸 쓴다
 
 AEquipmentSpawnZone::AEquipmentSpawnZone()
@@ -120,6 +123,10 @@ void AEquipmentSpawnZone::SpawnPurchasedEquipment()
 
 	bHasSpawned = true;
 
+	// 개인 장비는 구매 목록과 무관하다. 목록이 비어 있어도(이미 소비됐어도) 신발은
+	// 매 스테이지 다시 붙여야 하므로 아래 이른 반환보다 위에 있어야 한다.
+	ApplyPersonalEquipment();
+
 	if (Purchased.IsEmpty())
 	{
 		UE_LOG(LogLoot, Log, TEXT("%s: 구매한 장비가 없다."), *GetName());
@@ -189,6 +196,77 @@ AActor* AEquipmentSpawnZone::SpawnOne(const FGameplayTag& EquipmentTag, UClass* 
 		SpawnTransform.GetLocation(), FColor::Green);
 
 	return Spawned;
+}
+
+void AEquipmentSpawnZone::ApplyPersonalEquipment()
+{
+	if (PersonalEquipmentClasses.IsEmpty())
+	{
+		return;
+	}
+
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	const AGameStateBase* GS = GetWorld() ? GetWorld()->GetGameState() : nullptr;
+	if (!Run || !GS)
+	{
+		return;
+	}
+
+	// PlayerArray 로 돈다. 폰에서 시작하면 아직 폰이 없는 사람(관전 · 로딩)을 못 세고,
+	// 신원(FUniqueNetIdRepl)은 어차피 PlayerState 에만 있다.
+	for (const APlayerState* PS : GS->PlayerArray)
+	{
+		if (!IsValid(PS))
+		{
+			continue;
+		}
+
+		APawn* Pawn = PS->GetPawn();
+		if (!IsValid(Pawn))
+		{
+			// 관전자이거나 아직 폰이 없다. 경고할 일은 아니다
+			continue;
+		}
+
+		const FGameplayTagContainer& Owned = Run->GetPersonalEquipment(PS->GetUniqueId());
+		for (const FGameplayTag& EquipmentTag : Owned)
+		{
+			// 여기 없는 태그는 그냥 지나간다 — 컴포넌트로 표현되지 않는 개인 장비도 있다
+			if (const TSubclassOf<UActorComponent>* FoundClass = PersonalEquipmentClasses.Find(EquipmentTag))
+			{
+				GrantComponentTo(Pawn, EquipmentTag, *FoundClass);
+			}
+		}
+	}
+}
+
+void AEquipmentSpawnZone::GrantComponentTo(APawn* Pawn, const FGameplayTag& EquipmentTag, UClass* ComponentClass)
+{
+	if (!IsValid(Pawn) || !ComponentClass)
+	{
+		return;
+	}
+
+	// 두 번 붙으면 효과가 두 번 곱해진다(신발이라면 0.5 -> 0.25).
+	// 이 함수가 페이즈마다 다시 불릴 수 있으므로 반드시 확인한다.
+	if (Pawn->FindComponentByClass(ComponentClass))
+	{
+		return;
+	}
+
+	UActorComponent* Granted = NewObject<UActorComponent>(Pawn, ComponentClass);
+	if (!Granted)
+	{
+		UE_LOG(LogLoot, Error, TEXT("%s: %s 컴포넌트를 %s 에 만들지 못했다."),
+			*GetName(), *ComponentClass->GetName(), *GetNameSafe(Pawn));
+		return;
+	}
+
+	// 등록해야 BeginPlay 가 돌고, 등록되면서 폰의 OwnedComponents 에 들어가 GC 로부터도 안전해진다
+	Granted->RegisterComponent();
+
+	UE_LOG(LogLoot, Log, TEXT("%s: %s 를 %s 에 다시 붙였다 (%s)."),
+		*GetName(), *ComponentClass->GetName(), *GetNameSafe(Pawn), *EquipmentTag.ToString());
 }
 
 FTransform AEquipmentSpawnZone::GetPlacementTransform(int32 PlacementIndex) const

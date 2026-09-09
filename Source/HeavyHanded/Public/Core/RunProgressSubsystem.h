@@ -115,6 +115,26 @@ public:
 	 */
 	void ConsumePurchasedEquipment();
 
+	// ── 개인 장비 ──
+	//
+	// 사람에게 귀속되는 장비(고무창 신발 등). 위의 구매 장비와 셋이 다르다 —
+	// 바닥에 스폰되지 않고, 소비되지 않으며, **캠페인 단위**다.
+	// 1인당 1회만 살 수 있는 물건이라 판마다 사라지면 $8,000 을 낼 이유가 없어진다.
+	// 수량이 아니라 보유 여부인 것은 같은 패시브를 두 벌 걸 수 없기 때문이다.
+
+	/** 이 플레이어에게 이 장비를 귀속시킨다. 이미 갖고 있으면 아무 일도 하지 않는다. (서버 전용) */
+	void AddPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag);
+
+	/** 이 플레이어가 이 장비를 갖고 있는가. 상점의 1인 1회 판정이 쓴다 */
+	bool HasPersonalEquipment(const FUniqueNetIdRepl& PlayerId, const FGameplayTag& EquipmentTag) const;
+
+	/**
+	 * 이 플레이어가 가진 개인 장비 전부. 없으면 빈 컨테이너.
+	 * 작업 레벨이 스테이지 시작에 이걸 훑어 효과를 다시 붙인다 — ServerTravel 로 폰이
+	 * 새로 만들어지면서 컴포넌트가 사라지기 때문이다.
+	 */
+	const FGameplayTagContainer& GetPersonalEquipment(const FUniqueNetIdRepl& PlayerId) const;
+
 	// ── 체포된 팀원 ──
 	//
 	// 캠페인 단위 — BeginNewRun 이 지우지 않는다. 구출 전까지 남아야 하는 사실이다.
@@ -214,6 +234,12 @@ private:
 
 	/** 은신처에서 산 장비와 수량. 런 단위 — 작업 레벨에서 스폰되며 소비된다 */
 	TMap<FGameplayTag, int32> PurchasedEquipment;
+
+	/**
+	 * 플레이어별 개인 장비(Equipment.*). **캠페인 단위 — BeginNewRun 이 지우지 않는다.**
+	 * UPROPERTY 가 아닌 이유는 SelectedRoles 와 같다.
+	 */
+	TMap<FUniqueNetIdRepl, FGameplayTagContainer> PersonalEquipment;
 
 	/** 팀이 고른 진입점(Entry.*). 런 단위. 무효 태그면 레벨 기본값으로 폴백한다 */
 	UPROPERTY()
