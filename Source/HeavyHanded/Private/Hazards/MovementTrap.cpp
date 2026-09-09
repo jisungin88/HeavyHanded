@@ -3,10 +3,10 @@
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Core/HeavyHandedGameplayTags.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — 임시 문자열 조회용
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
@@ -98,10 +98,17 @@ void AMovementTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, A
 	}
 
 	// 소음은 이 사건 자체가 발생원이다. Noise.Hazard.Trap 은 Noise.ini(지성인)에 이미
-	// 등록된 태그를 참조만 한 것 — 새로 만들지 않았다
+	// 등록된 태그를 참조만 한 것 — 새로 만들지 않았다.
+	//
+	// [임시: 네이티브 선언 대신 문자열 조회]
+	//   HeavyHandedGameplayTags.h/.cpp 를 환경 방해 요소 작업 이전 상태로 되돌려 달라는
+	//   요청(공용 파일 충돌 우려)에 따라 HHTags::Noise_Hazard_Trap 선언을 걷어냈다.
+	//   기능은 그대로 유지하려고 문자열 조회로 임시 대체한 것 — 복구 요청이 오면
+	//   HeavyHandedGameplayTags.h 에 다시 선언하고 이 줄을 HHTags::Noise_Hazard_Trap 으로 되돌릴 것.
 	if (UNoiseSubsystem* Noise = UNoiseSubsystem::Get(this))
 	{
-		Noise->ReportNoise(HHTags::Noise_Hazard_Trap, GetActorLocation(), 1.f, Target);
+		static const FGameplayTag TrapNoiseTag = FGameplayTag::RequestGameplayTag(TEXT("Noise.Hazard.Trap"));
+		Noise->ReportNoise(TrapNoiseTag, GetActorLocation(), 1.f, Target);
 	}
 
 	Multicast_PlayTriggerEffect();
