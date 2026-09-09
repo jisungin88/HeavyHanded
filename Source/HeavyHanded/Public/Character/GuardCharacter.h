@@ -17,12 +17,13 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 public:
 	AGuardCharacter();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
 	bool bEnableSight = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
 	bool bEnableHearing = true;
 
+	void SetGuardMoveSpeed(float NewMoveSpeed);
 
 	// IGenericTeamAgentInterface 기본 구현(GenericTeamAgentInterface.h)은 감지 대상 액터
 	// 자신이 이 인터페이스를 구현했는지만 보고, 그 액터의 컨트롤러까지는 확인하지 않는다.
@@ -47,9 +48,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
-
-	// UFUNCTION(BlueprintPure, Category = "Guard|Perception")
-	// UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
 
 	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
 	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서

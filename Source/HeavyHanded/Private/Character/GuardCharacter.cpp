@@ -101,6 +101,14 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 
 
 
+void AGuardCharacter::SetGuardMoveSpeed(float NewMoveSpeed)
+{
+	if (UCharacterMovementComponent* MovementComp = GetCharacterMovement())
+	{
+		MovementComp->MaxWalkSpeed = NewMoveSpeed;
+	}
+}
+
 FGenericTeamId AGuardCharacter::GetGenericTeamId() const
 {
 	const IGenericTeamAgentInterface* ControllerTeamAgent = Cast<IGenericTeamAgentInterface>(GetController());

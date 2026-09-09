@@ -143,54 +143,6 @@ public:
 	bool IsTargeting(const AActor* InActor) const;
 
 
-
-	// Perception UI
-
-protected:
-
-	/// 	// 가드 캐릭터로 이동. 작동시 삭제
-	/// // 로컬 플레이어를 타겟하고 있을 때만 GetDetectionGaugePercent()를 폰의 머리 위
-	/// // 위젯 컴포넌트(UDetectionGaugeWidget)로 밀어넣는다. BTService_UpdateDetectionGauge와
-	/// // 같은 주기(0.1초)로 충분해 매 틱 대신 타이머로 돈다.
-	/// void UpdateHeadGaugeWidget();
-
-	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
-	/// UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
-	/// float HeadGaugeUpdateInterval = 0.1f;
-
-	// ========================================================
-
-
-
-public:
-
-	// 다음 순찰 지점을 골라 Blackboard의 PatrolLocation에 써넣는다.
-	// Patrol 브랜치 진입 시 BTTask_SelectNextPatrolPoint가 호출한다.
-	//
-	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않고 그대로 유지한다.
-	// 이 함수는 브랜치에 진입할 때마다 불리는데, 시야 획득/상실로 순찰이
-	// abort 됐다 재개될 때마다 지점을 건너뛰면 순찰 경로가 망가진다.
-	// UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
-	// void SelectNextPatrolPoint();
-
-
-	// 다음 수색 지점을 골라 Blackboard의 InvestigateLocation에 써넣는다.
-	// Investigate 브랜치 진입 시 BTTask_SelectSearchPoint가 호출한다.
-	//
-	// 한 번의 조사는 [마지막 목격 지점] -> [주변 무작위 지점 x SearchSweepCount] 순서로
-	// 진행된다. 더 훑을 지점이 없으면 false를 돌려주고, 호출한 태스크가 Failed 로
-	// 브랜치를 끝내 순찰로 돌려보낸다.
-	//
-	// 조사 세션은 SearchStartTime 값으로 구분한다. 그 값이 바뀌면(= 게이지가 다시
-	// 가득 찼거나 새 소음을 들었으면) 새 조사로 보고 훑기 횟수를 초기화한다.
-	// UFUNCTION(BlueprintCallable, Category = "Guard|Investigate")
-	// bool SelectNextSearchPoint();
-
-
-
-
-
-
 	// World Alert (월드 경계도)
 	// ========================================================
 
@@ -254,31 +206,6 @@ protected:
 
 
 	// ========================================================
-
-
-
-
-	// Runtime State (실행 상태)
-	// ========================================================
-
-
-		// 가드 캐릭터로 이동. 작동시 삭제
-	//private:
-	//FTimerHandle HeadGaugeUpdateTimerHandle;
-
-
-	// ========================================================
-
-
-
-
-
-
-
-
-
-
-
 
 
 };

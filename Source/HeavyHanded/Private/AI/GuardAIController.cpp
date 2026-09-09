@@ -183,24 +183,9 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	}
 
 
-	// 머리 위 감지 게이지 타이머 등록
+	// 첫 순찰 지점 선택 : 시작 시 첫 순찰 지점을 미리 채워둔다
 	// -------------------------------------------------------------------------------------------------------
-
-	/// 	// 가드 캐릭터로 이동. 작동시 삭제
-	/// // 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
-	/// // BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
-	/// // 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
-	/// GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
-	/// 	&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
-
-
-
-
-	// 첫 순찰 지점 선택
-	// -------------------------------------------------------------------------------------------------------
-	// 시작 시 첫 순찰 지점을 미리 채워둔다
-	// SelectNextPatrolPoint(); 	// 이동 필요
-	// 아래 함수로 변경했음
+	// SelectNextPatrolPoint();-> 아래 함수로 변경했음
 	SelectNextAction(EGuardAIState::Patrol);
 
 
@@ -304,9 +289,6 @@ void AGuardAIController::StopForMatchEnd()
 		GuardHearingComp->SetHearingEnabled(false);
 	}
 
-	// 가드 캐릭터로 이동. 작동시 삭제
-	/// // 머리 위 게이지 갱신 타이머도 멈춘다. 게이지는 더 이상 변하지 않는다
-	/// GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
 
 	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn()))
 	{
@@ -417,17 +399,12 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 		return;
 	}
 
-	// 가드 캐릭터로 이동. 작동시 삭제
-	//HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
 	GuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
+	GuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();
 
-	if (UCharacterMovementComponent* MovementComp = GuardPawn->GetCharacterMovement())
-	{
-		MovementComp->MaxWalkSpeed = Row->MoveSpeed;
-	}
 	
 
 	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
@@ -499,36 +476,3 @@ bool AGuardAIController::IsTargeting(const AActor* InActor) const
 
 	return BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) == InActor;
 }
-
-/* 	// 가드 캐릭터로 이동. 작동시 삭제
-void AGuardAIController::UpdateHeadGaugeWidget()
-{
-	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
-	if (!IsValid(GuardPawn))
-	{
-		return;
-	}
-
-	UWidgetComponent* WidgetComp = GuardPawn->GetDetectionGaugeWidgetComponent();
-	if (!IsValid(WidgetComp))
-	{
-		return;
-	}
-
-	UDetectionGaugeWidget* GaugeWidget = Cast<UDetectionGaugeWidget>(WidgetComp->GetUserWidgetObject());
-	if (!GaugeWidget)
-	{
-		// Widget Class 가 아직 지정 안 됐거나(파생 BP에서 WBP_DetectionGauge 미설정),
-		// 컴포넌트가 아직 위젯 인스턴스를 만들기 전(BeginPlay 타이밍)일 수 있다.
-		return;
-	}
-
-	// 인덱스 0 로컬 플레이어 기준. 이 프로토타입은 단일 플레이어 대상 테스트 씬이라
-	// 화면 하나에 여러 로컬 플레이어가 동시에 있는 상황(스플릿스크린)은 다루지 않는다.
-	const APawn* LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	const float GaugePercent = IsTargeting(LocalPlayerPawn) ? GetDetectionGaugePercent() : 0.f;
-
-	GaugeWidget->SetGaugePercent(GaugePercent);
-}
-
-*/
