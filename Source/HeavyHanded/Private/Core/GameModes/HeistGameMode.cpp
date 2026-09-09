@@ -2,7 +2,9 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Components/CapsuleComponent.h"   // 진입점 배치 간격을 폰 캡슐에서 끌어온다
 #include "Engine/World.h"
+#include "GameFramework/Character.h"       // 같은 이유 — 캡슐을 가진 CDO 로 캐스트한다
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
@@ -324,6 +326,96 @@ UClass* AHeistGameMode::GetDefaultPawnClassForController_Implementation(AControl
 		return RolePawn;
 	}
 	return Super::GetDefaultPawnClassForController_Implementation(InController);
+}
+
+APawn* AHeistGameMode::SpawnDefaultPawnAtTransform_Implementation(
+	AController* NewPlayer, const FTransform& SpawnTransform)
+{
+	// 엔진 기본 구현과 같고 충돌 처리 하나만 다르다 (헤더 주석 참고).
+	// ChoosePlayerStart 가 전원에게 같은 진입점을 주는데 APawn 기본값이
+	// "겹치면 스폰하지 않음" 이라, 뒤에 도착한 사람만 폰이 안 생겼다
+	FActorSpawnParameters SpawnInfo;
+	SpawnInfo.Instigator = GetInstigator();
+	SpawnInfo.ObjectFlags |= RF_Transient;   // 기본 폰을 맵에 저장하지 않는다
+	SpawnInfo.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
+	if (!PawnClass)
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("%s 의 폰 클래스를 찾지 못해 스폰하지 않습니다. "
+				 "Project Settings → Game → Character 의 역할 폰 매핑을 확인하세요."),
+			*GetNameSafe(NewPlayer));
+		return nullptr;
+	}
+
+	// 진입점은 전원이 공유한다. 빈 자리를 찾아 흩어 놓지 않으면 캡슐이 서로 파묻힌다
+	FTransform PlacedTransform = SpawnTransform;
+	PlacedTransform.SetLocation(FindFreeEntrySlot(SpawnTransform.GetLocation(), PawnClass));
+
+	APawn* ResultPawn = GetWorld()->SpawnActor<APawn>(PawnClass, PlacedTransform, SpawnInfo);
+	if (!ResultPawn)
+	{
+		// 여기까지 오면 충돌이 아닌 다른 이유다 (클래스가 Abstract 라거나 월드가 정리 중이라거나).
+		// 증상이 "그 사람만 조종할 폰이 없다" 뿐이라 이유를 남기지 않으면 찾을 수 없다
+		UE_LOG(LogHeist, Error,
+			TEXT("폰 스폰 실패 — %s / %s / %s"),
+			*GetNameSafe(NewPlayer), *GetNameSafe(PawnClass),
+			*SpawnTransform.GetLocation().ToCompactString());
+	}
+
+	return ResultPawn;
+}
+
+FVector AHeistGameMode::FindFreeEntrySlot(const FVector& EntryLocation, const UClass* PawnClass) const
+{
+	const UWorld* World = GetWorld();
+
+	// 캡슐을 못 읽으면 간격의 기준이 없다. 임의의 숫자를 지어내느니 진입점 그대로 둔다 —
+	// 겹쳐도 스폰은 되고(AlwaysSpawn), 잘못된 자리로 밀어내는 것보다 낫다
+	const ACharacter* PawnCDO = PawnClass ? Cast<ACharacter>(PawnClass->GetDefaultObject()) : nullptr;
+	const UCapsuleComponent* Capsule = PawnCDO ? PawnCDO->GetCapsuleComponent() : nullptr;
+	if (!World || !Capsule)
+	{
+		return EntryLocation;
+	}
+
+	const float Radius = Capsule->GetUnscaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+
+	// 반경의 3배로 벌리면 6개 자리의 이웃 간격이 캡슐 지름보다 넓다.
+	// 최대 4인이므로 중앙 1 + 원둘레 6 이면 재접속까지 감안해도 남는다
+	const float SlotRadius = Radius * 3.f;
+	constexpr int32 RingSlots = 6;
+
+	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+	const FCollisionQueryParams Params(SCENE_QUERY_STAT(HeistEntrySlot), false);
+
+	for (int32 Slot = 0; Slot <= RingSlots; ++Slot)
+	{
+		FVector Candidate = EntryLocation;
+
+		if (Slot > 0)
+		{
+			const float Angle = (2.f * PI * (Slot - 1)) / RingSlots;
+			Candidate += FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * SlotRadius;
+		}
+
+		// ECC_Pawn 으로 본다. 다른 플레이어뿐 아니라 벽도 같이 걸러진다 —
+		// 원둘레의 한 점이 벽 안쪽일 수 있고, 그 자리에 넣으면 밖으로 튕겨 나간다
+		if (!World->OverlapBlockingTestByChannel(Candidate, FQuat::Identity, ECC_Pawn, Shape, Params))
+		{
+			return Candidate;
+		}
+	}
+
+	// 일곱 자리가 전부 막혔다. 진입점이 너무 좁다는 뜻이라 남겨 둔다
+	UE_LOG(LogHeist, Warning,
+		TEXT("진입점 %s 주변에 빈 자리가 없어 겹쳐서 스폰합니다. 진입점 주위를 넓히세요."),
+		*EntryLocation.ToCompactString());
+
+	return EntryLocation;
 }
 
 void AHeistGameMode::HandleMatchHasStarted()
