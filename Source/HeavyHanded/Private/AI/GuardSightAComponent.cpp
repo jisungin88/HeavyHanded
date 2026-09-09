@@ -59,22 +59,7 @@ void UGuardSightAComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// ...
 
-
-	//if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	//{
-	//	PerceptionComp = AIController->GetPerceptionComponent();
-	//
-	//	if (!PerceptionComp)
-	//	{
-	//		// PerceptionComp 존재하지 않음 로그
-	//		return;
-	//	}
-	//		PerceptionComp->ConfigureSense(*SightConfig);
-	//		// SetSightEnabled(bEnableSight); // AI 컨트롤러에서 설정하도록 변경
-	//		///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	//}
 
 
 }

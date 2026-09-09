@@ -116,6 +116,8 @@ protected:
 	UFUNCTION()
 	void HandlePerceptionFull(FVector LastNoiseLocation);
 
+	//UFUNCTION()
+	//void HandlePerceptionChanged(float NewPerception01);
 
 public:
 
@@ -146,14 +148,15 @@ public:
 
 protected:
 
-	// 로컬 플레이어를 타겟하고 있을 때만 GetDetectionGaugePercent()를 폰의 머리 위
-	// 위젯 컴포넌트(UDetectionGaugeWidget)로 밀어넣는다. BTService_UpdateDetectionGauge와
-	// 같은 주기(0.1초)로 충분해 매 틱 대신 타이머로 돈다.
-	void UpdateHeadGaugeWidget();
+	/// 	// 가드 캐릭터로 이동. 작동시 삭제
+	/// // 로컬 플레이어를 타겟하고 있을 때만 GetDetectionGaugePercent()를 폰의 머리 위
+	/// // 위젯 컴포넌트(UDetectionGaugeWidget)로 밀어넣는다. BTService_UpdateDetectionGauge와
+	/// // 같은 주기(0.1초)로 충분해 매 틱 대신 타이머로 돈다.
+	/// void UpdateHeadGaugeWidget();
 
 	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
-	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
-	float HeadGaugeUpdateInterval = 0.1f;
+	/// UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
+	/// float HeadGaugeUpdateInterval = 0.1f;
 
 	// ========================================================
 
@@ -258,27 +261,10 @@ protected:
 	// Runtime State (실행 상태)
 	// ========================================================
 
-private:
 
-	// 이동했음
-	/// // 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
-	/// int32 CurrentPatrolIndex = -1;
-	/// 
-	/// // PingPong 패턴에서 현재 진행 방향 (true=정방향/증가, false=역방향/감소)
-	/// bool bPatrolMovingForward = true;
-	/// 
-	/// // 진단용. 순찰 지점 선택 간격을 로그에 남겨 abort/restart 폭주를 구분한다.
-	/// // 음수는 "아직 한 번도 고른 적 없음".
-	/// float LastPatrolSelectTime = -1.f;
-	/// 
-	/// 
-	/// // 이번 조사에서 지금까지 고른 지점 수. 0 = 마지막 목격 지점 자체.
-	/// // -1 은 "이번 조사에서 아직 아무것도 고르지 않음".
-	/// int32 CurrentSearchStep = -1;
-
-
-	
-	FTimerHandle HeadGaugeUpdateTimerHandle;
+		// 가드 캐릭터로 이동. 작동시 삭제
+	//private:
+	//FTimerHandle HeadGaugeUpdateTimerHandle;
 
 
 	// ========================================================

@@ -6,6 +6,12 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+
+#include "UI/DetectionGaugeWidget.h"
+#include "Kismet/GameplayStatics.h"
+#include "AI/GuardAIController.h"
+
+
 AGuardCharacter::AGuardCharacter()
 {
 	//???? < AI 컨트롤러에도 있음
@@ -26,7 +32,74 @@ AGuardCharacter::AGuardCharacter()
 	DetectionGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
 	// 위젯 클래스는 여기서 강제하지 않는다 - BP_GuardBase 등 파생 BP에서
 	// 컴포넌트 디테일 패널의 Widget Class로 WBP_DetectionGauge를 지정할 것.
+
+
+
+	// 소리 디버그용 위젯
+	HearingGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NoiseGaugeWidgetComponent"));
+	HearingGaugeWidgetComponent->SetupAttachment(GetCapsuleComponent());
+	HearingGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	HearingGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
+	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
+
 }
+
+void AGuardCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+
+
+}
+
+void AGuardCharacter::SetHeadGaugeUpdateInterval(float NewInterval)
+{
+	HeadGaugeUpdateInterval = NewInterval;
+
+	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
+	GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle,
+		this, &AGuardCharacter::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
+}
+
+void AGuardCharacter::StopHeadGaugeUpdate()
+{
+	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
+}
+
+void AGuardCharacter::UpdateHeadGaugeWidget()
+{
+
+	if (!IsValid(DetectionGaugeWidgetComponent))
+	{
+		return;
+	}
+
+	UDetectionGaugeWidget* GaugeWidget = Cast<UDetectionGaugeWidget>(DetectionGaugeWidgetComponent->GetUserWidgetObject());
+	if (!GaugeWidget)
+	{
+		// Widget Class 가 아직 지정 안 됐거나(파생 BP에서 WBP_DetectionGauge 미설정),
+		// 컴포넌트가 아직 위젯 인스턴스를 만들기 전(BeginPlay 타이밍)일 수 있다.
+		return;
+	}
+
+	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
+	if (!GuardAIController)
+	{
+		GaugeWidget->SetGaugePercent(0.f);
+		return;
+	}
+
+	// 인덱스 0 로컬 플레이어 기준. 이 프로토타입은 단일 플레이어 대상 테스트 씬이라
+	// 화면 하나에 여러 로컬 플레이어가 동시에 있는 상황(스플릿스크린)은 다루지 않는다.
+	const APawn* LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	const float GaugePercent = GuardAIController->IsTargeting(LocalPlayerPawn) ? GuardAIController->GetDetectionGaugePercent() : 0.f;
+
+	GaugeWidget->SetGaugePercent(GaugePercent);
+}
+
+
+
+
 
 FGenericTeamId AGuardCharacter::GetGenericTeamId() const
 {
@@ -56,3 +129,5 @@ bool AGuardCharacter::GetPatrolLocation(int32 Index, FVector& OutLocation) const
 	OutLocation = Point->GetActorLocation();
 	return true;
 }
+
+

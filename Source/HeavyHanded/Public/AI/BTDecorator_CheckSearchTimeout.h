@@ -11,9 +11,12 @@
 // 브랜치별 권장값 (에셋에서 노드마다 설정한다 - 아래 기본값은 조사 쪽 기준):
 //   Investigate : TimeKeyName=SearchStartTime, TimeoutSeconds=12
 //                 한 지점만 찍고 끝나는 구조라 짧으면 너무 쉽게 따돌려진다.
+//   >> 조사를 시작한 후 12초 동안은 Investigate Branch를 유지한다. // 조사 자체에 시간 제한
+// 
 //   Pursue      : TimeKeyName=LastSeenTime,    TimeoutSeconds=4
 //                 모퉁이 하나 도는 동안은 놓치지 않을 만큼. LastSeenTime 은
 //                 BTService_UpdateDetectionGauge 가 보고 있는 동안 계속 갱신한다.
+//   >> 마지막으로 본 순간부터 4초 정도는 계속 추격 // 시야를 잃었을 때 추격을 얼마나 오래 유지할지
 UCLASS()
 class UBTDecorator_CheckSearchTimeout : public UBTDecorator
 {

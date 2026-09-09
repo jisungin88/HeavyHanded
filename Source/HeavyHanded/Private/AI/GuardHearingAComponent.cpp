@@ -22,7 +22,7 @@ UGuardHearingAComponent::UGuardHearingAComponent()
 {
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
+	//PrimaryComponentTick.bCanEverTick = true;
 
 	// ...
 
@@ -74,8 +74,6 @@ void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FA
 
 void UGuardHearingAComponent::SetHearingRange(float InHearingRange)
 {
-	//if (!HearingConfig) return;
-
 	HearingConfig->HearingRange = InHearingRange;
 }
 
@@ -89,24 +87,6 @@ void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 void UGuardHearingAComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// ...
-
-
-	//if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	//{
-	//	PerceptionComp = AIController->GetPerceptionComponent();
-	//
-	//	if (!PerceptionComp)
-	//	{
-	//		// PerceptionComp 존재하지 않음 로그
-	//		return;
-	//	}
-	//	PerceptionComp->ConfigureSense(*HearingConfig); // PerceptionComp 굳이? (인자로 해도 되지 않을지 여부)
-	//	// SetHearingEnabled(bEnableHearing); // AI 컨트롤러에서 설정하도록 변경
-	//	/// PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	//}
-
 
 	
 }

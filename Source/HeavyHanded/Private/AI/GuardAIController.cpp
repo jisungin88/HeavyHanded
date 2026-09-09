@@ -45,9 +45,9 @@
 #include "EngineUtils.h"
 
 // UI
-#include "Components/WidgetComponent.h"
-#include "UI/DetectionGaugeWidget.h"
-#include "Kismet/GameplayStatics.h"
+//#include "Components/WidgetComponent.h"
+//#include "UI/DetectionGaugeWidget.h"
+//#include "Kismet/GameplayStatics.h"
 
 
 
@@ -173,6 +173,7 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 		if (PerceptionMeter)
 		{
 			PerceptionMeter->OnPerceptionFull.AddDynamic(this, &AGuardAIController::HandlePerceptionFull);
+			//PerceptionMeter->OnPerceptionChanged.AddDynamic(this, &AGuardAIController::HandlePerceptionChanged);
 		}
 		else
 		{
@@ -185,12 +186,12 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 머리 위 감지 게이지 타이머 등록
 	// -------------------------------------------------------------------------------------------------------
 
-
-	// 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
-	// BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
-	// 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
-	GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
-		&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
+	/// 	// 가드 캐릭터로 이동. 작동시 삭제
+	/// // 머리 위 게이지 위젯도 BTService_UpdateDetectionGauge와 같은 주기로 갱신한다.
+	/// // BT 서비스 쪽에 얹지 않고 별도 타이머로 두는 이유: BTService는 활성 브랜치에서만
+	/// // 도는데, 게이지 표시는 브랜치와 무관하게(순찰 중이라도 시야에 들어오면) 항상 필요하다.
+	/// GetWorldTimerManager().SetTimer(HeadGaugeUpdateTimerHandle, this,
+	/// 	&AGuardAIController::UpdateHeadGaugeWidget, HeadGaugeUpdateInterval, true);
 
 
 
@@ -303,8 +304,15 @@ void AGuardAIController::StopForMatchEnd()
 		GuardHearingComp->SetHearingEnabled(false);
 	}
 
-	// 머리 위 게이지 갱신 타이머도 멈춘다. 게이지는 더 이상 변하지 않는다
-	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
+	// 가드 캐릭터로 이동. 작동시 삭제
+	/// // 머리 위 게이지 갱신 타이머도 멈춘다. 게이지는 더 이상 변하지 않는다
+	/// GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
+
+	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn()))
+	{
+		GuardPawn->StopHeadGaugeUpdate();
+	}
+
 }
 
 
@@ -401,28 +409,34 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
 
-	HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
+
+	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn);
+	if (!GuardPawn)
+	{
+		// 캐스팅 실패 로그
+		return;
+	}
+
+	// 가드 캐릭터로 이동. 작동시 삭제
+	//HeadGaugeUpdateInterval = Row->HeadGaugeUpdateInterval;
+	GuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();
 
-	if (ACharacter* GuardCharacterPawn = Cast<ACharacter>(InPawn))
+	if (UCharacterMovementComponent* MovementComp = GuardPawn->GetCharacterMovement())
 	{
-		if (UCharacterMovementComponent* MovementComp = GuardCharacterPawn->GetCharacterMovement())
-		{
-			MovementComp->MaxWalkSpeed = Row->MoveSpeed;
-		}
+		MovementComp->MaxWalkSpeed = Row->MoveSpeed;
 	}
+	
 
 	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
 	// 뒤에 찾는다) - 여기서는 InPawn 에서 직접 다시 찾는다.
-	if (AGuardCharacter* GuardPawnForMeter = Cast<AGuardCharacter>(InPawn))
+	if (UPerceptionMeterComponent* Meter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>())
 	{
-		if (UPerceptionMeterComponent* Meter = GuardPawnForMeter->FindComponentByClass<UPerceptionMeterComponent>())
-		{
-			Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
-		}
+		Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
 	}
+
 }
 
 
@@ -434,6 +448,8 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 		// 에러 로그
 		return false;
 	}
+
+	SetAIState(State);
 
 	switch (State)
 	{
@@ -484,6 +500,7 @@ bool AGuardAIController::IsTargeting(const AActor* InActor) const
 	return BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) == InActor;
 }
 
+/* 	// 가드 캐릭터로 이동. 작동시 삭제
 void AGuardAIController::UpdateHeadGaugeWidget()
 {
 	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
@@ -513,29 +530,5 @@ void AGuardAIController::UpdateHeadGaugeWidget()
 
 	GaugeWidget->SetGaugePercent(GaugePercent);
 }
-
-
-
-// 작동 확인 후 삭제할 것
-/*
-
-// bool AGuardAIController::SelectNextSearchPoint()
-// {
-// 	// 이동했음
-// 	return GuardPatrolComp->SelectNextSearchPoint2();
-// }
-
-// int32 AGuardAIController::SelectInitialPatrolIndex(const AGuardCharacter* GuardPawn)
-// {
-//	// 이동했음
-// }
-
-
-
-// void AGuardAIController::SelectNextPatrolPoint()
-// {
-// 	// 이동했음
-// 
-// }
 
 */
