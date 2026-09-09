@@ -13,6 +13,8 @@
 
 #include "ShelterPlayerController.generated.h"
 
+class UInputAction;
+class UInputMappingContext;
 
 /**
  *
@@ -41,11 +43,23 @@ protected:
 
 
 public:
-
-
 	UFUNCTION(BlueprintPure)
 	AShelterPlayerState* GetMyPlayerState() const;
 
+protected:
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Shelter")
+	TObjectPtr<UInputMappingContext> ShelterMappingContext;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Shelter")
+	TObjectPtr<UInputAction> ChatAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Shelter", meta = (ClampMin = "0"))
+	int32 ShelterInputPriority = 100;
+
+	virtual void SetupInputComponent() override;
+
+	void AddShelterMappingContext();
+	void HandleChatKey();
 
 	// ----------------------------------------------------------------
 
@@ -70,7 +84,7 @@ protected:
 
 
 
-
+public:
 	// ----------------------------------------------------------------
 
 
@@ -116,8 +130,8 @@ public:
 	void ServerClearJob();
 
 	// 역할 확정 버튼 누르고 다음 화면 넘어갈 때
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void serverConfirmedJob();
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
+	void serverConfirmedJob(const FString& Nickname);
 
 	// Pawn을 실제로 생성하고 빙의
 	void SpawnJobPawn(FGameplayTag JobTag);
@@ -142,8 +156,6 @@ protected:
 	// 직업별 Pawn 클래스
 	///UPROPERTY(EditDefaultsOnly, Category = "Job")
 	///TMap<FGameplayTag, TSubclassOf<APawn>> JobPawnMap;
-
-
 
 	// -------------------------------------------------------
 
