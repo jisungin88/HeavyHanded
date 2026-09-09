@@ -8,6 +8,8 @@
 
 
 #include "UI/DetectionGaugeWidget.h"
+#include "UI/PerceptionMeterWidget.h"
+
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
 
@@ -41,6 +43,7 @@ AGuardCharacter::AGuardCharacter()
 	HearingGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
 	HearingGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
 	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
+	// HearingGaugeWidgetComponent->SetDrawAtDesiredSize(false);
 
 }
 
@@ -48,6 +51,30 @@ void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	UPerceptionMeterWidget* PerceptionWidget = Cast<UPerceptionMeterWidget>(HearingGaugeWidgetComponent->GetUserWidgetObject());
+	if (!PerceptionWidget)
+	{
+		UE_LOG(LogGuardAI, Warning,
+			TEXT("[%s] HearingGaugeWidgetComponent에서 PerceptionMeterWidget을 가져오지 못했습니다."), *GetName());
+		return;
+	}
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterWidget 연결 성공."), *GetName());
+	PerceptionWidget->BindToGuard(this);
+
+
+
+	if (HearingGaugeWidgetComponent)
+	{
+		UUserWidget* Widget = HearingGaugeWidgetComponent->GetUserWidgetObject();
+
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DrawSize = %s"), *GetName(), *HearingGaugeWidgetComponent->GetDrawSize().ToString());
+
+		if (Widget)
+		{
+			UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DesiredSize = %s"), *GetName(), *Widget->GetDesiredSize().ToString());
+		}
+	}
 
 
 }

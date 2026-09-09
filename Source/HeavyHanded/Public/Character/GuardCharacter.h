@@ -49,26 +49,34 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
 
-	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
-	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서
-	// WBP_DetectionGauge로 지정한다.
-	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
-	UWidgetComponent* GetDetectionGaugeWidgetComponent() const { return DetectionGaugeWidgetComponent; }
+
 
 
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> HearingGaugeWidgetComponent;
 
 
 // 위젯 관리
 
 public:
+
+
+	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
+	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서
+	// WBP_DetectionGauge로 지정한다.
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UWidgetComponent* GetDetectionGaugeWidgetComponent() const { return DetectionGaugeWidgetComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UWidgetComponent* GetHearingGaugeWidgetComponent() const { return HearingGaugeWidgetComponent; }
+
+
 	void SetHeadGaugeUpdateInterval(float NewInterval);
 	void StopHeadGaugeUpdate();
 //private:

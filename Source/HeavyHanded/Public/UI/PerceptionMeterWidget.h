@@ -55,10 +55,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> GaugeBar;
 
-	// BP 구현
+	// BP 구현 > > 아래 함수로 변경. 정상 작동시 삭제할 것
 	/** 게이지 값이 바뀌었다. 원형 채우기와 보간을 여기서 한다 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Perception")
-	void OnPerceptionUpdated(float NewPerception01);
+	//UFUNCTION(BlueprintImplementableEvent, Category = "UI|Perception")
+	//void OnPerceptionUpdated(float NewPerception01);
+
+	UFUNCTION()
+	void UpdatePerceptionGauge(float NewPerception01);
 
 	/** 0 에서 벗어났거나 0 으로 돌아왔다. 페이드 인/아웃을 여기서 한다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Perception")

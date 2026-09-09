@@ -105,6 +105,11 @@ void UPerceptionMeterWidget::Unbind()
 	bShown = false; //추가
 }
 
+void UPerceptionMeterWidget::UpdatePerceptionGauge(float NewPerception01)
+{
+
+}
+
 void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 {
 	const float Perception01 = FMath::Clamp(NewPerception01, 0.f, 1.f); // 0~1 clamp 방어
@@ -112,7 +117,12 @@ void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 	UE_LOG(LogHeavyUI, Warning,
 		TEXT("Perception Changed: %.2f / GaugeBar: %s"), Perception01, GaugeBar ? TEXT("VALID") : TEXT("NULL"));
 
-	OnPerceptionUpdated(Perception01);
+	// 작동시 삭제
+	//OnPerceptionUpdated(Perception01);
+	if (GaugeBar)
+	{
+		GaugeBar->SetPercent(Perception01);
+	}
 
 	// 게이지가 차오르는 동안이 플레이어의 유예 시간이다. 0 일 때는 띄우지 않는다
 	const bool bShouldShow = Perception01 > KINDA_SMALL_NUMBER;
