@@ -14,11 +14,19 @@
 #include "AI/GuardTypes.h"
 
 
+#include "DrawDebugHelpers.h"
+#include "GameFramework/Pawn.h"
+#include "AI/GuardAIController.h"
+
+
 // Sets default values for this component's properties
 UGuardSightAComponent::UGuardSightAComponent()
 {
 
-
+	// 사용시 생성자에 true 필요
+	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
+	// off to improve performance if you don't need them.
+	PrimaryComponentTick.bCanEverTick = true;
 
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
@@ -161,7 +169,8 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 
 
 
-/*
+
+
 
 
 
@@ -172,14 +181,199 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	// ...
 
-	// 사용시 생성자에 true 필요
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
+	//const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	//if (GuardController && GuardController->GetPawn())
+	//{
+	//	DrawDebugSphere(GetWorld(), GuardController->GetPawn()->GetActorLocation(), 100.0f, 16, FColor::Yellow, false, 0.1f);
+	//}
+
+#if WITH_EDITOR
+	DrawSightDebug();
+	DrawPerceivedActorsDebug();
+#endif
 
 	// ...
 
 
 }
-*/
+
+
+
+void UGuardSightAComponent::DrawSightDebug() const
+{
+	if (!SightConfig)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FVector Origin = GuardPawn->GetActorLocation();
+	const FVector Forward = GuardPawn->GetActorForwardVector();
+	const FVector Up = FVector::UpVector;
+	const float Radius = SightConfig->SightRadius;
+	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	if (Radius <= 0.0f || HalfAngle <= 0.0f)
+	{
+		return;
+	}
+
+	const int32 ArcSegments = 24;
+	const int32 DepthSegments = 3;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
+
+	// 외곽 부채꼴
+	FVector PreviousPoint = FVector::ZeroVector;
+	bool bHasPreviousPoint = false;
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / ArcSegments;
+		const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
+		const FVector TraceEnd = Origin + Direction * Radius;
+
+		FHitResult Hit;
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+		const FVector VisibleEnd = bBlocked ? Hit.Location : TraceEnd;
+
+		if (bHasPreviousPoint)
+		{
+			DrawDebugLine(World, PreviousPoint, VisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+		}
+
+		if (bBlocked)
+		{
+			DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		PreviousPoint = VisibleEnd;
+		bHasPreviousPoint = true;
+	}
+
+	// 좌우 시야 경계
+	{
+		const FVector LeftDirection = Forward.RotateAngleAxis(-HalfAngle, Up);
+		const FVector RightDirection = Forward.RotateAngleAxis(HalfAngle, Up);
+
+		FHitResult LeftHit;
+		FHitResult RightHit;
+
+		const bool bLeftBlocked = World->LineTraceSingleByChannel(LeftHit, Origin, Origin + LeftDirection * Radius, ECC_Visibility, Params);
+		const bool bRightBlocked = World->LineTraceSingleByChannel(RightHit, Origin, Origin + RightDirection * Radius, ECC_Visibility, Params);
+
+		const FVector LeftVisibleEnd = bLeftBlocked ? LeftHit.Location : Origin + LeftDirection * Radius;
+		const FVector RightVisibleEnd = bRightBlocked ? RightHit.Location : Origin + RightDirection * Radius;
+
+		DrawDebugLine(World, Origin, LeftVisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+		DrawDebugLine(World, Origin, RightVisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+
+		if (bLeftBlocked)
+		{
+			DrawDebugLine(World, LeftHit.Location, Origin + LeftDirection * Radius, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		if (bRightBlocked)
+		{
+			DrawDebugLine(World, RightHit.Location, Origin + RightDirection * Radius, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+	}
+
+	// 내부 깊이선
+	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
+	{
+		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
+		const float CurrentRadius = Radius * DepthAlpha;
+
+		FVector PreviousDepthPoint = FVector::ZeroVector;
+		bool bHasPreviousDepthPoint = false;
+
+		for (int32 Index = 0; Index <= ArcSegments; ++Index)
+		{
+			const float Alpha = static_cast<float>(Index) / ArcSegments;
+			const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+			const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
+			const FVector TraceEnd = Origin + Direction * CurrentRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			const FVector EndPoint = bBlocked ? Hit.Location : TraceEnd;
+
+			if (bHasPreviousDepthPoint)
+			{
+				DrawDebugLine(World, PreviousDepthPoint, EndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
+			}
+
+			PreviousDepthPoint = EndPoint;
+			bHasPreviousDepthPoint = true;
+		}
+	}
+}
+
+
+// 초록색 = 실제 UAIPerceptionComponent에서 현재 Sight로 인식 중인 Actor
+void UGuardSightAComponent::DrawPerceivedActorsDebug() const
+{
+	if (!PerceptionComp)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<AActor*> PerceivedActors;
+	PerceptionComp->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), PerceivedActors);
+
+	const FVector Origin = GuardPawn->GetActorLocation();
+
+	for (AActor* Actor : PerceivedActors)
+	{
+		if (!Actor)
+		{
+			continue;
+		}
+
+		const FVector TargetLocation = Actor->GetActorLocation();
+
+		DrawDebugLine(World, Origin, TargetLocation, FColor::Yellow, false, 0.1f, 0, 6.0f);
+		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.1f);
+	}
+}
+
 

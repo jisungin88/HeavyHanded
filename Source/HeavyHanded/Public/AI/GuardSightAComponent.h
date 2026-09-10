@@ -14,7 +14,6 @@ class AGuardAIController;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 
-//struct FAIStimulus; //확인필요
 class AActor;
 
 
@@ -55,12 +54,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GuardSight")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 
-	// 각각 디버그용 // lee
-	// 시야 감지 사용 여부.
-	// BP에서 Guard 종류별로 시야를 켜고 끌 수 있다.
-	// UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardSight")
-	// bool bEnableSight = true;
-
 
 	void SetSightConfig(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle);
 
@@ -78,13 +71,17 @@ private:
 
 
 
-	/*
+	
 
 
-	public:
+	//public:
+
+	void DrawSightDebug() const;
+	void DrawPerceivedActorsDebug() const;
+
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	*/
+	
 
 };
