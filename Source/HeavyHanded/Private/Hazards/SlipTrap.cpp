@@ -67,6 +67,9 @@ void ASlipTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 	// 복구 로직과 부딪힐 수 있다
 	if (Target->IsDowned())
 	{
+		UE_LOG(LogHazard, Warning,
+			TEXT("[SlipTrap:%s] %s 가 밟았지만 이미 State.Downed 상태라 무시했다"),
+			*GetName(), *Target->GetName());
 		return;
 	}
 
