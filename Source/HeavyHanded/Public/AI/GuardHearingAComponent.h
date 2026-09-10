@@ -60,7 +60,10 @@ private:
 	void DrawHearingDebug() const;
 
 	FVector LastHearingLocation = FVector::ZeroVector;
-
 	bool bHasHearingLocation = false;
+
+public:
+	void ClearHearingDebug();
+
 
 };

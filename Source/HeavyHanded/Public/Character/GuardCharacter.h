@@ -56,6 +56,8 @@ protected:
 	virtual void BeginPlay() override;
 
 
+	void UpdatePerceptionWidgets();
+
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UPerceptionMeterComponent> PerceptionMeterComponent;

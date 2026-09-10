@@ -27,6 +27,19 @@ AGuardCharacter::AGuardCharacter()
 	GetCharacterMovement()->bUseRVOAvoidance = true;
 
 
+
+	// Controller의 Yaw를 캐릭터 회전에 반영
+	bUseControllerRotationYaw = true;
+
+	// 이동 방향으로 캐릭터가 자동 회전하지 않음
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+
+	// AIController가 원하는 회전 방향을 캐릭터가 따라감
+	GetCharacterMovement()->bUseControllerDesiredRotation = true;
+
+
+
+
 	// 위젯 클래스는 여기서 강제하지 않는다 - BP_GuardBase 등 파생 BP에서
 	// 컴포넌트 디테일 패널의 Widget Class로 WBP_DetectionGauge를 지정할 것.
 
@@ -80,6 +93,24 @@ void AGuardCharacter::BeginPlay()
 		}
 	}
 
+	UpdatePerceptionWidgets();
+
+}
+
+void AGuardCharacter::UpdatePerceptionWidgets()
+{
+
+	if (DetectionGaugeWidgetComponent)
+	{
+		DetectionGaugeWidgetComponent->SetVisibility(bEnableSight);
+		bEnableSight ? DetectionGaugeWidgetComponent->Activate() : DetectionGaugeWidgetComponent->Deactivate();
+	}
+
+	if (HearingGaugeWidgetComponent)
+	{
+		HearingGaugeWidgetComponent->SetVisibility(bEnableHearing);
+		bEnableHearing ? HearingGaugeWidgetComponent->Activate() : HearingGaugeWidgetComponent->Deactivate();
+	}
 
 }
 

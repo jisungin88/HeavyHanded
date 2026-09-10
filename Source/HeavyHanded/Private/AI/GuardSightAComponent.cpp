@@ -17,6 +17,7 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Pawn.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardHearingAComponent.h"
 
 
 // Sets default values for this component's properties
@@ -26,7 +27,7 @@ UGuardSightAComponent::UGuardSightAComponent()
 	// 사용시 생성자에 true 필요
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
+	//PrimaryComponentTick.bCanEverTick = true;
 
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
@@ -92,6 +93,7 @@ void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 	//if (!PerceptionComp) return;
 
 	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), isEnable);
+	PrimaryComponentTick.bCanEverTick = isEnable;
 }
 
 
@@ -106,6 +108,7 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
 		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
 		const float NowSeconds = GetWorld()->GetTimeSeconds();
+
 
 		if (Stimulus.WasSuccessfullySensed())
 		{
@@ -135,8 +138,25 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 
 		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
+
 		if (Stimulus.WasSuccessfullySensed())
 		{
+
+			// Sight에서 플레이어를 발견했을 때 Hearing에서 걸어둔 FocalPoint를 해제
+			AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+			if (GuardAIController)
+			{
+				GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
+
+
+				if (GuardAIController->GuardHearingComp)
+				{
+					GuardAIController->GuardHearingComp->ClearHearingDebug();
+				}
+			}
+
+
+
 			if (!bWasSeeing)
 			{
 				// 필요한지 확인 한번 더하고 주석 풀 것
