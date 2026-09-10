@@ -416,7 +416,7 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 
 	GuardPatrolComp->SetPatrolStats(Row->PatrolArrivalRadius, Row->SearchSweepCount, Row->SearchSweepRadius);
 
-	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
+	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees, Row->VerticalVisionAngleDegrees);
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
 
 	PossessGuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);

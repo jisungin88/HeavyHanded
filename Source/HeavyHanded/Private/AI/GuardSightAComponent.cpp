@@ -18,6 +18,7 @@
 #include "GameFramework/Pawn.h"
 #include "AI/GuardAIController.h"
 #include "AI/GuardHearingAComponent.h"
+#include "Character/GuardCharacter.h"
 
 
 // Sets default values for this component's properties
@@ -74,7 +75,8 @@ void UGuardSightAComponent::BeginPlay()
 }
 
 
-void UGuardSightAComponent::SetSightConfig(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle)
+void UGuardSightAComponent::SetSightConfig
+(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle, float InVerticalVisionAngle)
 {
 	if (!SightConfig)
 	{
@@ -85,8 +87,10 @@ void UGuardSightAComponent::SetSightConfig(float InSightRadius, float InLoseSigh
 	SightConfig->SightRadius = InSightRadius;
 	SightConfig->LoseSightRadius = InLoseSightRadius;
 	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle;
+	VerticalVisionAngleDegrees = FMath::Clamp(InVerticalVisionAngle, 0.0f, 90.0f);
 
 }
+
 
 void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 {
@@ -155,23 +159,30 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 				}
 			}
 
-
-
-			if (!bWasSeeing)
+			// 경비의 실제 눈높이에서 플레이어 머리까지의 수직 시야각을 검사
+			if (!IsWithinVerticalVisionAngle(Actor))
 			{
-				// 필요한지 확인 한번 더하고 주석 풀 것
-				/// OnPlayerSpotted.Broadcast(Actor);
+				BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, false);
 			}
 
-			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+			else
+			{
+				if (!bWasSeeing)
+				{
+					// 필요한지 확인 한번 더하고 주석 풀 것
+					/// OnPlayerSpotted.Broadcast(Actor);
+				}
 
-			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
-			// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
-			// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
-			// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
-			// 추격 조건이 영구히 거짓이 된다.
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
+				BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
+				BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+
+				// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
+				// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
+				// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
+				// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
+				// 추격 조건이 영구히 거짓이 된다.
+				BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
+			}
 		}
 		// 시야를 잃었다고 해서 여기서 SearchStartTime 을 쓰지 않는다.
 		//
@@ -219,6 +230,40 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 
 
+//경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
+bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const
+{
+
+	if (!IsValid(TargetActor))
+	{
+		return false;
+	}
+
+	const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardAIController)
+	{
+		return false;
+	}
+
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
+	if (!GuardCharacter)
+	{
+		return false;
+	}
+
+	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
+	const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, 80.0f); // 80은 임시값
+	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, 80.0f);
+	const FVector Direction = (TargetHeadLocation - GuardEyeLocation).GetSafeNormal();
+
+	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Asin(Direction.Z));
+
+	return FMath::Abs(VerticalAngle) <= VerticalVisionAngleDegrees;
+
+}
+
+
 void UGuardSightAComponent::DrawSightDebug() const
 {
 	if (!SightConfig)
@@ -244,13 +289,24 @@ void UGuardSightAComponent::DrawSightDebug() const
 		return;
 	}
 
-	const FVector Origin = GuardPawn->GetActorLocation();
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
+	if (!GuardCharacter)
+	{
+		return;
+	}
+
+	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+//	const FVector Origin = GuardPawn->GetActorLocation();
+
 	const FVector Forward = GuardPawn->GetActorForwardVector();
 	const FVector Up = FVector::UpVector;
 	const float Radius = SightConfig->SightRadius;
-	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
 
-	if (Radius <= 0.0f || HalfAngle <= 0.0f)
+	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
+//	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	if (Radius <= 0.0f || HorizontalHalfAngle <= 0.0f)
 	{
 		return;
 	}
@@ -267,7 +323,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 	for (int32 Index = 0; Index <= ArcSegments; ++Index)
 	{
 		const float Alpha = static_cast<float>(Index) / ArcSegments;
-		const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
 		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
 		const FVector TraceEnd = Origin + Direction * Radius;
 
@@ -292,8 +348,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 	// 좌우 시야 경계
 	{
-		const FVector LeftDirection = Forward.RotateAngleAxis(-HalfAngle, Up);
-		const FVector RightDirection = Forward.RotateAngleAxis(HalfAngle, Up);
+		const FVector LeftDirection = Forward.RotateAngleAxis(-HorizontalHalfAngle, Up);
+		const FVector RightDirection = Forward.RotateAngleAxis(HorizontalHalfAngle, Up);
 
 		FHitResult LeftHit;
 		FHitResult RightHit;
@@ -318,7 +374,73 @@ void UGuardSightAComponent::DrawSightDebug() const
 		}
 	}
 
+	// 상하 수직 시야 경계
+	{
+		const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalVisionAngleDegrees);
+		const FVector HorizontalForward = Forward.GetSafeNormal2D();
+
+		const FVector UpDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+		const FVector DownDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+
+		const FVector UpEnd = Origin + UpDirection * Radius;
+		const FVector DownEnd = Origin + DownDirection * Radius;
+
+		DrawDebugLine(World, Origin, UpEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+		DrawDebugLine(World, Origin, DownEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+	}
+
+
 	// 내부 깊이선
+	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
+	{
+		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
+		const float CurrentRadius = Radius * DepthAlpha;
+		const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
+
+		FVector PreviousUpPoint = FVector::ZeroVector;
+		FVector PreviousDownPoint = FVector::ZeroVector;
+		bool bHasPreviousUpPoint = false;
+		bool bHasPreviousDownPoint = false;
+
+		for (int32 Index = 0; Index <= ArcSegments; ++Index)
+		{
+			const float Alpha = static_cast<float>(Index) / ArcSegments;
+			const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+			const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
+
+			const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+			const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+
+			const FVector UpTraceEnd = Origin + UpDirection * CurrentRadius;
+			const FVector DownTraceEnd = Origin + DownDirection * CurrentRadius;
+
+			FHitResult UpHit;
+			FHitResult DownHit;
+
+			const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
+			const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
+
+			const FVector UpEndPoint = bUpBlocked ? UpHit.Location : UpTraceEnd;
+			const FVector DownEndPoint = bDownBlocked ? DownHit.Location : DownTraceEnd;
+
+			if (bHasPreviousUpPoint)
+			{
+				DrawDebugLine(World, PreviousUpPoint, UpEndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
+			}
+
+			if (bHasPreviousDownPoint)
+			{
+				DrawDebugLine(World, PreviousDownPoint, DownEndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
+			}
+
+			PreviousUpPoint = UpEndPoint;
+			PreviousDownPoint = DownEndPoint;
+			bHasPreviousUpPoint = true;
+			bHasPreviousDownPoint = true;
+		}
+	}
+
+	/*
 	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
 	{
 		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
@@ -330,7 +452,9 @@ void UGuardSightAComponent::DrawSightDebug() const
 		for (int32 Index = 0; Index <= ArcSegments; ++Index)
 		{
 			const float Alpha = static_cast<float>(Index) / ArcSegments;
-			const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+			const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+
+
 			const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
 			const FVector TraceEnd = Origin + Direction * CurrentRadius;
 
@@ -348,6 +472,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 			bHasPreviousDepthPoint = true;
 		}
 	}
+	*/
 }
 
 

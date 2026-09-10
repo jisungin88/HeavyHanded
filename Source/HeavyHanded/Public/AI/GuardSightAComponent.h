@@ -54,10 +54,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GuardSight")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 
-
-	void SetSightConfig(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle);
-
 	void SetSightEnabled(bool isEnable);
+
+	void SetSightConfig
+	(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle, float InVerticalVisionAngle);
+
+private:
+	float VerticalVisionAngleDegrees = 45.0f;
 
 
 private:
@@ -70,7 +73,8 @@ private:
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 
-
+	// 수직 시야 판정 함수
+	bool IsWithinVerticalVisionAngle(AActor* TargetActor) const;
 	
 
 
