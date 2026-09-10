@@ -93,6 +93,11 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 		return;
 	}
 
+	//+ 0910 디버그용 
+	UE_LOG(LogTemp, Warning, TEXT("[Perception] Noise Heard | Strength=%.2f | Before=%.2f | Gain=%.2f | Add=%.2f"),
+		Stimulus.Strength, Perception01, GainPerStimulus, Stimulus.Strength * GainPerStimulus);
+
+
 	LastNoiseLocation     = Stimulus.Location;
 	TimeSinceLastStimulus = 0.f;
 
@@ -116,6 +121,12 @@ void UPerceptionMeterComponent::SetPerception(float NewValue)
 	// 기본 감소율 0.2/초로는 ~2000fps 까지 안전하지만, 감소율은 디자이너가 만지는 값이다.
 	// 0.01 로 낮추는 순간 100fps 에서 바로 재현된다 — UAlertComponent 와 같은 함정이다
 	const float Clamped = FMath::Clamp(NewValue, 0.f, 1.f);
+
+	//+ 0910 디버그용
+	UE_LOG(LogTemp, Warning, TEXT("[Perception] SetPerception | New=%.2f | Clamped=%.2f | Current=%.2f | Threshold=%.2f"),
+		NewValue, Clamped, Perception01, PerceptionFullThreshold);
+
+
 	if (Clamped == Perception01)
 	{
 		return;
@@ -133,12 +144,25 @@ void UPerceptionMeterComponent::SetPerception(float NewValue)
 		OnRep_ReplicatedPerception();
 	}
 
+	// 0910 수정중(청각 감지 최소값)
+	//if (Perception01 >= 0.5 && !bLatched)
+	if (Perception01 >= PerceptionFullThreshold && !bLatched)
+	{
+		Perception01 = PerceptionFullThreshold;
+		bLatched = true;
+		SetComponentTickEnabled(false);
+		OnPerceptionFull.Broadcast(LastNoiseLocation);
+	}
+
+	/*
 	if (Perception01 >= 1.f && !bLatched)
 	{
 		bLatched = true;
 		SetComponentTickEnabled(false);   // 래치 중엔 오르지도 내리지도 않는다
 		OnPerceptionFull.Broadcast(LastNoiseLocation);
 	}
+	*/
+
 	else if (Perception01 <= 0.f)
 	{
 		SetComponentTickEnabled(false);   // 더 내려갈 것이 없다

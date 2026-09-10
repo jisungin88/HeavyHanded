@@ -88,17 +88,30 @@ void UPerceptionMeterWidget::Unbind()
 
 void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 {
-	const float Perception01 = FMath::Clamp(NewPerception01, 0.f, 1.f); // 0~1 clamp 방어
 
-	UE_LOG(LogHeavyUI, Warning,
-		TEXT("Perception Changed: %.2f / GaugeBar: %s"), Perception01, GaugeBar ? TEXT("VALID") : TEXT("NULL"));
 
-	// 작동시 삭제
-	//OnPerceptionUpdated(Perception01);
+
+	// 0910 수정중(청각 감지 최소값)
+	UPerceptionMeterComponent* Meter = BoundMeter.Get();
+	if (!Meter)
+	{
+		return;
+	}
+
+	const float Perception01 = FMath::Clamp(NewPerception01, 0.f, 1.f);  // 0~1 clamp 방어
+	const float FullThreshold = Meter->GetPerceptionFullThreshold();
+	const float GaugePercent = FullThreshold > 0.f ? Perception01 / FullThreshold : 0.f;
+
+	//+ 0910 디버그용
+	//UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] Value=%.2f | Threshold=%.2f | Gauge=%.0f%% | GaugeBar=%s"),
+	//	Perception01, FullThreshold, GaugePercent * 100.f, GaugeBar ? TEXT("VALID") : TEXT("NULL"));
+
+
 	if (GaugeBar)
 	{
-		GaugeBar->SetPercent(Perception01);
+		GaugeBar->SetPercent(FMath::Clamp(GaugePercent, 0.f, 1.f));
 	}
+
 
 	// 게이지가 차오르는 동안이 플레이어의 유예 시간이다. 0 일 때는 띄우지 않는다
 	const bool bShouldShow = Perception01 > KINDA_SMALL_NUMBER;

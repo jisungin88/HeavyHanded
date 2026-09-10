@@ -59,22 +59,53 @@ void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
 
-	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
+	//if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
+	//{
+	//	// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
+	//	// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
+	//	if (Stimulus.WasSuccessfullySensed())
+	//	{
+	//		BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
+	//		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
+	//		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+	//
+	//
+	//		// 디버그용. 추후 삭제
+	//		LastHearingLocation = Stimulus.StimulusLocation;
+	//		bHasHearingLocation = true;
+	//	}
+	//}
+
+
+	// 일단 게이지가 차기 전엔 의심만
+	if (Stimulus.Type != UAISense::GetSenseID<UAISense_Hearing>())
 	{
-		// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
-		// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
-
-
-			// 디버그용. 추후 삭제
-			LastHearingLocation = Stimulus.StimulusLocation;
-			bHasHearingLocation = true;
-		}
+		return;
 	}
+
+	if (Stimulus.WasSuccessfullySensed())
+	{
+
+		if (AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner()))
+		{
+			if (APawn* GuardPawn = GuardAIController->GetPawn())
+			{
+				const FVector LookDirection = Stimulus.StimulusLocation - GuardPawn->GetActorLocation();
+				if (!LookDirection.IsNearlyZero())
+				{
+					const FRotator LookRotation = LookDirection.Rotation();
+					GuardPawn->SetActorRotation(FRotator(0.0f, LookRotation.Yaw, 0.0f));
+				}
+			}
+		}
+
+		// 디버그용. 추후 삭제
+		LastHearingLocation = Stimulus.StimulusLocation;
+		bHasHearingLocation = true;
+
+	}
+	
+
 
 }
 

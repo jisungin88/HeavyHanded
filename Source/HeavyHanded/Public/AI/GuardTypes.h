@@ -28,6 +28,34 @@ enum class EPatrolPattern : uint8
 	Random   UMETA(DisplayName = "무작위 (직전 지점 제외 랜덤)")
 };
 
+
+USTRUCT(BlueprintType)
+struct FGuardHearingConfig
+{
+	GENERATED_BODY()
+
+	// AI Hearing 감지 반경
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hearing", meta = (ClampMin = "0.0", Units = "cm"))
+	float HearingRangeNew = 1200.f;
+
+	// UPerceptionMeterComponent
+	/**
+	 * 귀 높이. Owner 가 폰이 아닐 때만 쓰는 오프셋.
+	 * ClampMax 는 UNoiseSubsystem 의 ListenerCullMargin 과 묶여 있다 — 그보다 크게 열면
+	 * 반경 경계의 청취자가 1차 거리 컬링에서 조용히 걸러진다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hearing", meta = (ClampMin = "0.0", ClampMax = "300.0", Units = "cm"))
+	float EarHeight = 60.f;
+
+
+	// UPerceptionMeterComponent
+	// 게이지가 다 차야 반응하는 최대치
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hearing|Perception", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PerceptionFullThreshold = 0.5f;
+
+};
+
+
 // DT_GuardStats 한 행. RowName == EGuardType 이름 문자열 (예: "Standard", "Dog", "Armed").
 // GuardAIController::OnPossess 가 GuardType 으로 이 행을 찾아 이동/지각/조사 수치를
 // 일괄 적용한다 — BP 인스턴스 기본값은 테이블 조회가 실패했을 때만 쓰는 폴백이다.
@@ -54,6 +82,8 @@ struct FGuardStatsRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.0", ClampMax = "180.0", Units = "deg"))
 	float PeripheralVisionAngleDegrees = 90.f;
+
+
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.0", Units = "cm"))
 	float HearingRange = 1200.f;
