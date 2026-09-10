@@ -70,10 +70,10 @@ public:
 
 	// 위젯 관리
 protected:
-	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception")
+	UPROPERTY(EditAnywhere, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception")
+	UPROPERTY(EditAnywhere, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> HearingGaugeWidgetComponent;
 
 

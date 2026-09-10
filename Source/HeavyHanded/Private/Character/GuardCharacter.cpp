@@ -28,9 +28,11 @@ AGuardCharacter::AGuardCharacter()
 
 	// Screen space로 두면 항상 카메라를 향해 평면으로 그려지므로(빌보드), World space처럼
 	// 경비가 돌아설 때 게이지가 옆으로 눕는 문제가 없다. 위치만 머리 위로 올려서 붙인다.
+	// 적용 확인 필요
+
 	DetectionGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("DetectionGaugeWidgetComponent"));
 	DetectionGaugeWidgetComponent->SetupAttachment(GetCapsuleComponent());
-	DetectionGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	//DetectionGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // 나중에 다시 고칠 것
 	DetectionGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
 	DetectionGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
 	// 위젯 클래스는 여기서 강제하지 않는다 - BP_GuardBase 등 파생 BP에서
@@ -41,7 +43,7 @@ AGuardCharacter::AGuardCharacter()
 	// 소리 디버그용 위젯
 	HearingGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NoiseGaugeWidgetComponent"));
 	HearingGaugeWidgetComponent->SetupAttachment(GetCapsuleComponent());
-	HearingGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	//HearingGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // 나중에 다시 고칠 것
 	HearingGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
 	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
 	// HearingGaugeWidgetComponent->SetDrawAtDesiredSize(false);

@@ -1,8 +1,8 @@
 ﻿#include "UI/PerceptionMeterWidget.h"
 
-#include "Engine/World.h"
+//#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "TimerManager.h"
+//#include "TimerManager.h"
 
 #include "Noise/PerceptionMeterComponent.h"
 #include "UI/HeavyUILog.h"
@@ -17,30 +17,15 @@ void UPerceptionMeterWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	UE_LOG(LogHeavyUI, Warning,
-		TEXT("PerceptionMeterWidget Construct - GaugeBar: %s"), GaugeBar ? TEXT("VALID") : TEXT("NULL"));
-
-	//+
-	UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] Construct This=%p Name=%s Outer=%s"), this, *GetNameSafe(this), *GetNameSafe(GetOuter()));
-
 	if (GaugeBar)
 	{
 		GaugeBar->SetPercent(0.f);
 	}
 
-	// if (UWorld* World = GetWorld())
-	// {
-	// 	World->GetTimerManager().SetTimer(
-	// 			UnboundWarnHandle, this, &UPerceptionMeterWidget::WarnIfUnbound, UnboundWarnDelay, false);
-	// }
 }
 
 void UPerceptionMeterWidget::NativeDestruct()
 {
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(UnboundWarnHandle);
-	}
 
 	Unbind();
 
@@ -49,9 +34,7 @@ void UPerceptionMeterWidget::NativeDestruct()
 
 void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 {
-	//+
-	UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] BindToGuard START This=%p Name=%s Guard=%s"), this, *GetNameSafe(this), *GetNameSafe(Guard));
-
+	
 	Unbind();
 
 	if (!IsValid(Guard))
@@ -67,17 +50,7 @@ void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 		return;
 	}
 
-	AAIController* AIController = Cast<AAIController>(GuardPawn->GetController());
-	if (!AIController)
-	{
-		UE_LOG(LogHeavyUI, Warning, TEXT("%s 의 AIController를 찾지 못했습니다."), *Guard->GetName());
-		return;
-	}
 
-
-	UE_LOG(LogHeavyUI, Warning, TEXT("BindToGuard: AIController = %s"), *AIController->GetName());
-
-	//UPerceptionMeterComponent* Meter = AIController->FindComponentByClass<UPerceptionMeterComponent>();
 	UPerceptionMeterComponent* Meter = Guard->FindComponentByClass<UPerceptionMeterComponent>();
 
 	if (!Meter)
@@ -91,16 +64,10 @@ void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 	BoundMeter = Meter;
 	Meter->OnPerceptionChanged.AddDynamic(this, &UPerceptionMeterWidget::HandlePerceptionChanged);
 
-	//+
-	UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] BoundMeter SET This=%p Meter=%s"), this, *GetNameSafe(BoundMeter.Get()));
-
 
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(UnboundWarnHandle);
-
-		//+
-		UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] UnboundWarnHandle CLEARED This=%p"), this);
 	}
 
 	// 구독 시점의 값으로 한 번 그린다
@@ -118,10 +85,6 @@ void UPerceptionMeterWidget::Unbind()
 	bShown = false; //추가
 }
 
-void UPerceptionMeterWidget::UpdatePerceptionGauge(float NewPerception01)
-{
-
-}
 
 void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 {
@@ -149,8 +112,8 @@ void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 void UPerceptionMeterWidget::WarnIfUnbound()
 {
 
-	//+
-	UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] WarnIfUnbound This=%p Name=%s BoundMeter=%s Outer=%s"), this, *GetNameSafe(this), *GetNameSafe(BoundMeter.Get()), *GetNameSafe(GetOuter()));
+	//+ bind 디버그용. 정상작동시 삭제할 것
+	//UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] WarnIfUnbound This=%p Name=%s BoundMeter=%s Outer=%s"), this, *GetNameSafe(this), *GetNameSafe(BoundMeter.Get()), *GetNameSafe(GetOuter()));
 
 	if (BoundMeter.Get())
 	{
