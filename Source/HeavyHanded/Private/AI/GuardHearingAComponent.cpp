@@ -7,10 +7,11 @@
 
 //#include "Perception/AISense_Hearing.h"
 #include "Perception/AISenseConfig_Hearing.h"
+#include "DrawDebugHelpers.h"
 
-
-
-#include "AIController.h"
+#include "GameFramework/Pawn.h"
+#include "AI/GuardAIController.h"
+//#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AI/GuardBlackboardKeys.h"
 
@@ -20,11 +21,11 @@
 // Sets default values for this component's properties
 UGuardHearingAComponent::UGuardHearingAComponent()
 {
+
+	// 사용시 생성자에 true 필요
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
-	//PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
+	PrimaryComponentTick.bCanEverTick = true;
 
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
@@ -67,6 +68,11 @@ void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FA
 			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
 			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
 			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+
+
+			// 디버그용. 추후 삭제
+			LastHearingLocation = Stimulus.StimulusLocation;
+			bHasHearingLocation = true;
 		}
 	}
 
@@ -91,23 +97,56 @@ void UGuardHearingAComponent::BeginPlay()
 	
 }
 
-/*
-// Called every frame
 void UGuardHearingAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// ...
+	DrawHearingDebug();
+}
+
+void UGuardHearingAComponent::DrawHearingDebug() const
+{
+	if (!HearingConfig)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FVector Origin = GuardPawn->GetActorLocation();
+	const float Radius = HearingConfig->HearingRange;
+
+	if (Radius <= 0.0f)
+	{
+		return;
+	}
+
+	// 청각 감지 범위
+	DrawDebugSphere(World, Origin, Radius, 48, FColor::Cyan, false, 0.1f, 0, 2.0f);
 
 
-	// 사용시 생성자에 true 필요
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
-
+	// 마지막으로 감지한 소음 위치
+	if (bHasHearingLocation)
+	{
+		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.1f, 0, 4.0f);
+	}
 
 }
 
-*/

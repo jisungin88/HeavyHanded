@@ -100,6 +100,8 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 	// 래치되는 경우에 SetPerception 이 도로 꺼줄 수 있다
 	SetComponentTickEnabled(true);
 
+	// Stimulus.Strength : 실제 발생한 소리 세기 
+	// GainPerStimulus : 소리 세기를 인지 게이지에 얼마나 반영할지
 	SetPerception(Perception01 + Stimulus.Strength * GainPerStimulus);
 }
 

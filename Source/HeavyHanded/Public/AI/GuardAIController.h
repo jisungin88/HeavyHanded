@@ -10,7 +10,7 @@
 
 class UBehaviorTree;
 class UAIPerceptionComponent;
-class UPerceptionMeterComponent;
+class UPerceptionMeterComponent; //삭제
 
 class AActor;
 class AGameStateBase;
