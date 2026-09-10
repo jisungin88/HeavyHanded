@@ -53,9 +53,13 @@ public:
 	EGuardType GuardType = EGuardType::Standard;
 
 protected:
+
+	UPROPERTY()
+	TObjectPtr<AGuardCharacter> PossessGuardPawn; // 빙의할 가드 Pawn
+
 	// GuardType 에 맞는 DT_GuardStats 행을 찾아 이동/지각/순찰/조사 수치를 일괄 적용한다.
 	// 행을 못 찾으면 위 폴백값을 그대로 두고 경고만 남긴다. InPawn은 이동속도를 적용할 대상.
-	void ApplyGuardStats(APawn* InPawn);
+	void ApplyGuardStats(); //APawn* InPawn);
 
 	// ========================================================
 
@@ -103,9 +107,10 @@ private:
 	UPROPERTY(BlueprintReadOnly, Category = "Perception", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
-	// OnPossess 때 빙의한 폰에서 가져와 바인딩해 둔다. HandlePerceptionFull 에서 ResetPerception 에 쓴다
-	UPROPERTY()
-	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
+	// 캐릭터로 이동. 삭제
+	/// // OnPossess 때 빙의한 폰에서 가져와 바인딩해 둔다. HandlePerceptionFull 에서 ResetPerception 에 쓴다
+	/// UPROPERTY()
+	/// TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
 
 
 protected:

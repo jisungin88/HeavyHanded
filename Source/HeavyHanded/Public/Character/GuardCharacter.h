@@ -55,6 +55,21 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	TObjectPtr<UPerceptionMeterComponent> PerceptionMeterComponent;
+
+public:
+
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UPerceptionMeterComponent* GetPerceptionMeterComponent() const
+	{ return PerceptionMeterComponent; }
+
+
+
+	// 위젯 관리
+protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception")
 	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
 
@@ -62,7 +77,7 @@ protected:
 	TObjectPtr<UWidgetComponent> HearingGaugeWidgetComponent;
 
 
-// 위젯 관리
+
 
 public:
 

@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+#include "Noise/PerceptionMeterComponent.h"
 
 #include "UI/DetectionGaugeWidget.h"
 #include "UI/PerceptionMeterWidget.h"
@@ -16,8 +17,8 @@
 
 AGuardCharacter::AGuardCharacter()
 {
-	//???? < AI 컨트롤러에도 있음
-	// PerceptionMeter = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
+	//???? < AI 컨트롤러에도 있음 > 다시 이쪽으로 옮김
+	PerceptionMeterComponent = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
 
 	// 팀 어피니에이션(GuardAIController::SetGenericTeamId)으로 서로를 "감지"는 안 하게 됐지만,
 	// 순찰 경로가 겹치면 캡슐끼리 물리적으로 계속 밀며 그 자리에 멈춰(마주보는 것처럼 보임) 있고,
@@ -50,6 +51,8 @@ AGuardCharacter::AGuardCharacter()
 void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
 
 	UPerceptionMeterWidget* PerceptionWidget = Cast<UPerceptionMeterWidget>(HearingGaugeWidgetComponent->GetUserWidgetObject());
 	if (!PerceptionWidget)

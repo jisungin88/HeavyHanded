@@ -55,6 +55,8 @@
 
 DEFINE_LOG_CATEGORY(LogGuardAI);
 
+
+
 // 1. 생성자
 AGuardAIController::AGuardAIController()
 {
@@ -96,14 +98,15 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-
-	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn);
-
-	if (!IsValid(GuardPawn))
+	PossessGuardPawn = Cast<AGuardCharacter>(InPawn);
+	if (!IsValid(PossessGuardPawn))
 	{
-		// 에러 로그
+		UE_LOG(LogGuardAI, Error, TEXT("[%s] GuardPawn이 유효하지 않습니다. 현재 빙의한 Pawn=%s"), *GetNameSafe(this), *GetNameSafe(GetPawn()));
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("[GuardAI] 빙의한 GuardPawn을 가져오지 못했습니다."));
 		return;
 	}
+
+	// --------------------------------------------------------------------------------------------
 
 
 	// PerceptionComp 넘겨주기 (추후 수정 필요)
@@ -111,8 +114,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	GuardHearingComp->InitializeHearingPerception(PerceptionComp);
 
 	// 시야, 청각 활성화 여부 결정 (테스트용)
-	GuardSightComp->SetSightEnabled(GuardPawn->bEnableSight);
-	GuardHearingComp->SetHearingEnabled(GuardPawn->bEnableHearing);
+	GuardSightComp->SetSightEnabled(PossessGuardPawn->bEnableSight);
+	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->bEnableHearing);
 
 
 
@@ -120,7 +123,7 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// -------------------------------------------------------------------------------------------------------
 	// BT/Blackboard 를 건드리기 전에 먼저 적용한다 - PatrolArrivalRadius/HeadGaugeUpdateInterval
 	// 등이 아래에서 바로 쓰인다 (SelectNextPatrolPoint, 헤드 게이지 타이머 등록).
-	ApplyGuardStats(InPawn);
+	ApplyGuardStats(); //InPawn);
 
 
 
@@ -162,6 +165,12 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// -------------------------------------------------------------------------------------------------------
 	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
 
+
+
+
+
+	// 캐릭터로 이동. 삭제
+	/*
 	// 빙의한 폰의 PerceptionMeterComponent(소음 인지 게이지)를 찾아 OnPerceptionFull 을 구독한다.
 	// 멤버 PerceptionMeter 에도 캐싱해 둬야 한다 - HandlePerceptionFull 에서 게이지를
 	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
@@ -181,7 +190,7 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 				*GetNameSafe(InPawn));
 		}
 	}
-
+	*/
 
 	// 첫 순찰 지점 선택 : 시작 시 첫 순찰 지점을 미리 채워둔다
 	// -------------------------------------------------------------------------------------------------------
@@ -290,9 +299,9 @@ void AGuardAIController::StopForMatchEnd()
 	}
 
 
-	if (AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn()))
+	if (PossessGuardPawn)
 	{
-		GuardPawn->StopHeadGaugeUpdate();
+		PossessGuardPawn->StopHeadGaugeUpdate();
 	}
 
 }
@@ -343,24 +352,30 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 		Alert->ReportNoiseDetected();
 	}
 
-	// 리셋하지 않으면 래치가 풀리지 않아 경비가 영원히 100%에 박힌다 (PerceptionMeterComponent.h 참고)
-	if (PerceptionMeter)
-	{
-		PerceptionMeter->ResetPerception();
+	if (PossessGuardPawn) {
+		PossessGuardPawn->GetPerceptionMeterComponent()->ResetPerception();
 	}
 }
 
 
 
-void AGuardAIController::ApplyGuardStats(APawn* InPawn)
+
+
+void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 {
+
+	if (!PossessGuardPawn)
+	{
+		return;
+	}
+
 	const UGuardSettings* Settings = UGuardSettings::Get();
 	const UDataTable* StatsTable = Settings->GuardStats.LoadSynchronous();
 	if (!IsValid(StatsTable))
 	{
 		UE_LOG(LogGuardAI, Warning,
 			TEXT("[%s] Project Settings > Guard > Guard Stats 가 비어 있다. 폴백값을 그대로 쓴다."),
-			*GetNameSafe(InPawn));
+			*GetNameSafe(PossessGuardPawn));
 		return;
 	}
 
@@ -381,7 +396,7 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 	{
 		UE_LOG(LogGuardAI, Warning,
 			TEXT("[%s] DT_GuardStats 에 행 '%s' 가 없다. 폴백값을 그대로 쓴다."),
-			*GetNameSafe(InPawn), *RowName.ToString());
+			*GetNameSafe(PossessGuardPawn), *RowName.ToString());
 		return;
 	}
 
@@ -391,16 +406,8 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees);
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
 
-
-	AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(InPawn);
-	if (!GuardPawn)
-	{
-		// 캐스팅 실패 로그
-		return;
-	}
-
-	GuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
-	GuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
+	PossessGuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
+	PossessGuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();
@@ -409,7 +416,7 @@ void AGuardAIController::ApplyGuardStats(APawn* InPawn)
 
 	// PerceptionMeter 멤버는 이 시점에 아직 캐싱되지 않았다(OnPossess 에서 이 함수보다
 	// 뒤에 찾는다) - 여기서는 InPawn 에서 직접 다시 찾는다.
-	if (UPerceptionMeterComponent* Meter = GuardPawn->FindComponentByClass<UPerceptionMeterComponent>())
+	if (UPerceptionMeterComponent* Meter = PossessGuardPawn->FindComponentByClass<UPerceptionMeterComponent>())
 	{
 		Meter->SetDecayRate(Row->PerceptionDecayPerSecond);
 	}
