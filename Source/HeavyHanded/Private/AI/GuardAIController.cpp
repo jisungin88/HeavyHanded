@@ -166,17 +166,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGuardAIController::OnTargetPerceptionUpdated);
 
 
-
-
-
-	// 캐릭터로 이동. 삭제
-	// 빙의한 폰의 PerceptionMeterComponent(소음 인지 게이지)를 찾아 OnPerceptionFull 을 구독한다.
-	// 멤버 PerceptionMeter 에도 캐싱해 둬야 한다 - HandlePerceptionFull 에서 게이지를
-	// 리셋(ResetPerception)할 때 이 멤버를 쓰는데, 로컬 변수에만 대입하고 멤버 대입을
-	// 빠뜨리면 항상 nullptr 이라 리셋이 절대 호출되지 않는다. 그러면 래치가 안 풀려
-	// 게이지가 100%에서 그대로 굳어 두 번째 소음부터는 OnPerceptionFull 이 다시 터지지 않는다.
-
-
 	//PossessGuardPawn
 	if (PossessGuardPawn->GetPerceptionMeterComponent())
 	{
@@ -414,13 +403,13 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 	}
 
 
+	PossessGuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
+	PossessGuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
+
 	GuardPatrolComp->SetPatrolStats(Row->PatrolArrivalRadius, Row->SearchSweepCount, Row->SearchSweepRadius);
 
 	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees, Row->VerticalVisionAngleDegrees);
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
-
-	PossessGuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
-	PossessGuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();

@@ -25,12 +25,6 @@
 UGuardSightAComponent::UGuardSightAComponent()
 {
 
-	// 사용시 생성자에 true 필요
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	//PrimaryComponentTick.bCanEverTick = true;
-
-
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
@@ -69,19 +63,12 @@ void UGuardSightAComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-
-	UE_LOG(LogTemp, Warning, TEXT("[SightConfig BEGINPLAY] Component=%p | SightConfig=%p | Owner=%s"),
-		this, SightConfig.Get(), *GetNameSafe(GetOwner()));
-
 }
 
 
 void UGuardSightAComponent::OnRegister()
 {
 	Super::OnRegister();
-
-	UE_LOG(LogTemp, Warning, TEXT("[SightConfig ONREGISTER] Component=%p | SightConfig=%p | Owner=%s | Class=%s"),
-		this, SightConfig.Get(), *GetNameSafe(GetOwner()), *GetNameSafe(GetClass()));
 
 }
 
@@ -95,33 +82,10 @@ void UGuardSightAComponent::SetSightConfig
 		return;
 	}
 
-		UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET ENTRY] Component=%p | SightConfig=%p | Owner=%s"),
-			this, SightConfig.Get(), *GetNameSafe(GetOwner()));
-
-	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET before] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
-	//	*GetNameSafe(Cast<AGuardAIController>(GetOwner())), *GetNameSafe(Cast<AGuardAIController>(GetOwner()) ? Cast<AGuardAIController>(GetOwner())->GetPawn() : nullptr), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
-
 	SightConfig->SightRadius = InSightRadius;
 	SightConfig->LoseSightRadius = InLoseSightRadius;
-	//SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle;
-	VerticalVisionAngleDegrees = InVerticalVisionAngle;
-
-	//원하는게 180도면 180지정시
 	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle*0.5f;
-	//VerticalVisionAngleDegrees = InVerticalVisionAngle;
-
-	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET after] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
-	//	*GetNameSafe(Cast<AGuardAIController>(GetOwner())), *GetNameSafe(Cast<AGuardAIController>(GetOwner()) ? Cast<AGuardAIController>(GetOwner())->GetPawn() : nullptr), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
-
-	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"), *GetPawn()->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
-	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-
-	if (GuardController && GuardController->GetPawn())
-	{
-		const APawn* ControlledPawn = GuardController->GetPawn();
-		//UE_LOG(LogTemp, Warning, TEXT("[SightConfig 01] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"),
-		//	*ControlledPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
-	}
+	VerticalVisionAngleDegrees = InVerticalVisionAngle;
 
 }
 
@@ -325,6 +289,340 @@ void UGuardSightAComponent::DrawSightDebug() const
 		return;
 	}
 
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardPawn);
+	if (!GuardCharacter || !GuardCharacter->GetMesh())
+	{
+		return;
+	}
+
+	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	const FVector Forward = GuardPawn->GetActorForwardVector().GetSafeNormal();
+	const FVector Up = FVector::UpVector;
+
+	const float SightRadius = SightConfig->SightRadius;
+	const float LoseSightRadius = SightConfig->LoseSightRadius;
+
+	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
+
+	if (SightRadius <= 0.0f || LoseSightRadius <= SightRadius || HorizontalHalfAngle <= 0.0f || VerticalHalfAngle <= 0.0f)
+	{
+		return;
+	}
+
+	const int32 ArcSegments = 24;
+	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
+
+	// ========================================================
+	// 수평 시야 외곽
+	// ========================================================
+
+	FVector PreviousGreenPoint = FVector::ZeroVector;
+	FVector PreviousYellowPoint = FVector::ZeroVector;
+
+	bool bHasPreviousGreenPoint = false;
+	bool bHasPreviousYellowPoint = false;
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / ArcSegments;
+		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
+
+		const FVector TraceEnd = Origin + Direction * LoseSightRadius;
+
+		FHitResult Hit;
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+		const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+		const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+		const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
+
+		const FVector GreenPoint = Origin + Direction * GreenDistance;
+		const FVector YellowPoint = Origin + Direction * YellowDistance;
+
+		if (bHasPreviousGreenPoint)
+		{
+			DrawDebugLine(World, PreviousGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 4.0f);
+		}
+
+		if (VisibleDistance > SightRadius && bHasPreviousYellowPoint)
+		{
+			DrawDebugLine(World, PreviousYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (bBlocked)
+		{
+			DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		//if (bBlocked && (Index == 0 || Index == ArcSegments))
+		//{
+		//	DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		//}
+
+		PreviousGreenPoint = GreenPoint;
+		bHasPreviousGreenPoint = true;
+
+		if (VisibleDistance > SightRadius)
+		{
+			PreviousYellowPoint = YellowPoint;
+			bHasPreviousYellowPoint = true;
+		}
+		else
+		{
+			bHasPreviousYellowPoint = false;
+		}
+	}
+
+	// ========================================================
+	// 수직 시야 경계
+	// ========================================================
+
+	{
+		const FVector HorizontalForward = Forward.GetSafeNormal2D();
+
+		const FVector UpDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+		const FVector DownDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+
+		const FVector UpTraceEnd = Origin + UpDirection * LoseSightRadius;
+		const FVector DownTraceEnd = Origin + DownDirection * LoseSightRadius;
+
+		FHitResult UpHit;
+		FHitResult DownHit;
+
+		const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
+		const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
+
+		const float UpVisibleDistance = bUpBlocked ? FVector::Distance(Origin, UpHit.Location) : LoseSightRadius;
+		const float DownVisibleDistance = bDownBlocked ? FVector::Distance(Origin, DownHit.Location) : LoseSightRadius;
+
+		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
+		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
+
+		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
+
+		if (UpVisibleDistance > SightRadius)
+		{
+			DrawDebugLine(World, Origin + UpDirection * SightRadius, Origin + UpDirection * UpVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (DownVisibleDistance > SightRadius)
+		{
+			DrawDebugLine(World, Origin + DownDirection * SightRadius, Origin + DownDirection * DownVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (bUpBlocked)
+		{
+			DrawDebugLine(World, UpHit.Location, UpTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		if (bDownBlocked)
+		{
+			DrawDebugLine(World, DownHit.Location, DownTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+	}
+
+	/*
+	// ========================================================
+	// 수직 시야 외곽
+	// ========================================================
+
+	FVector PreviousUpGreenPoint = FVector::ZeroVector;
+	FVector PreviousDownGreenPoint = FVector::ZeroVector;
+	FVector PreviousUpYellowPoint = FVector::ZeroVector;
+	FVector PreviousDownYellowPoint = FVector::ZeroVector;
+
+	bool bHasPreviousUpGreenPoint = false;
+	bool bHasPreviousDownGreenPoint = false;
+	bool bHasPreviousUpYellowPoint = false;
+	bool bHasPreviousDownYellowPoint = false;
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / ArcSegments;
+		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+
+		const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
+
+		const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+		const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+
+		// 상단
+		{
+			const FVector TraceEnd = Origin + UpDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+			const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
+
+			const FVector GreenPoint = Origin + UpDirection * GreenDistance;
+			const FVector YellowPoint = Origin + UpDirection * YellowDistance;
+
+			if (bHasPreviousUpGreenPoint)
+			{
+				DrawDebugLine(World, PreviousUpGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 2.0f);
+			}
+
+			if (VisibleDistance > SightRadius && bHasPreviousUpYellowPoint)
+			{
+				DrawDebugLine(World, PreviousUpYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 2.0f);
+			}
+
+			if (bBlocked)
+			{
+				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+
+			PreviousUpGreenPoint = GreenPoint;
+			bHasPreviousUpGreenPoint = true;
+
+			if (VisibleDistance > SightRadius)
+			{
+				PreviousUpYellowPoint = YellowPoint;
+				bHasPreviousUpYellowPoint = true;
+			}
+			else
+			{
+				bHasPreviousUpYellowPoint = false;
+			}
+		}
+
+		// 하단
+		{
+			const FVector TraceEnd = Origin + DownDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+			const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
+
+			const FVector GreenPoint = Origin + DownDirection * GreenDistance;
+			const FVector YellowPoint = Origin + DownDirection * YellowDistance;
+
+			if (bHasPreviousDownGreenPoint)
+			{
+				DrawDebugLine(World, PreviousDownGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 2.0f);
+			}
+
+			if (VisibleDistance > SightRadius && bHasPreviousDownYellowPoint)
+			{
+				DrawDebugLine(World, PreviousDownYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 2.0f);
+			}
+
+			if (bBlocked)
+			{
+				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+
+			PreviousDownGreenPoint = GreenPoint;
+			bHasPreviousDownGreenPoint = true;
+
+			if (VisibleDistance > SightRadius)
+			{
+				PreviousDownYellowPoint = YellowPoint;
+				bHasPreviousDownYellowPoint = true;
+			}
+			else
+			{
+				bHasPreviousDownYellowPoint = false;
+			}
+		}
+	}
+
+	*/
+
+	// ========================================================
+	// 수평 좌우 경계
+	// ========================================================
+
+	{
+		const FVector LeftDirection = Forward.RotateAngleAxis(-HorizontalHalfAngle, Up);
+		const FVector RightDirection = Forward.RotateAngleAxis(HorizontalHalfAngle, Up);
+
+		// 왼쪽
+		{
+			const FVector TraceEnd = Origin + LeftDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+
+			DrawDebugLine(World, Origin, Origin + LeftDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+
+			if (VisibleDistance > SightRadius)
+			{
+				DrawDebugLine(World, Origin + LeftDirection * SightRadius, Origin + LeftDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			}
+
+			if (bBlocked)
+			{
+				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+		}
+
+		// 오른쪽
+		{
+			const FVector TraceEnd = Origin + RightDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+
+			DrawDebugLine(World, Origin, Origin + RightDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+
+			if (VisibleDistance > SightRadius)
+			{
+				DrawDebugLine(World, Origin + RightDirection * SightRadius, Origin + RightDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			}
+
+			if (bBlocked)
+			{
+				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+		}
+	}
+
+
+	/*
+	if (!SightConfig)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
 	if (!GuardCharacter)
 	{
@@ -339,20 +637,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 	const FVector Up = FVector::UpVector;
 	const float Radius = SightConfig->SightRadius;
 
-	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;//;*0.5f;
+	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
 	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
-//	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
-
-	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig 02] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"),
-	//	*GuardPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
-	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW 03] Pawn=%s | ConfigHorizontalHalf=%.1f | DrawHorizontalHalf=%.1f | ConfigVertical=%.1f | DrawVerticalHalf=%.1f"),
-	//	*GuardPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, HorizontalHalfAngle, VerticalVisionAngleDegrees, VerticalHalfAngle);
-	//
-	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW 04] Component=%s | ComponentOwner=%s | Controller=%s | Pawn=%s | SightConfig=%s | Horizontal=%.1f"),
-	//	*GetNameSafe(this), *GetNameSafe(GetOwner()), *GetNameSafe(GuardController), *GetNameSafe(GuardController->GetPawn()), *GetNameSafe(SightConfig), SightConfig->PeripheralVisionAngleDegrees);
-
-	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
-	//	*GetNameSafe(GuardController), *GetNameSafe(GuardController->GetPawn()), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
 
 	if (Radius <= 0.0f || HorizontalHalfAngle <= 0.0f)
 	{
@@ -360,7 +646,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 	}
 
 	const int32 ArcSegments = 24;
-	const int32 DepthSegments = 3;
+	const int32 DepthSegments = 1;
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
 
@@ -408,8 +694,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const FVector LeftVisibleEnd = bLeftBlocked ? LeftHit.Location : Origin + LeftDirection * Radius;
 		const FVector RightVisibleEnd = bRightBlocked ? RightHit.Location : Origin + RightDirection * Radius;
 
-		DrawDebugLine(World, Origin, LeftVisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
-		DrawDebugLine(World, Origin, RightVisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+		DrawDebugLine(World, Origin, LeftVisibleEnd, FColor::Green, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, RightVisibleEnd, FColor::Green, false, 0.1f, 0, 4.0f);
 
 		if (bLeftBlocked)
 		{
@@ -433,16 +719,20 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const FVector UpEnd = Origin + UpDirection * Radius;
 		const FVector DownEnd = Origin + DownDirection * Radius;
 
-		DrawDebugLine(World, Origin, UpEnd, FColor::Green, false, 0.1f, 0, 2.0f);
-		DrawDebugLine(World, Origin, DownEnd, FColor::Green, false, 0.1f, 0, 2.0f);
+		DrawDebugLine(World, Origin, UpEnd, FColor::Emerald, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, DownEnd, FColor::Emerald, false, 0.1f, 0, 4.0f);
 	}
 
 
 	// 내부 깊이선
+
+	const float SightRadius = SightConfig->SightRadius;
+	const float LoseSightRadius = SightConfig->LoseSightRadius;
+
 	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
 	{
 		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
-		const float CurrentRadius = Radius * DepthAlpha;
+		const float CurrentRadius = SightRadius * DepthAlpha;
 		const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
 
 		FVector PreviousUpPoint = FVector::ZeroVector;
@@ -488,39 +778,47 @@ void UGuardSightAComponent::DrawSightDebug() const
 		}
 	}
 
-	/*
-	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
+	const float LoseSightVerticalRadius = LoseSightRadius;
+	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
+
+	FVector PreviousLoseUpPoint = FVector::ZeroVector;
+	FVector PreviousLoseDownPoint = FVector::ZeroVector;
+	bool bHasPreviousLoseUpPoint = false;
+	bool bHasPreviousLoseDownPoint = false;
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
 	{
-		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
-		const float CurrentRadius = Radius * DepthAlpha;
+		const float Alpha = static_cast<float>(Index) / ArcSegments;
+		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+		const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
 
-		FVector PreviousDepthPoint = FVector::ZeroVector;
-		bool bHasPreviousDepthPoint = false;
+		const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+		const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
 
-		for (int32 Index = 0; Index <= ArcSegments; ++Index)
+		const FVector UpPoint = Origin + UpDirection * LoseSightVerticalRadius;
+		const FVector DownPoint = Origin + DownDirection * LoseSightVerticalRadius;
+
+		if (bHasPreviousLoseUpPoint)
 		{
-			const float Alpha = static_cast<float>(Index) / ArcSegments;
-			const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
-
-
-			const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
-			const FVector TraceEnd = Origin + Direction * CurrentRadius;
-
-			FHitResult Hit;
-			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
-
-			const FVector EndPoint = bBlocked ? Hit.Location : TraceEnd;
-
-			if (bHasPreviousDepthPoint)
-			{
-				DrawDebugLine(World, PreviousDepthPoint, EndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
-			}
-
-			PreviousDepthPoint = EndPoint;
-			bHasPreviousDepthPoint = true;
+			DrawDebugLine(World, PreviousLoseUpPoint, UpPoint, FColor::Yellow, false, 0.1f, 0, 1.5f);
 		}
+
+		if (bHasPreviousLoseDownPoint)
+		{
+			DrawDebugLine(World, PreviousLoseDownPoint, DownPoint, FColor::Yellow, false, 0.1f, 0, 1.5f);
+		}
+
+		PreviousLoseUpPoint = UpPoint;
+		PreviousLoseDownPoint = DownPoint;
+		bHasPreviousLoseUpPoint = true;
+		bHasPreviousLoseDownPoint = true;
 	}
-	*/
+
+
+
+
+*/
+
 }
 
 
