@@ -396,7 +396,7 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 	// "EGuardType::Standard" 처럼 열거형 이름까지 붙어 나와 DataTable RowName 관례와
 	// 어긋나므로, 여기서는 명시적으로 매핑한다.
 	FName RowName;
-	switch (GuardType)
+	switch (PossessGuardPawn->GuardType)
 	{
 	case EGuardType::Standard: RowName = TEXT("Standard"); break;
 	case EGuardType::Dog:      RowName = TEXT("Dog");      break;

@@ -29,7 +29,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedAc
 
 
 UENUM(BlueprintType)
-enum class EGuardAIState : uint8
+enum class EGuardAIState : uint8 // GuardTypes.h로 옮기는 작업 필요
 {
 	Patrol,
 	Search,
@@ -47,10 +47,7 @@ public:
 
 	// Guard Info (경비 정보)
 	// ========================================================
-	
-	// 경비 개체 종류. 스폰 시 BP_GuardVariant_* 쪽에서 설정.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
-	EGuardType GuardType = EGuardType::Standard;
+
 
 protected:
 

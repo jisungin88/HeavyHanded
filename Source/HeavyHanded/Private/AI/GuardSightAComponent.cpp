@@ -36,7 +36,7 @@ UGuardSightAComponent::UGuardSightAComponent()
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
-
+	UE_LOG(LogTemp, Warning, TEXT("[SightConfig CONSTRUCTOR] Component=%p | SightConfig=%p | Name=%s"), this, SightConfig.Get(), *GetNameSafe(SightConfig));
 
 	// 플레이어는 IGenericTeamAgentInterface를 구현하지 않아 FGenericTeamId::NoTeam(255)로
 	// 남는다. 경비 입장에서 그런 상대는 "중립"으로 판정되므로 bDetectNeutrals를 켜야
@@ -70,7 +70,18 @@ void UGuardSightAComponent::BeginPlay()
 	Super::BeginPlay();
 
 
+	UE_LOG(LogTemp, Warning, TEXT("[SightConfig BEGINPLAY] Component=%p | SightConfig=%p | Owner=%s"),
+		this, SightConfig.Get(), *GetNameSafe(GetOwner()));
 
+}
+
+
+void UGuardSightAComponent::OnRegister()
+{
+	Super::OnRegister();
+
+	UE_LOG(LogTemp, Warning, TEXT("[SightConfig ONREGISTER] Component=%p | SightConfig=%p | Owner=%s | Class=%s"),
+		this, SightConfig.Get(), *GetNameSafe(GetOwner()), *GetNameSafe(GetClass()));
 
 }
 
@@ -84,10 +95,33 @@ void UGuardSightAComponent::SetSightConfig
 		return;
 	}
 
+		UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET ENTRY] Component=%p | SightConfig=%p | Owner=%s"),
+			this, SightConfig.Get(), *GetNameSafe(GetOwner()));
+
+	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET before] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
+	//	*GetNameSafe(Cast<AGuardAIController>(GetOwner())), *GetNameSafe(Cast<AGuardAIController>(GetOwner()) ? Cast<AGuardAIController>(GetOwner())->GetPawn() : nullptr), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
+
 	SightConfig->SightRadius = InSightRadius;
 	SightConfig->LoseSightRadius = InLoseSightRadius;
-	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle;
-	VerticalVisionAngleDegrees = FMath::Clamp(InVerticalVisionAngle, 0.0f, 90.0f);
+	//SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle;
+	VerticalVisionAngleDegrees = InVerticalVisionAngle;
+
+	//원하는게 180도면 180지정시
+	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle*0.5f;
+	//VerticalVisionAngleDegrees = InVerticalVisionAngle;
+
+	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig SET after] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
+	//	*GetNameSafe(Cast<AGuardAIController>(GetOwner())), *GetNameSafe(Cast<AGuardAIController>(GetOwner()) ? Cast<AGuardAIController>(GetOwner())->GetPawn() : nullptr), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
+
+	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"), *GetPawn()->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+
+	if (GuardController && GuardController->GetPawn())
+	{
+		const APawn* ControlledPawn = GuardController->GetPawn();
+		//UE_LOG(LogTemp, Warning, TEXT("[SightConfig 01] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"),
+		//	*ControlledPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
+	}
 
 }
 
@@ -218,6 +252,8 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	//	DrawDebugSphere(GetWorld(), GuardController->GetPawn()->GetActorLocation(), 100.0f, 16, FColor::Yellow, false, 0.1f);
 	//}
 
+
+
 #if WITH_EDITOR
 	DrawSightDebug();
 	DrawPerceivedActorsDebug();
@@ -295,6 +331,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 		return;
 	}
 
+	
 	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
 //	const FVector Origin = GuardPawn->GetActorLocation();
 
@@ -302,9 +339,20 @@ void UGuardSightAComponent::DrawSightDebug() const
 	const FVector Up = FVector::UpVector;
 	const float Radius = SightConfig->SightRadius;
 
-	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;//;*0.5f;
 	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
 //	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig 02] Pawn=%s | Horizontal=%.1f deg | Vertical=%.1f deg"),
+	//	*GuardPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, VerticalVisionAngleDegrees);
+	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW 03] Pawn=%s | ConfigHorizontalHalf=%.1f | DrawHorizontalHalf=%.1f | ConfigVertical=%.1f | DrawVerticalHalf=%.1f"),
+	//	*GuardPawn->GetName(), SightConfig->PeripheralVisionAngleDegrees, HorizontalHalfAngle, VerticalVisionAngleDegrees, VerticalHalfAngle);
+	//
+	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW 04] Component=%s | ComponentOwner=%s | Controller=%s | Pawn=%s | SightConfig=%s | Horizontal=%.1f"),
+	//	*GetNameSafe(this), *GetNameSafe(GetOwner()), *GetNameSafe(GuardController), *GetNameSafe(GuardController->GetPawn()), *GetNameSafe(SightConfig), SightConfig->PeripheralVisionAngleDegrees);
+
+	//UE_LOG(LogTemp, Warning, TEXT("[Sight DRAW] Controller=%s | Pawn=%s | Component=%p | SightConfig=%p | Config=%.1f"),
+	//	*GetNameSafe(GuardController), *GetNameSafe(GuardController->GetPawn()), this, SightConfig.Get(), SightConfig->PeripheralVisionAngleDegrees);
 
 	if (Radius <= 0.0f || HorizontalHalfAngle <= 0.0f)
 	{

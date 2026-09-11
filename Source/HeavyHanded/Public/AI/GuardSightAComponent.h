@@ -41,6 +41,8 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
+	virtual void OnRegister() override;
+
 
 public:
 
@@ -51,8 +53,14 @@ public:
 	// 시야/청각 파라미터. 반경·시야각 등 실제 수치는 DT_GuardStats(FGuardStatsRow)에서
 	// OnPossess 때 GuardType 에 맞는 행으로 덮어쓴다(ApplyGuardStats). 여기 생성자 기본값은
 	// 테이블 조회가 실패했을 때의 폴백이며, 멤버로 들고 있어야 디테일 패널에도 노출된다.
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GuardSight")
+
+	// Instanced : 언리얼에게 이 프로퍼티가 가리키는 UObject도 **소유 컴포넌트별로 인스턴스화해야 한다고** 알려주는 역할
+	// SightConfig UObject의 인스턴싱/복제 문제
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Instanced,  Category = "GuardSight")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
+
+
 
 	void SetSightEnabled(bool isEnable);
 

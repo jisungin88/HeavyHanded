@@ -15,7 +15,18 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 	GENERATED_BODY()
 
 public:
+
 	AGuardCharacter();
+
+
+	// Guard Info (경비 정보)
+	// ========================================================
+	// 가드 캐릭터로 이동
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	EGuardType GuardType = EGuardType::Standard;
+
+
+
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
 	bool bEnableSight = true;

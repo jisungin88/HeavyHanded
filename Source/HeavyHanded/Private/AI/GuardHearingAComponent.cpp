@@ -86,7 +86,9 @@ void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FA
 		return;
 	}
 
-	GuardAIController->SetFocalPoint(Stimulus.StimulusLocation);
+
+	//잠시 비활성화
+	//GuardAIController->SetFocalPoint(Stimulus.StimulusLocation);
 
 	
 }

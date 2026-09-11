@@ -81,7 +81,7 @@ struct FGuardStatsRow : public FTableRowBase
 	float LoseSightRadius = 1700.f;
 
 	// 수평 시야
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "60.0", ClampMax = "180.0", Units = "deg"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "60.0", ClampMax = "240", Units = "deg"))
 	float PeripheralVisionAngleDegrees = 90.f;
 
 	// 수직 시야
