@@ -70,6 +70,18 @@ protected:
 		meta = (ClampMin = "0.0", Units = "s"))
 	float MinRetriggerInterval = 1.f;
 
+	/**
+	 * 레이저에 걸렸을 때 호출된다. 판정(경보·경계도)은 이미 끝난 뒤이므로 여기서 게임
+	 * 상태를 더 바꾸지 않는다 — 문을 닫는 등 레벨별 연출/연결은 BP 에서 이 이벤트에 붙인다.
+	 *
+	 * [서버 전용이다 — 이 함수를 부르는 OnTriggerOverlap 자체가 HasAuthority() 로 막혀 있다]
+	 *   여기서 문을 닫기로 했다면, 그 문 BP 자신이 복제(Replicated bool + RepNotify)로
+	 *   클라이언트 전파를 책임져야 한다 — AVaultDoor/ABreakableWall 과 같은 원칙이다.
+	 *   이 이벤트 자체를 클라에서도 실행시키면 서버·클라가 각자 다르게 판단할 위험이 생긴다.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|LaserTrap")
+	void OnLaserTriggered();
+
 	/** 경보음 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> AlarmSound;

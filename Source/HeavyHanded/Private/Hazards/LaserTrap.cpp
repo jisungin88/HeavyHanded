@@ -96,6 +96,9 @@ void ALaserTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 
 	Multicast_PlayAlarmSound();
 
+	// 판정은 여기서 끝났다. 문을 닫는 등 레벨별 연결은 BP 몫이다 (헤더 주석 참고)
+	OnLaserTriggered();
+
 	UE_LOG(LogHazard, Log, TEXT("[LaserTrap:%s] %s 가 레이저를 가로질렀다 — 경보"),
 		*GetName(), *Target->GetName());
 }
