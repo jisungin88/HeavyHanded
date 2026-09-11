@@ -73,8 +73,8 @@ void UGuardSightAComponent::OnRegister()
 }
 
 
-void UGuardSightAComponent::SetSightConfig
-(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle, float InVerticalVisionAngle)
+void UGuardSightAComponent::SetSightConfig (float InSightRadius, float InLoseSightRadius,
+	float InPeripheralVisionAngle, float InVerticalVisionAngle, float InBinocularVisionAngle)
 {
 	if (!SightConfig)
 	{
@@ -84,9 +84,71 @@ void UGuardSightAComponent::SetSightConfig
 
 	SightConfig->SightRadius = InSightRadius;
 	SightConfig->LoseSightRadius = InLoseSightRadius;
-	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle*0.5f;
+
+
+	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle * 0.5f;
 	VerticalVisionAngleDegrees = InVerticalVisionAngle;
 
+	// 전체 시야 안에서 중앙 양안 시야에 해당하는 각도를 저장한다.
+	// 이후 인지 게이지 상승 속도를 계산할 때 사용한다.
+	BinocularVisionAngleDegrees = InBinocularVisionAngle * 0.5f;
+
+}
+
+bool UGuardSightAComponent::IsWithinBinocularVisionAngle(AActor* TargetActor) const
+{
+	if (!IsValid(TargetActor))
+	{
+		return false;
+	}
+
+	const AActor* OwnerActor = GetOwner();
+	if (!IsValid(OwnerActor))
+	{
+		return false;
+	}
+
+	// 대상과 경비 사이의 방향에서 높이 차이를 제거한다.
+	// 양안 시야는 수평 시야 기준으로 판단한다.
+	FVector ToTarget = TargetActor->GetActorLocation() - OwnerActor->GetActorLocation();
+	ToTarget.Z = 0.f;
+
+	if (ToTarget.IsNearlyZero())
+	{
+		return true;
+	}
+
+	ToTarget.Normalize();
+
+	// 경비가 바라보는 방향도 수평 방향만 사용한다.
+	FVector Forward = OwnerActor->GetActorForwardVector();
+	Forward.Z = 0.f;
+
+	if (Forward.IsNearlyZero())
+	{
+		return true;
+	}
+
+	Forward.Normalize();
+
+	// 정면과 대상 사이의 수평 각도를 계산한다.
+	const float Dot = FMath::Clamp(FVector::DotProduct(Forward, ToTarget), -1.f, 1.f);
+	const float AngleDegrees = FMath::RadiansToDegrees(FMath::Acos(Dot));
+
+	// 설정된 양안 시야각은 좌우를 합친 전체 각도이므로 절반을 사용한다.
+	const float BinocularHalfAngle = BinocularVisionAngleDegrees * 0.5f;
+
+	return AngleDegrees <= BinocularHalfAngle;
+}
+
+float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
+{
+	if (IsWithinBinocularVisionAngle(TargetActor))
+	{
+		return 1.f;
+	}
+
+	return 0.5f;
 }
 
 
@@ -208,15 +270,6 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// ...
-
-	//const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	//if (GuardController && GuardController->GetPawn())
-	//{
-	//	DrawDebugSphere(GetWorld(), GuardController->GetPawn()->GetActorLocation(), 100.0f, 16, FColor::Yellow, false, 0.1f);
-	//}
-
-
 
 #if WITH_EDITOR
 	DrawSightDebug();
@@ -253,8 +306,8 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
 	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
-	const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, 80.0f); // 80은 임시값
-	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, 80.0f);
+	const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation();// +FVector(0.0f, 0.0f, 80.0f); // 80은 임시값
+	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation(); // +FVector(0.0f, 0.0f, 80.0f);
 	const FVector Direction = (TargetHeadLocation - GuardEyeLocation).GetSafeNormal();
 
 	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Asin(Direction.Z));
@@ -597,227 +650,6 @@ void UGuardSightAComponent::DrawSightDebug() const
 			}
 		}
 	}
-
-
-	/*
-	if (!SightConfig)
-	{
-		return;
-	}
-
-	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	const APawn* GuardPawn = GuardController->GetPawn();
-	if (!GuardPawn)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
-	if (!GuardCharacter)
-	{
-		return;
-	}
-
-	
-	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
-//	const FVector Origin = GuardPawn->GetActorLocation();
-
-	const FVector Forward = GuardPawn->GetActorForwardVector();
-	const FVector Up = FVector::UpVector;
-	const float Radius = SightConfig->SightRadius;
-
-	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
-	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
-
-	if (Radius <= 0.0f || HorizontalHalfAngle <= 0.0f)
-	{
-		return;
-	}
-
-	const int32 ArcSegments = 24;
-	const int32 DepthSegments = 1;
-
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
-
-	// 외곽 부채꼴
-	FVector PreviousPoint = FVector::ZeroVector;
-	bool bHasPreviousPoint = false;
-
-	for (int32 Index = 0; Index <= ArcSegments; ++Index)
-	{
-		const float Alpha = static_cast<float>(Index) / ArcSegments;
-		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
-		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
-		const FVector TraceEnd = Origin + Direction * Radius;
-
-		FHitResult Hit;
-		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
-
-		const FVector VisibleEnd = bBlocked ? Hit.Location : TraceEnd;
-
-		if (bHasPreviousPoint)
-		{
-			DrawDebugLine(World, PreviousPoint, VisibleEnd, FColor::Green, false, 0.1f, 0, 2.0f);
-		}
-
-		if (bBlocked)
-		{
-			DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
-		}
-
-		PreviousPoint = VisibleEnd;
-		bHasPreviousPoint = true;
-	}
-
-	// 좌우 시야 경계
-	{
-		const FVector LeftDirection = Forward.RotateAngleAxis(-HorizontalHalfAngle, Up);
-		const FVector RightDirection = Forward.RotateAngleAxis(HorizontalHalfAngle, Up);
-
-		FHitResult LeftHit;
-		FHitResult RightHit;
-
-		const bool bLeftBlocked = World->LineTraceSingleByChannel(LeftHit, Origin, Origin + LeftDirection * Radius, ECC_Visibility, Params);
-		const bool bRightBlocked = World->LineTraceSingleByChannel(RightHit, Origin, Origin + RightDirection * Radius, ECC_Visibility, Params);
-
-		const FVector LeftVisibleEnd = bLeftBlocked ? LeftHit.Location : Origin + LeftDirection * Radius;
-		const FVector RightVisibleEnd = bRightBlocked ? RightHit.Location : Origin + RightDirection * Radius;
-
-		DrawDebugLine(World, Origin, LeftVisibleEnd, FColor::Green, false, 0.1f, 0, 4.0f);
-		DrawDebugLine(World, Origin, RightVisibleEnd, FColor::Green, false, 0.1f, 0, 4.0f);
-
-		if (bLeftBlocked)
-		{
-			DrawDebugLine(World, LeftHit.Location, Origin + LeftDirection * Radius, FColor::Red, false, 0.1f, 0, 2.0f);
-		}
-
-		if (bRightBlocked)
-		{
-			DrawDebugLine(World, RightHit.Location, Origin + RightDirection * Radius, FColor::Red, false, 0.1f, 0, 2.0f);
-		}
-	}
-
-	// 상하 수직 시야 경계
-	{
-		const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalVisionAngleDegrees);
-		const FVector HorizontalForward = Forward.GetSafeNormal2D();
-
-		const FVector UpDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-		const FVector DownDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-
-		const FVector UpEnd = Origin + UpDirection * Radius;
-		const FVector DownEnd = Origin + DownDirection * Radius;
-
-		DrawDebugLine(World, Origin, UpEnd, FColor::Emerald, false, 0.1f, 0, 4.0f);
-		DrawDebugLine(World, Origin, DownEnd, FColor::Emerald, false, 0.1f, 0, 4.0f);
-	}
-
-
-	// 내부 깊이선
-
-	const float SightRadius = SightConfig->SightRadius;
-	const float LoseSightRadius = SightConfig->LoseSightRadius;
-
-	for (int32 DepthIndex = 1; DepthIndex <= DepthSegments; ++DepthIndex)
-	{
-		const float DepthAlpha = static_cast<float>(DepthIndex) / (DepthSegments + 1);
-		const float CurrentRadius = SightRadius * DepthAlpha;
-		const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
-
-		FVector PreviousUpPoint = FVector::ZeroVector;
-		FVector PreviousDownPoint = FVector::ZeroVector;
-		bool bHasPreviousUpPoint = false;
-		bool bHasPreviousDownPoint = false;
-
-		for (int32 Index = 0; Index <= ArcSegments; ++Index)
-		{
-			const float Alpha = static_cast<float>(Index) / ArcSegments;
-			const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
-			const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
-
-			const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-			const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-
-			const FVector UpTraceEnd = Origin + UpDirection * CurrentRadius;
-			const FVector DownTraceEnd = Origin + DownDirection * CurrentRadius;
-
-			FHitResult UpHit;
-			FHitResult DownHit;
-
-			const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
-			const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
-
-			const FVector UpEndPoint = bUpBlocked ? UpHit.Location : UpTraceEnd;
-			const FVector DownEndPoint = bDownBlocked ? DownHit.Location : DownTraceEnd;
-
-			if (bHasPreviousUpPoint)
-			{
-				DrawDebugLine(World, PreviousUpPoint, UpEndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
-			}
-
-			if (bHasPreviousDownPoint)
-			{
-				DrawDebugLine(World, PreviousDownPoint, DownEndPoint, FColor::Green, false, 0.1f, 0, 0.5f);
-			}
-
-			PreviousUpPoint = UpEndPoint;
-			PreviousDownPoint = DownEndPoint;
-			bHasPreviousUpPoint = true;
-			bHasPreviousDownPoint = true;
-		}
-	}
-
-	const float LoseSightVerticalRadius = LoseSightRadius;
-	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
-
-	FVector PreviousLoseUpPoint = FVector::ZeroVector;
-	FVector PreviousLoseDownPoint = FVector::ZeroVector;
-	bool bHasPreviousLoseUpPoint = false;
-	bool bHasPreviousLoseDownPoint = false;
-
-	for (int32 Index = 0; Index <= ArcSegments; ++Index)
-	{
-		const float Alpha = static_cast<float>(Index) / ArcSegments;
-		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
-		const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
-
-		const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-		const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-
-		const FVector UpPoint = Origin + UpDirection * LoseSightVerticalRadius;
-		const FVector DownPoint = Origin + DownDirection * LoseSightVerticalRadius;
-
-		if (bHasPreviousLoseUpPoint)
-		{
-			DrawDebugLine(World, PreviousLoseUpPoint, UpPoint, FColor::Yellow, false, 0.1f, 0, 1.5f);
-		}
-
-		if (bHasPreviousLoseDownPoint)
-		{
-			DrawDebugLine(World, PreviousLoseDownPoint, DownPoint, FColor::Yellow, false, 0.1f, 0, 1.5f);
-		}
-
-		PreviousLoseUpPoint = UpPoint;
-		PreviousLoseDownPoint = DownPoint;
-		bHasPreviousLoseUpPoint = true;
-		bHasPreviousLoseDownPoint = true;
-	}
-
-
-
-
-*/
 
 }
 

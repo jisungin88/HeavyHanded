@@ -64,14 +64,30 @@ public:
 
 	void SetSightEnabled(bool isEnable);
 
-	void SetSightConfig
-	(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle, float InVerticalVisionAngle);
+	// 경비의 전체 시야 설정을 적용한다.
+	// 전체 수평 시야각은 AI Perception의 실제 시야 범위에 사용하고,
+	// 양안 시야각은 이후 인지 게이지 상승 속도 보정에 사용한다.
+	void SetSightConfig(float InSightRadius, float InLoseSightRadius,
+		float InPeripheralVisionAngle, float InVerticalVisionAngle, float InBinocularVisionAngle);
+
+
+public:
+
+	// 대상이 현재 경비의 양안 시야 안에 있는지 확인한다.
+	// 양안 시야는 전체 수평 시야각보다 좁은 중앙 영역이며,
+	// 인지 게이지 상승 속도를 결정할 때 사용한다.
+	bool IsWithinBinocularVisionAngle(AActor* TargetActor) const;
+
+	// 대상이 양안 시야 안에 있는지에 따라 인지 게이지 상승 배율을 반환한다.
+	// 양안 시야 안에서는 정상 속도, 주변 시야에서는 감소된 속도를 사용한다.
+	float GetBinocularVisionRate(AActor* TargetActor) const;
 
 private:
-	float VerticalVisionAngleDegrees = 45.0f;
+	UPROPERTY()
+	float BinocularVisionAngleDegrees = 0.0f;
 
+	float VerticalVisionAngleDegrees = 0.0f;
 
-private:
 
 	// 진단용. 시야를 잃은 시각. 되찾을 때 상실이 몇 초 지속됐는지 찍는다.
 	// 음수는 "현재 상실 상태가 아님".

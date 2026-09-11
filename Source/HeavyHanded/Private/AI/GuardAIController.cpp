@@ -408,7 +408,9 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 
 	GuardPatrolComp->SetPatrolStats(Row->PatrolArrivalRadius, Row->SearchSweepCount, Row->SearchSweepRadius);
 
-	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius, Row->PeripheralVisionAngleDegrees, Row->VerticalVisionAngleDegrees);
+	GuardSightComp->SetSightConfig(Row->SightRadius, Row->LoseSightRadius,
+		Row->PeripheralVisionAngleDegrees, Row->VerticalVisionAngleDegrees, Row->BinocularVisionAngleDegrees);
+
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
