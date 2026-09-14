@@ -164,4 +164,7 @@ void AMovementTrap::Multicast_PlayTriggerEffect_Implementation()
 	{
 		UGameplayStatics::PlaySoundAtLocation(World, TriggerSound, GetActorLocation());
 	}
+
+	// 판정은 끝났다. 턱이 맞물리는 등 메시 자체가 움직이는 연출은 BP 몫이다 (헤더 주석 참고)
+	OnTrapVisualTrigger();
 }

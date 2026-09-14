@@ -99,6 +99,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> TriggerSound;
 
+	/**
+	 * 걸리는 순간 호출된다 — Multicast_PlayTriggerEffect 안에서 불리므로 모든 머신
+	 * (데디케이티드 서버 제외)에서 실행된다. 덫의 턱이 맞물리는 것처럼 메시 자체가
+	 * 움직여야 하는 연출을 여기서 만든다. 판정은 이미 끝난 뒤라 게임 상태를 바꾸지 않는다
+	 * (ALaserTrap::OnLaserTriggered 와 같은 역할의 훅).
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|Visual")
+	void OnTrapVisualTrigger();
+
 private:
 	/** 걸리는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
 	UFUNCTION(NetMulticast, Unreliable)
