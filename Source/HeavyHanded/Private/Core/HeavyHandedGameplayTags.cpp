@@ -46,4 +46,5 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Equipment_StickyBomb, "Equipment.StickyBomb");
 	UE_DEFINE_GAMEPLAY_TAG(Equipment_Decoy,      "Equipment.Decoy");
 	UE_DEFINE_GAMEPLAY_TAG(Equipment_MedKit,     "Equipment.MedKit");
+	UE_DEFINE_GAMEPLAY_TAG(Equipment_Drone,      "Equipment.Drone");
 }

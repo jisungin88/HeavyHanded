@@ -188,4 +188,7 @@ namespace HHTags
 
 	/** 응급 키트. 던져서 다운된 동료를 즉시 일으킨다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_MedKit);
+
+	/** 정찰 드론. 던져 놓으면 떠올라 조종하고, 그 시점으로 잠긴 스테이지 안을 미리 본다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Drone);
 }

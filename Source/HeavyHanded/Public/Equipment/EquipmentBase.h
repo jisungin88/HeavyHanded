@@ -131,18 +131,24 @@ protected:
 	virtual void BeginPlay() override;
 
 	/**
-	 * 자리를 잡았다. 붙었거나 바닥에 닿았다. (모든 머신)
+	 * 자리를 잡았다. 붙었거나 바닥에 닿았다. **(서버 전용)**
 	 * 서브클래스가 여기서 '준비' 를 한다 — 폭탄이라면 퓨즈 소리를 낸다.
 	 */
 	virtual void OnDeployed(const FHitResult& Hit);
 
 	/**
-	 * 효과가 발동했다. (모든 머신)
-	 * 실제 효과는 **서버에서만** 적용할 것. 여기는 모든 머신에서 불린다.
+	 * 효과가 발동했다. **(서버 전용)**
+	 *
+	 * ⚠ 아래 세 훅은 Deploy / Activate / Finish 에서만 불리고 그 셋은 전부 서버 전용이다.
+	 * 클라이언트의 OnRep_State 는 ApplyStateEffects(연출)만 실행한다 —
+	 * 2026-09-11 까지 이 주석이 "(모든 머신)" 이라고 잘못 적혀 있었다.
+	 *
+	 * 그래서 **클라이언트에서 무언가를 해야 하는 장비는 자기 상태를 따로 복제해야 한다.**
+	 * ADrone 이 bFlightActive 를 복제해 조종사의 화면에서 시점을 가져가는 것이 그 예다.
 	 */
 	virtual void OnActivated();
 
-	/** 효과가 끝났다. (모든 머신) */
+	/** 효과가 끝났다. **(서버 전용 — OnActivated 주석을 볼 것)** */
 	virtual void OnSpent();
 
 	/** BP 확장점. C++ 가상 함수로 부족할 때만 쓴다 */
@@ -358,6 +364,14 @@ protected:
 
 	/** 지금 상태를 바꾼다. 서버 전용이고, 값이 실제로 달라졌을 때만 일한다 */
 	void SetEquipmentState(EEquipmentState NewState);
+
+	/**
+	 * 효과를 예정보다 일찍 끝낸다. EffectDuration 타이머를 지우고 Spent 로 넘어간다. (서버 전용)
+	 *
+	 * 드론이 이걸 쓴다 — 준비 시간이 끝나면 남은 시간과 무관하게 조종을 끊어야 한다.
+	 * Active 가 아니면 아무 일도 하지 않는다.
+	 */
+	void FinishEffectEarly();
 
 private:
 	UFUNCTION()

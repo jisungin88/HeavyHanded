@@ -455,6 +455,20 @@ void AEquipmentBase::Activate()
 	}
 }
 
+void AEquipmentBase::FinishEffectEarly()
+{
+	if (!HasAuthority() || State != EEquipmentState::Active)
+	{
+		return;
+	}
+
+	// 타이머를 먼저 지운다. 남겨 두면 Spent 가 된 뒤에 Finish 가 한 번 더 돌고,
+	// 그쪽은 State 검사로 조용히 빠져나가서 무해하지만 흔적이 남지 않아 헷갈린다.
+	GetWorldTimerManager().ClearTimer(EffectTimer);
+
+	Finish();
+}
+
 void AEquipmentBase::Finish()
 {
 	if (!HasAuthority() || State != EEquipmentState::Active)
