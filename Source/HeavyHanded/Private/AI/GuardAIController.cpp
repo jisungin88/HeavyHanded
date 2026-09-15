@@ -517,6 +517,7 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 		bWorldAlertSpeedUp = false;
 		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
 		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
 
 		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 경계도 감소 - Pawn = %s | Alert = %.1f | Speed = %.1f"),
@@ -524,22 +525,29 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 		return;
 	}
 
-	// 이미 이번 경계도 진입에서 속도 증가를 발동했다면 다시 발동하지 않는다.
-	if (bWorldAlertSpeedTriggered)
+	// 아직 이번 경계도 구간에서 속도 증가가 발동되지 않았다면 속도를 증가시킨다.
+	if (!bWorldAlertSpeedTriggered)
 	{
-		return;
+		bWorldAlertSpeedTriggered = true;
+		bWorldAlertSpeedUp = true;
+
+		const float NewMoveSpeed = NormalMoveSpeed * WorldAlertMoveSpeedMultiplier;
+		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
+
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | Speed = %.1f | SilenceTimer = %.1f sec"),
+			*PossessGuardPawn->GetName(), WorldAlertLevel, NewMoveSpeed, WorldAlertSilenceDelay);
+	}
+	// 경계도가 올라올 때마다 무소음 타이머를 다시 시작한다.
+	if (bWorldAlertSpeedUp)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceDebugTimerHandle, this, &AGuardAIController::LogWorldAlertSilenceRemaining, 1.0f, true);
 	}
 
-	bWorldAlertSpeedTriggered = true;
-	bWorldAlertSpeedUp = true;
-
-	const float NewMoveSpeed = NormalMoveSpeed * WorldAlertMoveSpeedMultiplier;
-	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
-
-	GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
-
-	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | Speed = %.1f | SilenceTimer = %.1f sec"), *PossessGuardPawn->GetName(), WorldAlertLevel, NewMoveSpeed, WorldAlertSilenceDelay);
-
+	PreviousWorldAlertLevel = WorldAlertLevel;
 
 	/*
 	if (!PossessGuardPawn)

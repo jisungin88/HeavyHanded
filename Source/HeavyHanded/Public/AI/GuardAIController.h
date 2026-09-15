@@ -184,6 +184,8 @@ private:
 	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
 	FTimerHandle WorldAlertSilenceDebugTimerHandle;
 
+	// 게이지가 올라갈 때만 리셋 위함
+	float PreviousWorldAlertLevel = 0.0f;
 
 	// 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
 	// 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
