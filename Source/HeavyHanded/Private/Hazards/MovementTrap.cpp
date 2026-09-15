@@ -130,6 +130,8 @@ void AMovementTrap::ReleaseTarget(TWeakObjectPtr<ABaseCharacter> TargetPtr)
 	{
 		Movement->SetMovementMode(MOVE_Walking);
 	}
+
+	Multicast_PlayReleaseEffect();
 }
 
 void AMovementTrap::Rearm()
@@ -167,4 +169,18 @@ void AMovementTrap::Multicast_PlayTriggerEffect_Implementation()
 
 	// 판정은 끝났다. 턱이 맞물리는 등 메시 자체가 움직이는 연출은 BP 몫이다 (헤더 주석 참고)
 	OnTrapVisualTrigger();
+}
+
+void AMovementTrap::Multicast_PlayReleaseEffect_Implementation()
+{
+	const UWorld* World = GetWorld();
+
+	// 데디케이티드 서버는 화면도 스피커도 없다 (Multicast_PlayTriggerEffect 와 동일 사유)
+	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 판정은 끝났다. 턱이 다시 벌어지는 등 OnTrapVisualTrigger 를 되돌리는 연출은 BP 몫이다
+	OnTrapVisualReset();
 }

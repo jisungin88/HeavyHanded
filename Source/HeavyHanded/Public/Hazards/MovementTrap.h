@@ -108,11 +108,26 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|Visual")
 	void OnTrapVisualTrigger();
 
+	/**
+	 * 풀려나는 순간(ImmobilizeDuration 경과, ReleaseTarget) 호출된다 —
+	 * Multicast_PlayReleaseEffect 안에서 불리므로 모든 머신(데디케이티드 서버 제외)에서
+	 * 실행된다. 덫의 턱이 다시 벌어지는 등 OnTrapVisualTrigger 를 되돌리는 연출은
+	 * 여기서 만든다(Timeline 을 Reverse 하는 식). 판정은 이미 끝난 뒤라 게임 상태를
+	 * 바꾸지 않는다.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|Visual")
+	void OnTrapVisualReset();
+
 private:
 	/** 걸리는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayTriggerEffect();
 	void Multicast_PlayTriggerEffect_Implementation();
+
+	/** 풀려나는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_PlayReleaseEffect();
+	void Multicast_PlayReleaseEffect_Implementation();
 
 	/** ImmobilizeDuration 뒤 호출돼 이동을 되돌린다 */
 	void ReleaseTarget(TWeakObjectPtr<ABaseCharacter> TargetPtr);
