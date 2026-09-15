@@ -363,6 +363,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 		return;
 	}
 
+	constexpr float CharacterDebugOffset = 50.0f;
+
 	const int32 ArcSegments = 24;
 	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
 
@@ -389,7 +391,14 @@ void UGuardSightAComponent::DrawSightDebug() const
 		FHitResult Hit;
 		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
 
-		const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+		float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+		const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+		if (bHitCharacter)
+		{
+			VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
 
 		const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 		const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
@@ -409,13 +418,10 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 		if (bBlocked)
 		{
-			DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
-		}
+			const FVector RedStart = bHitCharacter ? Hit.Location + Direction * CharacterDebugOffset : Hit.Location;
 
-		//if (bBlocked && (Index == 0 || Index == ArcSegments))
-		//{
-		//	DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
-		//}
+			DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
 
 		PreviousGreenPoint = GreenPoint;
 		bHasPreviousGreenPoint = true;
@@ -450,8 +456,21 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
 		const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
 
-		const float UpVisibleDistance = bUpBlocked ? FVector::Distance(Origin, UpHit.Location) : LoseSightRadius;
-		const float DownVisibleDistance = bDownBlocked ? FVector::Distance(Origin, DownHit.Location) : LoseSightRadius;
+		float UpVisibleDistance = bUpBlocked ? FVector::Distance(Origin, UpHit.Location) : LoseSightRadius;
+		float DownVisibleDistance = bDownBlocked ? FVector::Distance(Origin, DownHit.Location) : LoseSightRadius;
+
+		const bool bUpHitCharacter = bUpBlocked && UpHit.GetActor() && UpHit.GetActor()->IsA<ACharacter>();
+		const bool bDownHitCharacter = bDownBlocked && DownHit.GetActor() && DownHit.GetActor()->IsA<ACharacter>();
+
+		if (bUpHitCharacter)
+		{
+			UpVisibleDistance = FMath::Min(UpVisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
+
+		if (bDownHitCharacter)
+		{
+			DownVisibleDistance = FMath::Min(DownVisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
 
 		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
 		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
@@ -471,130 +490,18 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 		if (bUpBlocked)
 		{
-			DrawDebugLine(World, UpHit.Location, UpTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			const FVector RedStart = bUpHitCharacter ? UpHit.Location + UpDirection * CharacterDebugOffset : UpHit.Location;
+
+			DrawDebugLine(World, RedStart, UpTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
 		}
 
 		if (bDownBlocked)
 		{
-			DrawDebugLine(World, DownHit.Location, DownTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			const FVector RedStart = bDownHitCharacter ? DownHit.Location + DownDirection * CharacterDebugOffset : DownHit.Location;
+
+			DrawDebugLine(World, RedStart, DownTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
 		}
 	}
-
-	/*
-	// ========================================================
-	// 수직 시야 외곽
-	// ========================================================
-
-	FVector PreviousUpGreenPoint = FVector::ZeroVector;
-	FVector PreviousDownGreenPoint = FVector::ZeroVector;
-	FVector PreviousUpYellowPoint = FVector::ZeroVector;
-	FVector PreviousDownYellowPoint = FVector::ZeroVector;
-
-	bool bHasPreviousUpGreenPoint = false;
-	bool bHasPreviousDownGreenPoint = false;
-	bool bHasPreviousUpYellowPoint = false;
-	bool bHasPreviousDownYellowPoint = false;
-
-	for (int32 Index = 0; Index <= ArcSegments; ++Index)
-	{
-		const float Alpha = static_cast<float>(Index) / ArcSegments;
-		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
-
-		const FVector HorizontalDirection = Forward.RotateAngleAxis(Angle, Up);
-
-		const FVector UpDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-		const FVector DownDirection = (HorizontalDirection * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
-
-		// 상단
-		{
-			const FVector TraceEnd = Origin + UpDirection * LoseSightRadius;
-
-			FHitResult Hit;
-			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
-
-			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
-
-			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
-			const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
-
-			const FVector GreenPoint = Origin + UpDirection * GreenDistance;
-			const FVector YellowPoint = Origin + UpDirection * YellowDistance;
-
-			if (bHasPreviousUpGreenPoint)
-			{
-				DrawDebugLine(World, PreviousUpGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 2.0f);
-			}
-
-			if (VisibleDistance > SightRadius && bHasPreviousUpYellowPoint)
-			{
-				DrawDebugLine(World, PreviousUpYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 2.0f);
-			}
-
-			if (bBlocked)
-			{
-				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
-			}
-
-			PreviousUpGreenPoint = GreenPoint;
-			bHasPreviousUpGreenPoint = true;
-
-			if (VisibleDistance > SightRadius)
-			{
-				PreviousUpYellowPoint = YellowPoint;
-				bHasPreviousUpYellowPoint = true;
-			}
-			else
-			{
-				bHasPreviousUpYellowPoint = false;
-			}
-		}
-
-		// 하단
-		{
-			const FVector TraceEnd = Origin + DownDirection * LoseSightRadius;
-
-			FHitResult Hit;
-			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
-
-			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
-
-			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
-			const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
-
-			const FVector GreenPoint = Origin + DownDirection * GreenDistance;
-			const FVector YellowPoint = Origin + DownDirection * YellowDistance;
-
-			if (bHasPreviousDownGreenPoint)
-			{
-				DrawDebugLine(World, PreviousDownGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 2.0f);
-			}
-
-			if (VisibleDistance > SightRadius && bHasPreviousDownYellowPoint)
-			{
-				DrawDebugLine(World, PreviousDownYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 2.0f);
-			}
-
-			if (bBlocked)
-			{
-				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
-			}
-
-			PreviousDownGreenPoint = GreenPoint;
-			bHasPreviousDownGreenPoint = true;
-
-			if (VisibleDistance > SightRadius)
-			{
-				PreviousDownYellowPoint = YellowPoint;
-				bHasPreviousDownYellowPoint = true;
-			}
-			else
-			{
-				bHasPreviousDownYellowPoint = false;
-			}
-		}
-	}
-
-	*/
 
 	// ========================================================
 	// 수평 좌우 경계
@@ -611,7 +518,15 @@ void UGuardSightAComponent::DrawSightDebug() const
 			FHitResult Hit;
 			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
 
-			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+			if (bHitCharacter)
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+			}
+
 			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 
 			DrawDebugLine(World, Origin, Origin + LeftDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
@@ -623,7 +538,9 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 			if (bBlocked)
 			{
-				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+				const FVector RedStart = bHitCharacter ? Hit.Location + LeftDirection * CharacterDebugOffset : Hit.Location;
+
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
 			}
 		}
 
@@ -634,7 +551,15 @@ void UGuardSightAComponent::DrawSightDebug() const
 			FHitResult Hit;
 			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
 
-			const float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+			if (bHitCharacter)
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+			}
+
 			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 
 			DrawDebugLine(World, Origin, Origin + RightDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
@@ -646,11 +571,12 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 			if (bBlocked)
 			{
-				DrawDebugLine(World, Hit.Location, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+				const FVector RedStart = bHitCharacter ? Hit.Location + RightDirection * CharacterDebugOffset : Hit.Location;
+
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
 			}
 		}
 	}
-
 }
 
 

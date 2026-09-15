@@ -15,6 +15,7 @@ class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 
 class AActor;
+class AGuardCharacter;
 
 
 ///DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
@@ -99,7 +100,8 @@ private:
 
 	// 수직 시야 판정 함수
 	bool IsWithinVerticalVisionAngle(AActor* TargetActor) const;
-	
+
+
 
 
 	//public:
@@ -110,6 +112,5 @@ private:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	
 
 };

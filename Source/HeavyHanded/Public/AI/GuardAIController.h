@@ -104,11 +104,6 @@ private:
 	UPROPERTY(BlueprintReadOnly, Category = "Perception", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
-	// 캐릭터로 이동. 삭제
-	/// // OnPossess 때 빙의한 폰에서 가져와 바인딩해 둔다. HandlePerceptionFull 에서 ResetPerception 에 쓴다
-	/// UPROPERTY()
-	/// TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
-
 
 protected:
 
@@ -117,9 +112,6 @@ protected:
 	// 마지막 소음 지점으로 조사를 시작하도록 Blackboard를 갱신하고 게이지를 리셋한다.
 	UFUNCTION()
 	void HandlePerceptionFull(FVector LastNoiseLocation);
-
-	//UFUNCTION()
-	//void HandlePerceptionChanged(float NewPerception01);
 
 public:
 
@@ -146,14 +138,52 @@ public:
 
 
 	// World Alert (월드 경계도)
-	// ========================================================
+	// ==================================================================================
 
 public:
-	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반).
+	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반)
 	// BTDecorator_CheckWorldAlert 등이 참조.
 	float GetWorldAlertLevel() const;
 
-	// ========================================================
+	// 현재 월드 경계도에 따라 경비의 이동 속도를 갱신한다.
+	// 임계값을 넘으면 경계 속도를 적용하고, 다시 내려가면 기본 속도로 복구한다.
+	UFUNCTION() // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
+	void UpdateMoveSpeedByWorldAlert(float NewGauge01);
+
+	UFUNCTION() // 타이머 만료 함수
+	void HandleWorldAlertSilenceTimeout();
+
+private:
+
+	// 월드 경계도가 이 값 이상이면 경비가 추적 속도로 이동한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertSpeedThreshold = 34.0f;
+
+	// 월드 경계도가 임계값 이상일 때 기본 이동 속도에 적용할 증가율.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertMoveSpeedMultiplier = 1.3f;
+
+	// GuardStats DataTable에서 적용한 기본 이동 속도.
+	// 월드 경계도가 다시 내려가면 이 속도로 복구한다.
+	float NormalMoveSpeed = 0.0f;
+
+	// 현재 월드 경계도에 의해 가속된 상태인지 여부.
+	// 상태가 실제로 변경될 때만 이동 속도를 갱신하기 위해 사용한다.
+	bool bWorldAlertSpeedUp = false;
+
+	// 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
+	bool bWorldAlertSpeedTriggered = false;
+
+	// 경계도 속도 증가 상태를 해제하기 위한 무소음 타이머.
+	FTimerHandle WorldAlertSilenceTimerHandle;
+
+	// 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
+	// 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertSilenceDelay = 5.0f;
+
+
+	// ==================================================================================
 
 
 

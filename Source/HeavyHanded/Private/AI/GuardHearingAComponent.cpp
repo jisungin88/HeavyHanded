@@ -56,6 +56,11 @@ void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent
 	}
 }
 
+/*
+GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+*/
+
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
 

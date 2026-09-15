@@ -94,8 +94,8 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 	}
 
 	//+ 0910 디버그용 
-	UE_LOG(LogTemp, Warning, TEXT("[Perception] Noise Heard | Strength=%.2f | Before=%.2f | Gain=%.2f | Add=%.2f"),
-		Stimulus.Strength, Perception01, GainPerStimulus, Stimulus.Strength * GainPerStimulus);
+	//UE_LOG(LogTemp, Warning, TEXT("[Perception] Noise Heard | Strength=%.2f | Before=%.2f | Gain=%.2f | Add=%.2f"),
+	//	Stimulus.Strength, Perception01, GainPerStimulus, Stimulus.Strength * GainPerStimulus);
 
 
 	LastNoiseLocation     = Stimulus.Location;
@@ -123,8 +123,8 @@ void UPerceptionMeterComponent::SetPerception(float NewValue)
 	const float Clamped = FMath::Clamp(NewValue, 0.f, 1.f);
 
 	//+ 0910 디버그용
-	UE_LOG(LogTemp, Warning, TEXT("[Perception] SetPerception | New=%.2f | Clamped=%.2f | Current=%.2f | Threshold=%.2f"),
-		NewValue, Clamped, Perception01, PerceptionFullThreshold);
+	//UE_LOG(LogTemp, Warning, TEXT("[Perception] SetPerception | New=%.2f | Clamped=%.2f | Current=%.2f | Threshold=%.2f"),
+		//NewValue, Clamped, Perception01, PerceptionFullThreshold);
 
 
 	if (Clamped == Perception01)

@@ -108,6 +108,11 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 	// --------------------------------------------------------------------------------------------
 
+	if (UAlertComponent* Alert = UAlertComponent::Get(this))
+	{
+		Alert->OnAlertGaugeChanged.AddDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+	}
+
 
 	// PerceptionComp 넘겨주기 (추후 수정 필요)
 	GuardSightComp->InitializeSightPerception(PerceptionComp);
@@ -347,6 +352,14 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 	}
 
+	// 경계값 일정 이상일 시 무소음 타이머
+	if (bWorldAlertSpeedUp) {
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 소음 재발생 - 타이머 리셋 : Noise Reported | SilenceTimer Reset | Restart=%.1f sec"),WorldAlertSilenceDelay);
+	}
+
+
 	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
 	// ReportPursuitStarted() 와는 별개 카운터라 추격 횟수와 섞이지 않는다.
 	if (UAlertComponent* Alert = UAlertComponent::Get(this))
@@ -403,7 +416,12 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 	}
 
 
-	PossessGuardPawn->SetGuardMoveSpeed(Row->MoveSpeed);
+
+	// DataTable에서 설정한 이동 속도를 기본 속도로 저장한다.
+	NormalMoveSpeed = Row->MoveSpeed;
+	PossessGuardPawn->SetGuardMoveSpeed(NormalMoveSpeed);
+
+
 	PossessGuardPawn->SetHeadGaugeUpdateInterval(Row->HeadGaugeUpdateInterval);
 
 	GuardPatrolComp->SetPatrolStats(Row->PatrolArrivalRadius, Row->SearchSweepCount, Row->SearchSweepRadius);
@@ -469,6 +487,111 @@ float AGuardAIController::GetWorldAlertLevel() const
 
 	// GameState 에 아직 컴포넌트가 없다(리슨 서버 시작 직후 등). 경계도 0 으로 취급.
 	return 0.f;
+}
+
+void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
+{
+	if (!PossessGuardPawn)
+	{
+		return;
+	}
+
+	// 현재 월드 경계도를 0~100 퍼센트 값으로 가져온다.
+	const float WorldAlertLevel = GetWorldAlertLevel();
+
+	// 경계도가 설정된 임계값 이상이면 속도 증가 조건이다.
+	const bool bShouldSpeedUp = WorldAlertLevel >= WorldAlertSpeedThreshold;
+
+	// 경계도가 임계값 아래로 내려가면 다음 진입에서 다시 속도를 증가시킬 수 있도록 초기화한다.
+	if (!bShouldSpeedUp)
+	{
+		bWorldAlertSpeedTriggered = false;
+
+		if (!bWorldAlertSpeedUp)
+		{
+			return;
+		}
+
+		bWorldAlertSpeedUp = false;
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
+
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 경계도 감소 - Pawn = %s | Alert = %.1f | Speed = %.1f"),
+			*PossessGuardPawn->GetName(), WorldAlertLevel, NormalMoveSpeed);
+		return;
+	}
+
+	// 이미 이번 경계도 진입에서 속도 증가를 발동했다면 다시 발동하지 않는다.
+	if (bWorldAlertSpeedTriggered)
+	{
+		return;
+	}
+
+	bWorldAlertSpeedTriggered = true;
+	bWorldAlertSpeedUp = true;
+
+	const float NewMoveSpeed = NormalMoveSpeed * WorldAlertMoveSpeedMultiplier;
+	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
+
+	GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+
+	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | Speed = %.1f | SilenceTimer = %.1f sec"), *PossessGuardPawn->GetName(), WorldAlertLevel, NewMoveSpeed, WorldAlertSilenceDelay);
+
+
+	/*
+	if (!PossessGuardPawn)
+	{
+		return;
+	}
+
+	// 현재 월드 경계도를 0~100 퍼센트 값으로 가져온다.
+	const float WorldAlertLevel = GetWorldAlertLevel();
+
+	// 경계도가 설정된 임계값 이상이면 경비를 가속한다.
+	const bool bShouldSpeedUp = WorldAlertLevel >= WorldAlertSpeedThreshold;
+
+	// 이미 같은 속도 상태라면 불필요한 이동 속도 갱신을 하지 않는다.
+	if (bWorldAlertSpeedUp == bShouldSpeedUp)
+	{
+		return;
+	}
+
+	bWorldAlertSpeedUp = bShouldSpeedUp;
+
+	// 경계도 임계값에 진입하면 속도를 증가시키고 무소음 타이머를 시작한다.
+	if (bShouldSpeedUp)
+	{
+		const float NewMoveSpeed = NormalMoveSpeed * WorldAlertMoveSpeedMultiplier;
+		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
+
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | Speed = %.1f | SilenceTimer = %.1f sec"), *PossessGuardPawn->GetName(), WorldAlertLevel, NewMoveSpeed, WorldAlertSilenceDelay);
+		return;
+	}
+
+	// 경계도가 임계값 아래로 내려가면 타이머를 취소하고 기본 속도로 복구한다.
+	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
+
+	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 경계도 감소 - Pawn = %s | Alert = %.1f | Speed = %.1f"), *PossessGuardPawn->GetName(), WorldAlertLevel, NormalMoveSpeed);
+
+	*/
+
+}
+
+void AGuardAIController::HandleWorldAlertSilenceTimeout()
+{
+	if (!PossessGuardPawn || !bWorldAlertSpeedUp)
+	{
+		return;
+	}
+
+	bWorldAlertSpeedUp = false;
+	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
+
+	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 무소음 타이머 완료 : Silence Timeout | Pawn = %s | Speed Down | Speed = %.1f"),
+		*PossessGuardPawn->GetName(), NormalMoveSpeed);
 }
 
 float AGuardAIController::GetDetectionGaugePercent() const
