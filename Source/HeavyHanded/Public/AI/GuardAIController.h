@@ -153,6 +153,10 @@ public:
 	UFUNCTION() // 타이머 만료 함수
 	void HandleWorldAlertSilenceTimeout();
 
+
+	UFUNCTION() // 디버그용
+	void LogWorldAlertSilenceRemaining();
+
 private:
 
 	// 월드 경계도가 이 값 이상이면 경비가 추적 속도로 이동한다.
@@ -177,10 +181,14 @@ private:
 	// 경계도 속도 증가 상태를 해제하기 위한 무소음 타이머.
 	FTimerHandle WorldAlertSilenceTimerHandle;
 
+	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
+	FTimerHandle WorldAlertSilenceDebugTimerHandle;
+
+
 	// 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
 	// 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
-	float WorldAlertSilenceDelay = 5.0f;
+	float WorldAlertSilenceDelay = 20.0f;
 
 
 	// ==================================================================================
