@@ -5,10 +5,14 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameplayEffect.h"      // UGameplayEffect 완전한 타입 — TSubclassOf 의 StaticClass() 호출에 필요하다
 #include "Hazards/HazardLog.h"
+#include "Kismet/GameplayStatics.h"
 
 APuddle::APuddle()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	// Multicast_PlayEnterSound 를 쓰려면 복제 액터여야 한다 (AMovementTrap 과 동일 사유)
+	bReplicates = true;
 
 	PuddleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PuddleMesh"));
 	SetRootComponent(PuddleMesh);
@@ -65,6 +69,8 @@ void APuddle::OnZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 
 	Target->ApplyGameplayEffectToSelf(SlowEffectClass);
 
+	Multicast_PlayEnterSound();
+
 	UE_LOG(LogHazard, Log, TEXT("[Puddle:%s] %s 진입 — 감속 적용"), *GetName(), *Target->GetName());
 }
 
@@ -85,4 +91,20 @@ void APuddle::OnZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor*
 	Target->RemoveGameplayEffectFromSelf(SlowEffectClass);
 
 	UE_LOG(LogHazard, Log, TEXT("[Puddle:%s] %s 이탈 — 감속 해제"), *GetName(), *Target->GetName());
+}
+
+void APuddle::Multicast_PlayEnterSound_Implementation()
+{
+	const UWorld* World = GetWorld();
+
+	// 데디케이티드 서버는 화면도 스피커도 없다 (AMovementTrap::Multicast_PlayTriggerEffect 와 동일 사유)
+	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (IsValid(EnterSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(World, EnterSound, GetActorLocation());
+	}
 }

@@ -99,6 +99,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> TriggerSound;
 
+	/** 풀려나는 순간(ImmobilizeDuration 경과) 재생되는 소리. TriggerSound 와 짝을 이룬다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
+	TObjectPtr<USoundBase> ReleaseSound;
+
 	/**
 	 * 걸리는 순간 호출된다 — Multicast_PlayTriggerEffect 안에서 불리므로 모든 머신
 	 * (데디케이티드 서버 제외)에서 실행된다. 덫의 턱이 맞물리는 것처럼 메시 자체가

@@ -181,6 +181,11 @@ void AMovementTrap::Multicast_PlayReleaseEffect_Implementation()
 		return;
 	}
 
+	if (IsValid(ReleaseSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(World, ReleaseSound, GetActorLocation());
+	}
+
 	// 판정은 끝났다. 턱이 다시 벌어지는 등 OnTrapVisualTrigger 를 되돌리는 연출은 BP 몫이다
 	OnTrapVisualReset();
 }
