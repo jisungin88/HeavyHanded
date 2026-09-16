@@ -194,6 +194,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
 	bool TryDepartToSite(const FGameplayTag& SiteTag);
 
+	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
+	bool TryDepartToNextSite();
+
 	// ── 수명 경계 ──
 
 	/**

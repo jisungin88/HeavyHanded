@@ -484,6 +484,38 @@ bool URunProgressSubsystem::TryDepartToSite(const FGameplayTag& SiteTag)
 	return true;
 }
 
+bool URunProgressSubsystem::TryDepartToNextSite()
+{
+	if (!EnsureServerAuthority(TEXT("TryDepartToNextSite")))
+	{
+		return false;
+	}
+
+	const FGameplayTag NextSite = GetNextSite();
+	if (!NextSite.IsValid())
+	{
+		if (IsCampaignComplete())
+		{
+			UE_LOG(LogHeist, Log,
+			       TEXT("출발하지 않습니다 — 장소 %d곳을 모두 통과했습니다. 최종 성공."),
+			       GetClearedSiteNum());
+		}
+		else
+		{
+			UE_LOG(LogHeist, Warning,
+			       TEXT("출발 실패 — 캠페인 순서가 비어 있습니다. "
+				       "Project Settings → Game → Heist → Site Levels 를 채우세요."));
+		}
+
+		return false;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 — %s (통과 %d곳)"),
+	       *NextSite.ToString(), GetClearedSiteNum());
+
+	return TryDepartToSite(NextSite);
+}
+
 bool URunProgressSubsystem::TrySelectEntry(const FGameplayTag& EntryTag)
 {
 	if (!EnsureServerAuthority(TEXT("TrySelectEntry")))

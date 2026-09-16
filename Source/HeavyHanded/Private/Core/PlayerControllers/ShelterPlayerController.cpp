@@ -4,6 +4,9 @@
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
 #include "Core/HeistLog.h"   // 직업 확정 → 역할 기록 → 폰 스폰을 한 카테고리로 따라간다
 #include "Core/RunProgressSubsystem.h"
+#include "Core/HeistSettings.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/GameStateBase.h"
 
 #include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h"
@@ -656,71 +659,74 @@ void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
 
 void AShelterPlayerController::IngameTravel()
 {
-
-
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
+	if (!HasAuthority())
 	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 요청 무시 — 호스트만 시작할 수 있습니다."));
 		return;
 	}
 
-
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-	if (!Subsystem)
+	UWorld* World = GetWorld();
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!World || !Run)
 	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 실패 — 월드 또는 URunProgressSubsystem 이 없습니다."));
 		return;
 	}
 
-
-	// 로딩창 띄우기
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	// ── 갈 곳 확인 ──
+	const FGameplayTag NextSite = Run->GetNextSite();
+	if (!NextSite.IsValid())
 	{
-		AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get());
+		if (Run->IsCampaignComplete())
+		{
+			UE_LOG(LogHeist, Log,
+			       TEXT("출발하지 않습니다 — 전 장소를 통과했습니다. 최종 성공 처리는 UI 몫입니다."));
+		}
+		else
+		{
+			UE_LOG(LogHeist, Warning,
+			       TEXT("출발 실패 — 등록된 장소가 없습니다. "
+				       "Project Settings → Game → Heist → Site Levels 를 채우세요."));
+		}
+		return;
+	}
 
-		if (PC)
+	if (UHeistSettings::Get()->GetSiteLevel(NextSite).IsNull())
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("출발 실패 — %s 의 레벨이 비어 있습니다. Site Levels 항목의 Level 을 지정하세요."),
+		       *NextSite.ToString());
+		return;
+	}
+
+	// ── 명단 확정 ──
+	TArray<FUniqueNetIdRepl> Roster;
+
+	if (const AGameStateBase* GS = World->GetGameState())
+	{
+		Roster.Reserve(GS->PlayerArray.Num());
+
+		for (const APlayerState* PS : GS->PlayerArray)
+		{
+			if (IsValid(PS))
+			{
+				Roster.Add(PS->GetUniqueId());
+			}
+		}
+	}
+
+	Run->SetConfirmedRoster(Roster);
+
+	// ── 로딩창 ──
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get()))
 		{
 			PC->ClientShowStartGameWindow();
 		}
 	}
 
-
-
-	ESiteTag CurrentSite = GameState->SiteTag;
-	FGameplayTag SiteGT;
-
-	// config/Phase.ini 참고할 것
-
-
-	// 맵이 클리어 형식이라면 지금처럼 액터를 나눌 이유가 없음
-	/*
-	switch (CurrentSite)
-	{
-	case ESiteTag::Mansion:
-		// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-		break;
-
-	case ESiteTag::Museum:
-		//GameplayTagList = (Tag = "Site.Museum", DevComment = "박물관 — 목표 $120,000 / 8분. 레이저 센서, 감시 카메라")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Museum"));;
-		break;
-
-	case ESiteTag::Bank:
-		//GameplayTagList = (Tag = "Site.Bank", DevComment = "은행 — 목표 $250,000 / 9분. 압력판, 자동 셔터, 무장 경비")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Bank"));;
-		break;
-
-	default:
-		SiteGT = FGameplayTag();
-		break;
-	}
-	*/
-
-	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-
-	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
-	Subsystem->TryDepartToSite(SiteGT);
-
+	Run->TryDepartToNextSite();
 }
 
 void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)
