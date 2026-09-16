@@ -133,3 +133,19 @@ void AShelterGameMode::ChangeName(AController* Controller, const FString& NewNam
 	ENicknameError Error = ENicknameError::None;
 	TryApplyNickname(Cast<APlayerController>(Controller), NewName, Error);
 }
+
+void AShelterGameMode::HandleMatchHasStarted()
+{
+	Super::HandleMatchHasStarted();
+
+	if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+
+		Run->BeginNewRun();
+	}
+
+	if (AShelterGameState* GS = GetGameState<AShelterGameState>())
+	{
+		GS->PublishRunProgress();
+	}
+}

@@ -764,6 +764,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 		CarryOverArrests();
 		ReleaseServedSpectators();
 		RecordSiteProgress();
+
+		PublishNextSite();
 	}
 }
 
@@ -966,6 +968,24 @@ void AHeistGameMode::RecordSiteProgress()
 	// 무효 태그 경고는 서브시스템이 남긴다 — 목록을 오염시키지 않는 것이 그쪽 책임이라
 	// 판정을 여기서 한 번 더 적지 않는다
 	Run->RecordSiteCleared(SiteTag);
+}
+
+void AHeistGameMode::PublishNextSite()
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+
+	if (!GS || !Run)
+	{
+		return;
+	}
+
+	// 무효 태그면 전 장소를 통과했다는 뜻이다. 결과 화면이 "다음 목표" 대신
+	// 최종 성공을 띄우는 근거가 된다 — 여기서 폴백으로 첫 장소를 채우지 말 것
+	GS->NextSite = Run->GetNextSite();
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 게시 — %s"),
+			GS->NextSite.IsValid() ? *GS->NextSite.ToString() : TEXT("(없음 — 최종 성공)"));
 }
 
 void AHeistGameMode::CarryOverArrests()

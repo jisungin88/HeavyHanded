@@ -36,6 +36,7 @@ void AHeistGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AHeistGameState, ElapsedSeconds);
 	DOREPLIFETIME(AHeistGameState, Outcome);
 	DOREPLIFETIME(AHeistGameState, ResultConfirmedPlayers);
+	DOREPLIFETIME(AHeistGameState, NextSite);
 }
 
 AHeistGameState* AHeistGameState::Get(const UObject* WorldContext)

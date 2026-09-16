@@ -396,6 +396,23 @@ bool URunProgressSubsystem::IsCampaignComplete() const
 	return HeistCampaign::IsComplete(UHeistSettings::Get()->GetSiteOrder(), ClearedSites);
 }
 
+FRunProgressView URunProgressSubsystem::MakeProgressView() const
+{
+	const TArray<FGameplayTag> Order = UHeistSettings::Get()->GetSiteOrder();
+
+	FRunProgressView View;
+	View.TeamGold			= TeamGold;
+	View.ClearedSites		= ClearedSites;
+	View.NextSite			= HeistCampaign::GetNextSite(Order, ClearedSites);
+	View.SiteNum			= Order.Num();
+	View.ProgressNum		= HeistCampaign::GetProgress(Order, ClearedSites);
+	View.bCampaignComplete	= HeistCampaign::IsComplete(Order, ClearedSites);
+	View.ArrestedNum		= ArrestedPlayers.Num();
+
+	return View;
+}
+
+
 // ──────────────────────────────────────────────────────────────
 // 출발
 // ──────────────────────────────────────────────────────────────

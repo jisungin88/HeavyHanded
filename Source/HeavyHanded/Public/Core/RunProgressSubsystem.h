@@ -4,6 +4,7 @@
 #include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl — 값으로 보유
 #include "GameplayTagContainer.h"              // FGameplayTag — 값으로 보유
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Core/RunProgressView.h"
 #include "RunProgressSubsystem.generated.h"
 
 /**
@@ -181,6 +182,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Run|Progress")
 	bool IsCampaignComplete() const;
 
+	/** 화면에 그릴 구조체 */
+	FRunProgressView MakeProgressView() const;
 	// ── 출발 ──
 
 	/**

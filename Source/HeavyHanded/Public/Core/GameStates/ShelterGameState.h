@@ -6,6 +6,7 @@
 #include "GameFramework/GameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "GameplayTagContainer.h" // Tag 사용 위함
+#include "Core/RunProgressView.h"
 
 #include "ShelterGameState.generated.h"
 
@@ -43,6 +44,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRunProgressChanged, FRunProgressView, Progress);
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -62,12 +64,25 @@ public:
 
     void UpdateLobbyPlayerCount();
 
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Run")
+	FOnRunProgressChanged OnRunProgressChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Run")
+	const FRunProgressView& GetRunProgress() const { return RunProgress; }
+
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Run")
+	void PublishRunProgress();
+
 protected:
 
     virtual void AddPlayerState(APlayerState* PlayerState) override;
     virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RunProgress, BlueprintReadOnly, Category = "Shelter|Run")
+	FRunProgressView RunProgress;
 
+	UFUNCTION()
+	void OnRep_RunProgress();
 // --------------------------------------------------------------
 
 public:
