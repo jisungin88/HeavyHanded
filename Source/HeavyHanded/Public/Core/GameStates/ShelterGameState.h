@@ -6,11 +6,12 @@
 #include "GameFramework/GameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "GameplayTagContainer.h" // Tag 사용 위함
+#include "Core/RunProgressView.h"
 
 #include "ShelterGameState.generated.h"
 
 /**
- * 
+ *
  */
 
 
@@ -35,11 +36,6 @@ enum class ESiteTag : uint8
 // .h
 
 
-
-
-
-
-
  // Delegate 선언
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLobbyPlayerCountChanged, int32, PlayerCount);
 
@@ -47,6 +43,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart)
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRunProgressChanged, FRunProgressView, Progress);
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -66,12 +64,25 @@ public:
 
     void UpdateLobbyPlayerCount();
 
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Run")
+	FOnRunProgressChanged OnRunProgressChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Run")
+	const FRunProgressView& GetRunProgress() const { return RunProgress; }
+
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Run")
+	void PublishRunProgress();
+
 protected:
 
     virtual void AddPlayerState(APlayerState* PlayerState) override;
     virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RunProgress, BlueprintReadOnly, Category = "Shelter|Run")
+	FRunProgressView RunProgress;
 
+	UFUNCTION()
+	void OnRep_RunProgress();
 // --------------------------------------------------------------
 
 public:
@@ -85,6 +96,8 @@ public:
 	UFUNCTION()
 	void OnRep_JobStateChanged();
 
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Roster")
+	void NotifyRosterDirty();
 
 
 	// 해당 직업을 이미 누군가 선택했는지 검사
@@ -167,4 +180,17 @@ public:
 	// Replication에 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	//-----------------------닉네임
+public:
+	static constexpr int32 MinNicknameLength = 2;
+	static constexpr int32 MaxNicknameLength = 12;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	static FString SanitizeNickname(const FString& Raw);
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	static ENicknameError ValidateNicknameFormat(const FString& Clean);
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Nickname")
+	bool IsNicknameTaken(const FString& Clean, const APlayerState* Exclude) const;
 };

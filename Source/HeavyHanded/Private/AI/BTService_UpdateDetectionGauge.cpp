@@ -2,8 +2,11 @@
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AITypes.h"
+
 #include "AI/GuardBlackboardKeys.h"
 #include "AI/GuardTypes.h"
+#include "AI/GuardSightAComponent.h"
+
 #include "Alert/AlertComponent.h"
 
 UBTService_UpdateDetectionGauge::UBTService_UpdateDetectionGauge()
@@ -45,9 +48,26 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	float Delta = 0.f;
 	if (bCanSeeTarget)
 	{
+		// 0911 양안각 적용 테스트중
+		const float DistanceRate = GetDistanceRateMultiplier(*AIController, *BlackboardComp);
+		AActor* Target = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+
+		float BinocularRate = 1.f;
+
+		if (IsValid(Target))
+		{
+			if (const UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>())
+			{
+				BinocularRate = GuardSightComp->GetBinocularVisionRate(Target);
+			}
+		}
+
+		Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
+		// -------------------------------------------------------------------------
+
 		// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
 		// 플레이어가 거리를 두고 움직일 이유가 없어진다.
-		Delta = GaugeIncreaseRate * GetDistanceRateMultiplier(*AIController, *BlackboardComp) * DeltaSeconds;
+		/// Delta = GaugeIncreaseRate * GetDistanceRateMultiplier(*AIController, *BlackboardComp) * DeltaSeconds;
 	}
 	else if (!bInDecayGrace)
 	{
@@ -143,3 +163,5 @@ float UBTService_UpdateDetectionGauge::GetDistanceRateMultiplier(
 
 	return FMath::Lerp(NearRateMultiplier, FarRateMultiplier, Alpha);
 }
+
+

@@ -11,6 +11,7 @@
 
 #include "Core/HeistLog.h"
 #include "Core/HeistSettings.h"
+#include "Core/HeistCampaign.h"
 #include "Core/HeistTravel.h"
 #include "Shared/NetAuthority.h"
 
@@ -43,6 +44,29 @@ bool URunProgressSubsystem::EnsureServerAuthority(const TCHAR* Operation) const
 	UE_LOG(LogHeist, Warning,
 		TEXT("%s 무시 — 런 진행 데이터는 서버만 바꿀 수 있습니다."), Operation);
 	return false;
+}
+
+void URunProgressSubsystem::SetNickname(const FUniqueNetIdRepl& PlayerId, const FString& Nickname)
+{
+	if (!EnsureServerAuthority(TEXT("SetNickname")))
+	{
+		return;
+	}
+
+	if (!PlayerId.IsValid() || Nickname.IsEmpty())
+	{
+		UE_LOG(LogHeist, Warning, TEXT("닉네임 기록 거부 — 플레이어 또는 이름이 유효하지 않습니다."));
+		return;
+	}
+
+	Nicknames.Add(PlayerId, Nickname);
+	UE_LOG(LogHeist, Log, TEXT("닉네임 기록 — %s → %s"), *PlayerId.ToDebugString(), *Nickname);
+}
+
+FString URunProgressSubsystem::GetNickname(const FUniqueNetIdRepl& PlayerId) const
+{
+	const FString* Found = Nicknames.Find(PlayerId);
+	return Found ? *Found : FString();
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -362,6 +386,33 @@ bool URunProgressSubsystem::IsSiteCleared(FGameplayTag SiteTag) const
 	return SiteTag.IsValid() && ClearedSites.Contains(SiteTag);
 }
 
+FGameplayTag URunProgressSubsystem::GetNextSite() const
+{
+	return HeistCampaign::GetNextSite(UHeistSettings::Get()->GetSiteOrder(), ClearedSites);
+}
+
+bool URunProgressSubsystem::IsCampaignComplete() const
+{
+	return HeistCampaign::IsComplete(UHeistSettings::Get()->GetSiteOrder(), ClearedSites);
+}
+
+FRunProgressView URunProgressSubsystem::MakeProgressView() const
+{
+	const TArray<FGameplayTag> Order = UHeistSettings::Get()->GetSiteOrder();
+
+	FRunProgressView View;
+	View.TeamGold			= TeamGold;
+	View.ClearedSites		= ClearedSites;
+	View.NextSite			= HeistCampaign::GetNextSite(Order, ClearedSites);
+	View.SiteNum			= Order.Num();
+	View.ProgressNum		= HeistCampaign::GetProgress(Order, ClearedSites);
+	View.bCampaignComplete	= HeistCampaign::IsComplete(Order, ClearedSites);
+	View.ArrestedNum		= ArrestedPlayers.Num();
+
+	return View;
+}
+
+
 // ──────────────────────────────────────────────────────────────
 // 출발
 // ──────────────────────────────────────────────────────────────
@@ -431,6 +482,38 @@ bool URunProgressSubsystem::TryDepartToSite(const FGameplayTag& SiteTag)
 	World->ServerTravel(TravelURL);
 
 	return true;
+}
+
+bool URunProgressSubsystem::TryDepartToNextSite()
+{
+	if (!EnsureServerAuthority(TEXT("TryDepartToNextSite")))
+	{
+		return false;
+	}
+
+	const FGameplayTag NextSite = GetNextSite();
+	if (!NextSite.IsValid())
+	{
+		if (IsCampaignComplete())
+		{
+			UE_LOG(LogHeist, Log,
+			       TEXT("출발하지 않습니다 — 장소 %d곳을 모두 통과했습니다. 최종 성공."),
+			       GetClearedSiteNum());
+		}
+		else
+		{
+			UE_LOG(LogHeist, Warning,
+			       TEXT("출발 실패 — 캠페인 순서가 비어 있습니다. "
+				       "Project Settings → Game → Heist → Site Levels 를 채우세요."));
+		}
+
+		return false;
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 — %s (통과 %d곳)"),
+	       *NextSite.ToString(), GetClearedSiteNum());
+
+	return TryDepartToSite(NextSite);
 }
 
 bool URunProgressSubsystem::TrySelectEntry(const FGameplayTag& EntryTag)

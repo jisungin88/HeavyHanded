@@ -47,6 +47,8 @@ namespace HHTags
 	/** 결과 — 적재 목록 · 기여도 · 최다 소음 유발자 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Result);
 
+	/** 진입점 루트의 태그 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Entry);
 	// Phase.Lobby / Phase.Hideout 은 선언하지 않는다.
 	//   그 둘은 레벨 자체가 다르고 전환 수단이 ServerTravel 이라 태그로 판정할 것이 없다.
 	//   작업 레벨의 상태머신은 Prep 부터 시작한다.
@@ -109,6 +111,13 @@ namespace HHTags
 	 * 반복 발행 타이머를 켜고 끈다 (Config/Tags/State.ini 의 원래 설계 의도 그대로).
 	 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Sprinting);
+	/**
+	 * 스태미나 고갈. ABaseCharacter::OnStaminaChanged 가 Stamina<=0 을 감지하면
+	 * SprintGameplayEffectClass 를 떼고 ExhaustedGameplayEffectClass 로 이 태그를 부여한다.
+	 * 붙어 있는 동안 StartSprint/Server_ApplyGameplayEffect 양쪽에서 스프린트 재진입을 막고,
+	 * 쿨다운 타이머(ExhaustedCooldownSeconds) 만료 시 해제된다.
+	 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Exhausted);
 	/**
 	 * 밴 승차 완료. **진리원이 아니라 미러다** — 판정 근거는 GameState 의 승차 명단이고,
 	 * 태그로는 인원을 셀 수 없다. 남이 코어 루프 헤더 없이 물어볼 수 있게 두는 것이다.

@@ -2,7 +2,9 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Components/CapsuleComponent.h"   // 진입점 배치 간격을 폰 캡슐에서 끌어온다
 #include "Engine/World.h"
+#include "GameFramework/Character.h"       // 같은 이유 — 캡슐을 가진 CDO 로 캐스트한다
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
@@ -326,6 +328,96 @@ UClass* AHeistGameMode::GetDefaultPawnClassForController_Implementation(AControl
 	return Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 
+APawn* AHeistGameMode::SpawnDefaultPawnAtTransform_Implementation(
+	AController* NewPlayer, const FTransform& SpawnTransform)
+{
+	// 엔진 기본 구현과 같고 충돌 처리 하나만 다르다 (헤더 주석 참고).
+	// ChoosePlayerStart 가 전원에게 같은 진입점을 주는데 APawn 기본값이
+	// "겹치면 스폰하지 않음" 이라, 뒤에 도착한 사람만 폰이 안 생겼다
+	FActorSpawnParameters SpawnInfo;
+	SpawnInfo.Instigator = GetInstigator();
+	SpawnInfo.ObjectFlags |= RF_Transient;   // 기본 폰을 맵에 저장하지 않는다
+	SpawnInfo.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
+	if (!PawnClass)
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("%s 의 폰 클래스를 찾지 못해 스폰하지 않습니다. "
+				 "Project Settings → Game → Character 의 역할 폰 매핑을 확인하세요."),
+			*GetNameSafe(NewPlayer));
+		return nullptr;
+	}
+
+	// 진입점은 전원이 공유한다. 빈 자리를 찾아 흩어 놓지 않으면 캡슐이 서로 파묻힌다
+	FTransform PlacedTransform = SpawnTransform;
+	PlacedTransform.SetLocation(FindFreeEntrySlot(SpawnTransform.GetLocation(), PawnClass));
+
+	APawn* ResultPawn = GetWorld()->SpawnActor<APawn>(PawnClass, PlacedTransform, SpawnInfo);
+	if (!ResultPawn)
+	{
+		// 여기까지 오면 충돌이 아닌 다른 이유다 (클래스가 Abstract 라거나 월드가 정리 중이라거나).
+		// 증상이 "그 사람만 조종할 폰이 없다" 뿐이라 이유를 남기지 않으면 찾을 수 없다
+		UE_LOG(LogHeist, Error,
+			TEXT("폰 스폰 실패 — %s / %s / %s"),
+			*GetNameSafe(NewPlayer), *GetNameSafe(PawnClass),
+			*SpawnTransform.GetLocation().ToCompactString());
+	}
+
+	return ResultPawn;
+}
+
+FVector AHeistGameMode::FindFreeEntrySlot(const FVector& EntryLocation, const UClass* PawnClass) const
+{
+	const UWorld* World = GetWorld();
+
+	// 캡슐을 못 읽으면 간격의 기준이 없다. 임의의 숫자를 지어내느니 진입점 그대로 둔다 —
+	// 겹쳐도 스폰은 되고(AlwaysSpawn), 잘못된 자리로 밀어내는 것보다 낫다
+	const ACharacter* PawnCDO = PawnClass ? Cast<ACharacter>(PawnClass->GetDefaultObject()) : nullptr;
+	const UCapsuleComponent* Capsule = PawnCDO ? PawnCDO->GetCapsuleComponent() : nullptr;
+	if (!World || !Capsule)
+	{
+		return EntryLocation;
+	}
+
+	const float Radius = Capsule->GetUnscaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+
+	// 반경의 3배로 벌리면 6개 자리의 이웃 간격이 캡슐 지름보다 넓다.
+	// 최대 4인이므로 중앙 1 + 원둘레 6 이면 재접속까지 감안해도 남는다
+	const float SlotRadius = Radius * 3.f;
+	constexpr int32 RingSlots = 6;
+
+	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+	const FCollisionQueryParams Params(SCENE_QUERY_STAT(HeistEntrySlot), false);
+
+	for (int32 Slot = 0; Slot <= RingSlots; ++Slot)
+	{
+		FVector Candidate = EntryLocation;
+
+		if (Slot > 0)
+		{
+			const float Angle = (2.f * PI * (Slot - 1)) / RingSlots;
+			Candidate += FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * SlotRadius;
+		}
+
+		// ECC_Pawn 으로 본다. 다른 플레이어뿐 아니라 벽도 같이 걸러진다 —
+		// 원둘레의 한 점이 벽 안쪽일 수 있고, 그 자리에 넣으면 밖으로 튕겨 나간다
+		if (!World->OverlapBlockingTestByChannel(Candidate, FQuat::Identity, ECC_Pawn, Shape, Params))
+		{
+			return Candidate;
+		}
+	}
+
+	// 일곱 자리가 전부 막혔다. 진입점이 너무 좁다는 뜻이라 남겨 둔다
+	UE_LOG(LogHeist, Warning,
+		TEXT("진입점 %s 주변에 빈 자리가 없어 겹쳐서 스폰합니다. 진입점 주위를 넓히세요."),
+		*EntryLocation.ToCompactString());
+
+	return EntryLocation;
+}
+
 void AHeistGameMode::HandleMatchHasStarted()
 {
 	Super::HandleMatchHasStarted();
@@ -392,6 +484,8 @@ FString AHeistGameMode::InitNewPlayer(APlayerController* NewPlayerController, co
 	{
 		return ErrorMessage;
 	}
+
+	RestoreNickname(NewPlayerController, UniqueId);
 
 	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
 	if (!Run || !Run->IsArrested(UniqueId))
@@ -481,6 +575,30 @@ FHeistStartConditions AHeistGameMode::MakeStartConditions()
 	Conditions.QuietSeconds = UHeistSettings::Get()->PlayerJoinQuietSeconds;
 
 	return Conditions;
+}
+
+void AHeistGameMode::RestoreNickname(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId)
+{
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		return;
+	}
+
+	const FString SavedNick = Run->GetNickname(UniqueId);
+	if (SavedNick.IsEmpty())
+	{
+		return;
+	}
+
+	if (!NewPlayerController || !NewPlayerController->PlayerState)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("닉네임 복원 실패 — PlayerState 가 없습니다: %s"), *SavedNick);
+		return;
+	}
+
+	ChangeName(NewPlayerController, SavedNick, false);
+	UE_LOG(LogHeist, Log, TEXT("닉네임 복원 — %s"), *SavedNick);
 }
 
 void AHeistGameMode::TickStartWait()
@@ -593,6 +711,12 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 		return;
 	}
 
+	// **SetPhase() 보다 먼저 부른다.** SetPhase() 는 맨 끝에서 OnRep_CurrentPhase() 를 직접
+	// 불러 결과 화면을 그 자리에서 동기로 띄우는데, 그 화면이 GetOutcome() 을 바로 읽는다.
+	// 뒤에 두면 호스트만 FinalizeOutcome() 전의 기본값(Failure)을 읽어 무조건 실패로 나온다
+	// (클라이언트는 복제로 늦게 받아 정상이라, 호스트와 클라 결과가 어긋난다).
+	OnPhaseEntered(Phase, Reason);
+
 	const float Duration = GetPhaseDuration(Phase);
 	GS->SetPhase(Phase, Duration, Reason);
 
@@ -603,8 +727,6 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 	{
 		Timers.SetTimer(PhaseTimerHandle, this, &AHeistGameMode::HandlePhaseElapsed, Duration, false);
 	}
-
-	OnPhaseEntered(Phase, Reason);
 }
 
 void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason)
@@ -642,6 +764,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 		CarryOverArrests();
 		ReleaseServedSpectators();
 		RecordSiteProgress();
+
+		PublishNextSite();
 	}
 }
 
@@ -844,6 +968,24 @@ void AHeistGameMode::RecordSiteProgress()
 	// 무효 태그 경고는 서브시스템이 남긴다 — 목록을 오염시키지 않는 것이 그쪽 책임이라
 	// 판정을 여기서 한 번 더 적지 않는다
 	Run->RecordSiteCleared(SiteTag);
+}
+
+void AHeistGameMode::PublishNextSite()
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+
+	if (!GS || !Run)
+	{
+		return;
+	}
+
+	// 무효 태그면 전 장소를 통과했다는 뜻이다. 결과 화면이 "다음 목표" 대신
+	// 최종 성공을 띄우는 근거가 된다 — 여기서 폴백으로 첫 장소를 채우지 말 것
+	GS->NextSite = Run->GetNextSite();
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 게시 — %s"),
+			GS->NextSite.IsValid() ? *GS->NextSite.ToString() : TEXT("(없음 — 최종 성공)"));
 }
 
 void AHeistGameMode::CarryOverArrests()
@@ -1079,6 +1221,41 @@ static FAutoConsoleCommandWithWorld GPhaseShowCommand(
 	  TEXT("hh.Phase.Show"),
 	  TEXT("현재 페이즈 · 남은 시간 · 적재 금액을 찍는다. 클라이언트 창에서도 동작한다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&PhaseShowCommand),
+	  ECVF_Cheat);
+
+// 목표 금액을 채우려고 매번 실제로 노획물을 날라 밴에 싣는 것은 탈출/결과 페이즈
+// 쪽 코드를 고칠 때마다 7~9분씩 든다. 인자가 없으면 목표 금액까지 정확히 채우고,
+// 인자를 주면 그 액수만큼만 더한다(음수면 깎인다) — AddLoadedValue 를 그대로 태워서
+// LoadedEntries 를 건드리지 않는다는 점은 알아둘 것(결과 화면 적재 목록은 안 늘어난다)
+static void HeistFillValueCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("hh.Heist.FillValue 는 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Delta = Args.IsValidIndex(0)
+		? FCString::Atoi(*Args[0])
+		: GS->GetTargetValue() - GS->GetLoadedValue();
+
+	GS->AddLoadedValue(Delta);
+
+	UE_LOG(LogHeist, Log, TEXT("hh.Heist.FillValue — 적재 $%d of $%d"),
+		GS->GetLoadedValue(), GS->GetTargetValue());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GHeistFillValueCommand(
+	  TEXT("hh.Heist.FillValue"),
+	  TEXT("hh.Heist.FillValue [금액] — 적재 금액을 채운다. 인자가 없으면 목표 금액까지 바로 채운다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&HeistFillValueCommand),
 	  ECVF_Cheat);
 
 // 결과 화면(오유석)이 붙기 전까지 Result 데이터를 눈으로 확인할 유일한 수단이다.

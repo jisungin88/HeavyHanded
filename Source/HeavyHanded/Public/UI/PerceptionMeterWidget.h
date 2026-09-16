@@ -6,6 +6,7 @@
 
 class AActor;
 class UPerceptionMeterComponent;
+class UProgressBar;
 
 /**
  * 경비 머리 위 인지 게이지 (기획서 8장). WidgetComponent 에 물려 월드 스페이스로 띄운다.
@@ -43,22 +44,29 @@ public:
 	bool IsLatched() const;
 
 protected:
+
+
 	//~ UUserWidget
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	//~ End
 
-	/** 게이지 값이 바뀌었다. 원형 채우기와 보간을 여기서 한다 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Perception")
-	void OnPerceptionUpdated(float NewPerception01);
+
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (BindWidgetOptional))
+	TObjectPtr<UProgressBar> GaugeBar;
+
 
 	/** 0 에서 벗어났거나 0 으로 돌아왔다. 페이드 인/아웃을 여기서 한다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Perception")
 	void OnMeterVisibilityChanged(bool bShouldShow);
 
 private:
-	UFUNCTION()
-	void HandlePerceptionChanged(float NewPerception01);
+
+
+UFUNCTION()
+
+
+void HandlePerceptionChanged(float NewPerception01);
 
 	void Unbind();
 

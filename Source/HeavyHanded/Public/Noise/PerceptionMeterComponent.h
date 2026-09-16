@@ -55,11 +55,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Noise|Perception")
 	void SetDecayRate(float NewDecayPerSecond) { DecayPerSecond = FMath::Max(NewDecayPerSecond, 0.f); }
 
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float PerceptionFullThreshold = 1.f;
+	//float PerceptionFullThreshold = 0.5f;
+
 	UPROPERTY(BlueprintAssignable, Category = "Noise|Perception")
 	FOnPerceptionFull OnPerceptionFull;
 
 	UPROPERTY(BlueprintAssignable, Category = "Noise|Perception")
 	FOnPerceptionChanged OnPerceptionChanged;
+
+
+	UFUNCTION(BlueprintPure, Category = "Noise|Perception")
+	float GetPerceptionFullThreshold() const { return PerceptionFullThreshold; }
+
 
 protected:
 	UFUNCTION()

@@ -59,4 +59,6 @@ protected:
 	// 경비와 TargetActor 사이 거리로 상승량 계수를 구한다.
 	// 타겟을 못 찾으면 1.0(거리 보정 없음)을 돌려준다.
 	float GetDistanceRateMultiplier(const AAIController& AIController, const UBlackboardComponent& BlackboardComp) const;
+
+
 };

@@ -223,6 +223,49 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Noise", meta = (ClampMin = "0.05", Units = "s"))
 	float SprintNoiseInterval = 1.0f;
 
+	// 스태미나 고갈 시 부여할 GE — State.Exhausted 태그만 부여하고 모디파이어는 없다.
+	// SoloHeavyCarryPenaltyEffectClass 와 같은 방식으로 Apply/Remove 한다.
+	UPROPERTY(EditDefaultsOnly, Category = "GAS|Stamina")
+	TSubclassOf<class UGameplayEffect> ExhaustedGameplayEffectClass;
+
+	// 스프린트 중 Stamina 를 주기적으로 깎는 GE(Infinite, Period>0).
+	//
+	// [왜 GE_Sprint 안에 안 넣나] GameplayEffect 의 Period 는 그 GE 전체에 하나만 걸린다.
+	// GE_Sprint 는 MovementSpeed 를 Period=0(지속형)으로 계속 유지하는 방식이라, 같은 GE 에
+	// Stamina 용 Period 를 넣으면 MovementSpeed 모디파이어까지 매 틱 재적용(BaseValue 영구 가산)
+	// 방식으로 바뀌어 스프린트를 켤 때마다 이동속도가 되돌아가지 않고 계속 누적된다.
+	// 그래서 소모 전용 GE 를 따로 두고, Sprint GE 와 항상 같은 시점에 Apply/Remove 한다.
+	UPROPERTY(EditDefaultsOnly, Category = "GAS|Stamina")
+	TSubclassOf<class UGameplayEffect> StaminaDrainGameplayEffectClass;
+
+	// 고갈 후 스프린트 재진입을 막는 시간. 기획서 근거 없음, 임의값(2.5초, "2~3초" 범위).
+	UPROPERTY(EditDefaultsOnly, Category = "GAS|Stamina", meta = (ClampMin = "0.0", Units = "s"))
+	float ExhaustedCooldownSeconds = 2.5f;
+
+	// 스태미나 회복 타이머 반복 간격(초). 기획서 근거 없음, 임의값.
+	UPROPERTY(EditDefaultsOnly, Category = "GAS|Stamina", meta = (ClampMin = "0.05", Units = "s"))
+	float StaminaRegenInterval = 0.5f;
+
+	// StaminaRegenInterval 마다 회복시킬 양. 기본값은 초당 회복량 5 를 0.5초 간격으로 나눈 것.
+	UPROPERTY(EditDefaultsOnly, Category = "GAS|Stamina")
+	float StaminaRegenPerTick = 2.5f;
+
+	// State.Sprinting 이 없는 동안(스프린트 종료 즉시, 지연 없이) 돌아가는 회복 타이머.
+	FTimerHandle StaminaRegenTimerHandle;
+
+	// State.Exhausted 부여 시점에 시작해 ExhaustedCooldownSeconds 후 해제하는 타이머.
+	FTimerHandle ExhaustedCooldownTimerHandle;
+
+	// 어트리뷰트 변경 델리게이트가 부르는 콜백. OnMovementSpeedChanged 와 같은 자리에서 구독한다.
+	// Stamina 가 0 에 도달하면(서버 권위) Sprint GE 를 떼고 Exhausted GE 를 붙인다.
+	void OnStaminaChanged(const struct FOnAttributeChangeData& Data);
+
+	// StaminaRegenTimerHandle 이 반복 호출한다. 서버 권위 하에 Stamina 를 조금씩 회복시킨다.
+	void TickStaminaRegen();
+
+	// ExhaustedCooldownTimerHandle 만료 시 호출. State.Exhausted 를 해제한다.
+	void OnExhaustedCooldownExpired();
+
 public:
 	void ApplyGameplayEffectToSelf(TSubclassOf<class UGameplayEffect> EffectClass);
 	void RemoveGameplayEffectFromSelf(TSubclassOf<class UGameplayEffect> EffectClass);

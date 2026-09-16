@@ -63,6 +63,13 @@ void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 	// 새로운 직업 저장
 	SelectedJob = NewJob;
 
+	// 직업이 풀렸으면 확정도 같이 풀린다 (ClearJob / 퇴장 경로).
+	// 여기서 같이 내리지 않으면 확정 플래그만 살아남아 선택 화면을 건너뛴다
+	if (NewJob == EJobType::None)
+	{
+		SetJobConfirmed(false);
+	}
+
 	// 서버에서는 RepNotify가 자동 호출되지 않기 때문에
 	// 서버에서도 UI 갱신이 필요하다면 직접 호출
 	OnSelectedJobChanged.Broadcast(this);
@@ -77,6 +84,18 @@ void AShelterPlayerState::SetSelectedJob(EJobType NewJob)
 }
 
 
+void AShelterPlayerState::OnRep_PlayerName()
+{
+	Super::OnRep_PlayerName();
+
+	if (const UWorld* World = GetWorld())
+	{
+		if (AShelterGameState* GS = World->GetGameState<AShelterGameState>())
+		{
+			GS->NotifyRosterDirty();
+		}
+	}
+}
 
 void AShelterPlayerState::OnRep_SelectedJob()
 {
@@ -113,11 +132,59 @@ void AShelterPlayerState::OnRep_SelectedJob()
 	OnSelectedJobChanged.Broadcast(this);
 }
 
+void AShelterPlayerState::SetJobConfirmed(bool bNewConfirmed)
+{
+	// 확정 판정은 서버에서만
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (bJobConfirmed == bNewConfirmed)
+	{
+		return;
+	}
+
+	bJobConfirmed = bNewConfirmed;
+
+	// 서버에서는 RepNotify가 자동 호출되지 않으므로 호스트 UI를 위해 직접 알린다
+	OnJobConfirmedChanged.Broadcast(this);
+}
+
+void AShelterPlayerState::OnRep_JobConfirmed()
+{
+	OnJobConfirmedChanged.Broadcast(this);
+}
+
 void AShelterPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	// SelectedJob을 모든 클라이언트에 복제
 	DOREPLIFETIME(AShelterPlayerState,SelectedJob);
+	DOREPLIFETIME(AShelterPlayerState,bJobConfirmed);
+
+	DOREPLIFETIME_CONDITION(AShelterPlayerState, NicknameFeedback, COND_OwnerOnly);
+}
+
+void AShelterPlayerState::ReportNicknameError(ENicknameError Error)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	NicknameFeedback.Error = Error;
+
+	// 같은 사유로 거절이 되었을 때 값이 안바뀌면 복제가 일어나지 않음
+	// 일련번호를 반영하여 두 번째 거절에서도 화면이 뜨게 함
+	++NicknameFeedback.Seq;
+
+	OnNicknameRejected.Broadcast(Error);
+}
+
+void AShelterPlayerState::OnRep_NicknameFeedback()
+{
+	OnNicknameRejected.Broadcast(NicknameFeedback.Error);
 }
 

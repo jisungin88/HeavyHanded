@@ -4,6 +4,7 @@
 #include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl — 값으로 보유
 #include "GameplayTagContainer.h"              // FGameplayTag — 값으로 보유
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Core/RunProgressView.h"
 #include "RunProgressSubsystem.generated.h"
 
 /**
@@ -172,6 +173,17 @@ public:
 	/** 통과한 장소들. 통과한 순서대로 쌓인다 */
 	const TArray<FGameplayTag>& GetClearedSites() const { return ClearedSites; }
 
+	// ------- 캠페인 진행
+	/** 다음 장소 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	FGameplayTag GetNextSite() const;
+
+	/** 장소 통과 여부 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	bool IsCampaignComplete() const;
+
+	/** 화면에 그릴 구조체 */
+	FRunProgressView MakeProgressView() const;
 	// ── 출발 ──
 
 	/**
@@ -181,6 +193,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
 	bool TryDepartToSite(const FGameplayTag& SiteTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
+	bool TryDepartToNextSite();
 
 	// ── 수명 경계 ──
 
@@ -193,6 +208,13 @@ public:
 	/** 새 방(세션)을 연다. 팀 골드까지 포함해 전부 비운다. (서버 전용) */
 	void ResetCampaign();
 
+	//-------------닉네임
+
+	void SetNickname(const FUniqueNetIdRepl& PlayerId, const FString& Nickname);
+
+	FString GetNickname(const FUniqueNetIdRepl& PlayerId) const;
+
+
 private:
 	/** 쓰기 연산의 공통 관문. 서버가 아니면 경고를 남기고 막는다 */
 	bool EnsureServerAuthority(const TCHAR* Operation) const;
@@ -204,6 +226,9 @@ private:
 	/** 로비에서 확정된 참가자 */
 	UPROPERTY()
 	TArray<FUniqueNetIdRepl> ConfirmedRoster;
+
+	/** 플레이어별 닉네임 */
+	TMap<FUniqueNetIdRepl, FString> Nicknames;
 
 	/**
 	 * 플레이어별 선택 역할. 캠페인 단위.

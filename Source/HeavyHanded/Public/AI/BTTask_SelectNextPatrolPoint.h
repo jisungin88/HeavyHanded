@@ -4,6 +4,8 @@
 #include "BehaviorTree/BTTaskNode.h"
 #include "BTTask_SelectNextPatrolPoint.generated.h"
 
+class AGuardAIController;
+
 // AGuardAIController::SelectNextPatrolPoint()를 호출해 Blackboard의 PatrolLocation을 갱신한다.
 // Patrol 브랜치에서 Move To(PatrolLocation) 이전에 배치한다.
 UCLASS()

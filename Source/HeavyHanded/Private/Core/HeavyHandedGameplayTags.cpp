@@ -16,6 +16,8 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Escape, "Phase.Escape");
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Result, "Phase.Result");
 
+	UE_DEFINE_GAMEPLAY_TAG(Entry, "Entry");
+
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type,          "Loot.Type");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Heavy,    "Loot.Type.Heavy");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Fragile,  "Loot.Type.Fragile");
@@ -31,6 +33,7 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(State_InVan,        "State.InVan");
 	UE_DEFINE_GAMEPLAY_TAG(State_Arrested,     "State.Arrested");
 	UE_DEFINE_GAMEPLAY_TAG(State_Sprinting,    "State.Sprinting");
+	UE_DEFINE_GAMEPLAY_TAG(State_Exhausted,    "State.Exhausted");
 
 	UE_DEFINE_GAMEPLAY_TAG(Ability_HeavyCarryAssist, "Ability.HeavyCarryAssist");
 	UE_DEFINE_GAMEPLAY_TAG(Ability_Slot_Consumable,  "Ability.Slot.Consumable");

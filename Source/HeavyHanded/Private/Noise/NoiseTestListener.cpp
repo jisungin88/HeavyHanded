@@ -46,7 +46,7 @@ void ANoiseTestListener::BeginPlay()
 
 void ANoiseTestListener::HandlePerceptionFull(FVector LastNoiseLocation)
 {
-	UE_LOG(LogNoiseTest, Warning, TEXT("인지 100%% 도달 — 조사 지점 %s"), *LastNoiseLocation.ToString());
+	UE_LOG(LogNoiseTest, Warning, TEXT("청각 인지 100%% 도달 - PerceptionFull RECEIVED — 조사 지점 %s"), *LastNoiseLocation.ToString());
 
 #if ENABLE_DRAW_DEBUG
 	DrawDebugSphere(GetWorld(), LastNoiseLocation, 60.f, 12, FColor::Red, false, 5.f);

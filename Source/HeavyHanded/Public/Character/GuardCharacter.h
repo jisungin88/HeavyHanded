@@ -15,7 +15,26 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 	GENERATED_BODY()
 
 public:
+
 	AGuardCharacter();
+
+
+	// Guard Info (경비 정보)
+	// ========================================================
+	// 가드 캐릭터로 이동
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	EGuardType GuardType = EGuardType::Standard;
+
+
+
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
+	bool bEnableSight = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
+	bool bEnableHearing = true;
+
+	void SetGuardMoveSpeed(float NewMoveSpeed);
 
 	// IGenericTeamAgentInterface 기본 구현(GenericTeamAgentInterface.h)은 감지 대상 액터
 	// 자신이 이 인터페이스를 구현했는지만 보고, 그 액터의 컨트롤러까지는 확인하지 않는다.
@@ -41,8 +60,40 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
 
+
+
+
+protected:
+	virtual void BeginPlay() override;
+
+
+	void UpdatePerceptionWidgets();
+
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
+	TObjectPtr<UPerceptionMeterComponent> PerceptionMeterComponent;
+
+public:
+
 	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
-	UPerceptionMeterComponent* GetPerceptionMeter() const { return PerceptionMeter; }
+	UPerceptionMeterComponent* GetPerceptionMeterComponent() const
+	{ return PerceptionMeterComponent; }
+
+
+
+	// 위젯 관리
+protected:
+	UPROPERTY(EditAnywhere, Category = "Guard|Perception")
+	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
+
+	UPROPERTY(EditAnywhere, Category = "Guard|Perception")
+	TObjectPtr<UWidgetComponent> HearingGaugeWidgetComponent;
+
+
+
+
+public:
+
 
 	// AGuardAIController가 매 갱신마다 이 컴포넌트의 위젯(UDetectionGaugeWidget)에
 	// SetGaugePercent를 직접 호출한다. 위젯 클래스는 BP_GuardBase 등 파생 BP에서
@@ -50,10 +101,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
 	UWidgetComponent* GetDetectionGaugeWidgetComponent() const { return DetectionGaugeWidgetComponent; }
 
-protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
-	TObjectPtr<UPerceptionMeterComponent> PerceptionMeter;
+	UFUNCTION(BlueprintPure, Category = "Guard|Perception")
+	UWidgetComponent* GetHearingGaugeWidgetComponent() const { return HearingGaugeWidgetComponent; }
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception")
-	TObjectPtr<UWidgetComponent> DetectionGaugeWidgetComponent;
+
+	void SetHeadGaugeUpdateInterval(float NewInterval);
+	void StopHeadGaugeUpdate();
+//private:
+
+
+protected:
+
+	void UpdateHeadGaugeWidget();
+
+	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
+	float HeadGaugeUpdateInterval = 0.1f;
+
+	FTimerHandle HeadGaugeUpdateTimerHandle;
+
 };

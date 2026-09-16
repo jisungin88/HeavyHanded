@@ -4,11 +4,45 @@
 #include "Core/GameStates/ShelterGameState.h"
 #include "Net/UnrealNetwork.h"
 #include "GameplayTagsManager.h"
-
+#include "Core/RunProgressSubsystem.h"
+#include "Core/HeistLog.h"
+#include "HAL/IConsoleManager.h"
+#include "Shared/NetAuthority.h"
 
 int32 AShelterGameState::GetLobbyPlayerCount() const
 {
 	return PlayerArray.Num();
+}
+
+void AShelterGameState::PublishRunProgress()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run)
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("URunProgressSubsystem 이 없어 캠페인 진행을 게시하지 못했습니다."));
+		return;
+	}
+
+	RunProgress = Run->MakeProgressView();
+
+	OnRep_RunProgress();
+
+	UE_LOG(LogHeist, Log,
+	       TEXT("캠페인 진행 게시 — %d/%d 통과 / 다음 %s / 팀 골드 $%d / 구출 대기 %d명"),
+	       RunProgress.ProgressNum, RunProgress.SiteNum,
+	       RunProgress.NextSite.IsValid() ? *RunProgress.NextSite.ToString() : TEXT("(없음)"),
+	       RunProgress.TeamGold, RunProgress.ArrestedNum);
+}
+
+void AShelterGameState::OnRep_RunProgress()
+{
+	OnRunProgressChanged.Broadcast(RunProgress);
 }
 
 void AShelterGameState::AddPlayerState(APlayerState* PlayerState)
@@ -67,7 +101,6 @@ void AShelterGameState::RemovePlayerState(APlayerState* PlayerState)
 
 
 	//JobStateChanged++;
-
 }
 
 void AShelterGameState::UpdateLobbyPlayerCount()
@@ -146,8 +179,6 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	}
 
 
-
-
 	// PlayerState가 없으면 실패
 	if (!PlayerState)
 	{
@@ -171,7 +202,6 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 			-1, 10.f, FColor::Yellow, Message
 		);
 	}
-
 
 
 	// None은 선택 불가능
@@ -200,27 +230,17 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("2. GS -> SelectJob 호출"));
 
 
-
-
 	UE_LOG(LogTemp, Display,
-		TEXT("[SET JOB] PS=%p Name=%s Authority=%s Job=%s"),
-		this,
-		*GetName(),
-		HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"),
-		*UEnum::GetValueAsString(NewJob));
-
-
+	       TEXT("[SET JOB] PS=%p Name=%s Authority=%s Job=%s"),
+	       this,
+	       *GetName(),
+	       HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"),
+	       *UEnum::GetValueAsString(NewJob));
 
 
 	// 직업 변경
 	PlayerState->SetSelectedJob(NewJob);
 	UpdateCanStart();
-
-
-
-
-
-
 
 
 	// 값 자체를 변경해야 클라이언트에서 OnRep가 실행됨
@@ -229,10 +249,7 @@ bool AShelterGameState::SelectJob(AShelterPlayerState* PlayerState, EJobType New
 	OnRep_CanStart(); // 서버
 
 
-
-
 	return true;
-
 }
 
 bool AShelterGameState::ClearJob(AShelterPlayerState* PlayerState)
@@ -382,8 +399,6 @@ bool AShelterGameState::CanStartGame() const
 	}
 
 	return true;
-
-
 }
 
 void AShelterGameState::UpdateCanStart()
@@ -414,7 +429,6 @@ void AShelterGameState::UpdateCanStart()
 }
 
 
-
 void AShelterGameState::OnRep_JobStateChanged()
 {
 	if (GEngine)
@@ -425,6 +439,15 @@ void AShelterGameState::OnRep_JobStateChanged()
 	OnJobStateChanged.Broadcast();
 }
 
+void AShelterGameState::NotifyRosterDirty()
+{
+	if (HasAuthority())
+	{
+		++JobStateChanged;
+	}
+
+	OnJobStateChanged.Broadcast();
+}
 
 
 TArray<AShelterPlayerState*> AShelterGameState::GetShelterPlayerStates() const
@@ -449,7 +472,6 @@ void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
 {
 	OnJobStateChanged.Broadcast();
 }
-
 
 
 // ---------------
@@ -488,15 +510,14 @@ void AShelterGameState::SetSiteTag(ESiteTag NewTag)
 }
 
 
-
 void AShelterGameState::OnRep_EntryTag()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
 	OnTravelTagChanged.Broadcast();
 
 	UE_LOG(LogTemp, Warning, TEXT(
-		"[SiteTag] OnRep 실행 | World=%s | NetMode=%d | Tag=%d"
-	), *GetWorld()->GetName(), (int32)GetNetMode(), (int32)SiteTag);
+		       "[SiteTag] OnRep 실행 | World=%s | NetMode=%d | Tag=%d"
+	       ), *GetWorld()->GetName(), (int32)GetNetMode(), (int32)SiteTag);
 }
 
 void AShelterGameState::OnRep_SiteTag()
@@ -519,7 +540,6 @@ void AShelterGameState::DebugPrintGameplayTags()
 }
 
 
-
 void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -528,4 +548,110 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 
 	DOREPLIFETIME(AShelterGameState, SiteTag);
 	DOREPLIFETIME(AShelterGameState, EntryTag);
+
+	DOREPLIFETIME(AShelterGameState, RunProgress);
 }
+
+FString AShelterGameState::SanitizeNickname(const FString& Raw)
+{
+	const FString Trimmed = Raw.TrimStartAndEnd();
+
+	FString Result;
+	Result.Reserve(Trimmed.Len());
+	for (int32 i = 0; i < Trimmed.Len(); ++i)
+	{
+		if (Trimmed[i] >= 0x20)
+		{
+			Result.AppendChar(Trimmed[i]);
+		}
+	}
+
+	return Result;
+}
+
+ENicknameError AShelterGameState::ValidateNicknameFormat(const FString& Clean)
+{
+	if (Clean.IsEmpty())
+	{
+		return ENicknameError::Empty;
+	}
+	else if (Clean.Len() > MaxNicknameLength)
+	{
+		return ENicknameError::TooLong;
+	}
+	else if (Clean.Len() < MinNicknameLength)
+	{
+		return ENicknameError::TooShort;
+	}
+	return ENicknameError::None;
+}
+
+bool AShelterGameState::IsNicknameTaken(const FString& Clean, const APlayerState* Exclude) const
+{
+	if (Clean.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const APlayerState* PS : PlayerArray)
+	{
+		if (!PS || PS == Exclude)
+		{
+			continue;
+		}
+
+		if (PS->GetPlayerName().Equals(Clean, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void RunClearSiteCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("이 명령은 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(World);
+	if (!Run)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("URunProgressSubsystem 을 찾지 못했습니다."));
+		return;
+	}
+
+	FGameplayTag SiteTag;
+	if (Args.IsValidIndex(0))
+	{
+		SiteTag = FGameplayTag::RequestGameplayTag(FName(*Args[0]), false);
+		if (!SiteTag.IsValid())
+		{
+			return;
+		}
+	}
+	else
+	{
+		SiteTag = Run->GetNextSite();
+		if (!SiteTag.IsValid())
+		{
+			return;
+		}
+	}
+
+	Run->RecordSiteCleared(SiteTag);
+
+	if (AShelterGameState* GS = World->GetGameState<AShelterGameState>())
+	{
+		GS->PublishRunProgress();
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GRunClearSiteCommand(
+	TEXT("hh.Run.Clear"),
+	TEXT("hh.Run.Clear [Site.태그] - 장소 통과 처리, 인자를 비울 경우 지금 목표를 통과"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunClearSiteCommand),
+	ECVF_Cheat);
