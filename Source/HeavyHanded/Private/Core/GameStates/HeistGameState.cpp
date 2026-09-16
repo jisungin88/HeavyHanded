@@ -256,9 +256,11 @@ void AHeistGameState::FinalizeOutcome()
 
 	Outcome = HeistOutcome::Evaluate(IsTargetReached(), bAnyoneEscaped);
 
-	UE_LOG(LogHeist, Log, TEXT("결과 등급 %s — 적재 $%d / $%d, 탈출 %d of %d명, 소요 %.1f초"),
+	// 소요 시간은 찍지 않는다. SetPhase() 가 계산하는데 그것이 이 함수보다 나중이라
+	// 여기서는 언제나 0 이다 (AHeistGameMode::EnterPhase 의 호출 순서 주석 참고)
+	UE_LOG(LogHeist, Log, TEXT("결과 등급 %s — 적재 $%d / $%d, 탈출 %d of %d명"),
 		HeistOutcome::ToString(Outcome),
-		LoadedValue, TargetValue, EscapedNum, CountedNum, ElapsedSeconds);
+		LoadedValue, TargetValue, EscapedNum, CountedNum);
 }
 
 int32 AHeistGameState::GetContributionOf(const APlayerState* Player) const

@@ -711,6 +711,12 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 		return;
 	}
 
+	// **SetPhase() 보다 먼저 부른다.** SetPhase() 는 맨 끝에서 OnRep_CurrentPhase() 를 직접
+	// 불러 결과 화면을 그 자리에서 동기로 띄우는데, 그 화면이 GetOutcome() 을 바로 읽는다.
+	// 뒤에 두면 호스트만 FinalizeOutcome() 전의 기본값(Failure)을 읽어 무조건 실패로 나온다
+	// (클라이언트는 복제로 늦게 받아 정상이라, 호스트와 클라 결과가 어긋난다).
+	OnPhaseEntered(Phase, Reason);
+
 	const float Duration = GetPhaseDuration(Phase);
 	GS->SetPhase(Phase, Duration, Reason);
 
@@ -721,8 +727,6 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 	{
 		Timers.SetTimer(PhaseTimerHandle, this, &AHeistGameMode::HandlePhaseElapsed, Duration, false);
 	}
-
-	OnPhaseEntered(Phase, Reason);
 }
 
 void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason)
