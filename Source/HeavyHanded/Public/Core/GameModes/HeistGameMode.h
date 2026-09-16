@@ -289,4 +289,10 @@ private:
 
 	/** 탈출 판정이 다음 틱에 예약돼 있는가. 한 틱에 계기가 둘이어도 판정은 한 번이면 된다 */
 	bool bEscapeCheckQueued = false;
+
+	/**
+	  * 다음 목표를 GameState 로 실어 보낸다. **RecordSiteProgress 뒤에 부를 것** —
+	  * 앞에 부르면 이번 판의 통과가 반영되기 전 값이 나간다.
+	  */
+	void PublishNextSite();
 };
