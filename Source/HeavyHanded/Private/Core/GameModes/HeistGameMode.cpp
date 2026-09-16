@@ -1223,6 +1223,41 @@ static FAutoConsoleCommandWithWorld GPhaseShowCommand(
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&PhaseShowCommand),
 	  ECVF_Cheat);
 
+// 목표 금액을 채우려고 매번 실제로 노획물을 날라 밴에 싣는 것은 탈출/결과 페이즈
+// 쪽 코드를 고칠 때마다 7~9분씩 든다. 인자가 없으면 목표 금액까지 정확히 채우고,
+// 인자를 주면 그 액수만큼만 더한다(음수면 깎인다) — AddLoadedValue 를 그대로 태워서
+// LoadedEntries 를 건드리지 않는다는 점은 알아둘 것(결과 화면 적재 목록은 안 늘어난다)
+static void HeistFillValueCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("hh.Heist.FillValue 는 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Delta = Args.IsValidIndex(0)
+		? FCString::Atoi(*Args[0])
+		: GS->GetTargetValue() - GS->GetLoadedValue();
+
+	GS->AddLoadedValue(Delta);
+
+	UE_LOG(LogHeist, Log, TEXT("hh.Heist.FillValue — 적재 $%d of $%d"),
+		GS->GetLoadedValue(), GS->GetTargetValue());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GHeistFillValueCommand(
+	  TEXT("hh.Heist.FillValue"),
+	  TEXT("hh.Heist.FillValue [금액] — 적재 금액을 채운다. 인자가 없으면 목표 금액까지 바로 채운다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&HeistFillValueCommand),
+	  ECVF_Cheat);
+
 // 결과 화면(오유석)이 붙기 전까지 Result 데이터를 눈으로 확인할 유일한 수단이다.
 // 클라이언트 창에서도 돌아야 한다 — 복제가 실제로 갔는지가 확인의 핵심이라,
 // 서버에서만 찍으면 "서버에는 있는데 화면에 안 나온다" 를 구별할 수 없다
