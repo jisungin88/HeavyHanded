@@ -172,6 +172,15 @@ public:
 	/** 통과한 장소들. 통과한 순서대로 쌓인다 */
 	const TArray<FGameplayTag>& GetClearedSites() const { return ClearedSites; }
 
+	// ------- 캠페인 진행
+	/** 다음 장소 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	FGameplayTag GetNextSite() const;
+
+	/** 장소 통과 여부 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	bool IsCampaignComplete() const;
+
 	// ── 출발 ──
 
 	/**

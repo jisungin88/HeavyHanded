@@ -11,6 +11,7 @@
 
 #include "Core/HeistLog.h"
 #include "Core/HeistSettings.h"
+#include "Core/HeistCampaign.h"
 #include "Core/HeistTravel.h"
 #include "Shared/NetAuthority.h"
 
@@ -383,6 +384,16 @@ void URunProgressSubsystem::RecordSiteCleared(const FGameplayTag& SiteTag)
 bool URunProgressSubsystem::IsSiteCleared(FGameplayTag SiteTag) const
 {
 	return SiteTag.IsValid() && ClearedSites.Contains(SiteTag);
+}
+
+FGameplayTag URunProgressSubsystem::GetNextSite() const
+{
+	return HeistCampaign::GetNextSite(UHeistSettings::Get()->GetSiteOrder(), ClearedSites);
+}
+
+bool URunProgressSubsystem::IsCampaignComplete() const
+{
+	return HeistCampaign::IsComplete(UHeistSettings::Get()->GetSiteOrder(), ClearedSites);
 }
 
 // ──────────────────────────────────────────────────────────────

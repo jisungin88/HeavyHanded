@@ -63,8 +63,7 @@ public:
 	/**
 	 * 장소(Site.*) → 작업 레벨. **새 장소 맵을 만들면 여기 한 줄을 더한다.**
 	 *
-	 * 등록되지 않은 장소로 출발을 시도하면 떠나지 않고 경고를 남긴다 — 엉뚱한 맵을 열지 않는다.
-	 * 같은 태그를 두 번 넣으면 앞선 것이 이긴다. 막지는 않으니 넣지 말 것.
+	 * 맵이 없는 장소는 넣지 말 것.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Travel", meta = (TitleProperty = "SiteTag"))
 	TArray<FHeistSiteLevel> SiteLevels;
@@ -89,6 +88,25 @@ public:
 		}
 
 		return FSoftObjectPath();
+	}
+
+	/** 겜페인 순서
+	 * 없는 태그와 중복은 제외
+	 */
+	TArray<FGameplayTag> GetSiteOrder() const
+	{
+		TArray<FGameplayTag> Order;
+		Order.Reserve(SiteLevels.Num());
+
+		for (const FHeistSiteLevel& Entry : SiteLevels)
+		{
+			if (Entry.SiteTag.IsValid() && !Order.Contains(Entry.SiteTag))
+			{
+				Order.Add(Entry.SiteTag);
+			}
+		}
+
+		return Order;
 	}
 
 	/**
