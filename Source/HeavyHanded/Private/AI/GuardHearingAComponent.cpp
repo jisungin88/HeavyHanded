@@ -4,10 +4,14 @@
 #include "AI/GuardHearingAComponent.h"
 
 #include "Perception/AIPerceptionComponent.h"
+
+//#include "Perception/AISense_Hearing.h"
 #include "Perception/AISenseConfig_Hearing.h"
+#include "DrawDebugHelpers.h"
 
-
-#include "AIController.h"
+#include "GameFramework/Pawn.h"
+#include "AI/GuardAIController.h"
+//#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AI/GuardBlackboardKeys.h"
 
@@ -17,11 +21,11 @@
 // Sets default values for this component's properties
 UGuardHearingAComponent::UGuardHearingAComponent()
 {
+
+	// 사용시 생성자에 true 필요
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
+	//PrimaryComponentTick.bCanEverTick = true;
 
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
@@ -42,33 +46,67 @@ UGuardHearingAComponent::UGuardHearingAComponent()
 
 }
 
+void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent* InPerceptionComp)
+{
+	PerceptionComp = InPerceptionComp;
+
+	if (IsValid(PerceptionComp) && IsValid(HearingConfig))
+	{
+		PerceptionComp->ConfigureSense(*HearingConfig);
+	}
+}
+
+/*
+GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+*/
+
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
 
-	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>())
+	// 일단 게이지가 차기 전엔 의심만
+	if (Stimulus.Type != UAISense::GetSenseID<UAISense_Hearing>())
 	{
-		// 소실(감지 종료) 이벤트에서는 위치가 유효하지 않을 수 있다.
-		// 실제로 소리를 "들은" 순간에만 SoundTargetActor/InvestigateLocation/SearchStartTime을 갱신한다.
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			BlackboardComp->SetValueAsObject(GuardAIKeys::SoundTargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Stimulus.StimulusLocation);
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
-		}
+		return;
 	}
 
+	if (!Stimulus.WasSuccessfullySensed())
+	{
+		return;
+	}
+
+
+	LastHearingLocation = Stimulus.StimulusLocation;
+	bHasHearingLocation = true;
+
+	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardAIController)
+	{
+		return;
+	}
+
+	// 현재 추적 대상이 있으면 청각 위치를 바라보지 않는다.
+	if (BlackboardComp && BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor))
+	{
+		return;
+	}
+
+
+	//잠시 비활성화
+	//GuardAIController->SetFocalPoint(Stimulus.StimulusLocation);
+
+	
 }
 
 void UGuardHearingAComponent::SetHearingRange(float InHearingRange)
 {
-	//if (!HearingConfig) return;
-
 	HearingConfig->HearingRange = InHearingRange;
 }
 
 void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 {
-	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), bEnableHearing);
+	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), isEnable);
+	PrimaryComponentTick.bCanEverTick = isEnable;
 }
 
 
@@ -77,33 +115,65 @@ void UGuardHearingAComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// ...
-
-
-	if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	{
-		PerceptionComp = AIController->GetPerceptionComponent();
-
-		if (!PerceptionComp)
-		{
-			// PerceptionComp 존재하지 않음 로그
-			return;
-		}
-		PerceptionComp->ConfigureSense(*HearingConfig);
-		SetHearingEnabled(bEnableHearing);
-		///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	}
-
-
 	
 }
 
-
-// Called every frame
 void UGuardHearingAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// ...
+	DrawHearingDebug();
+}
+
+void UGuardHearingAComponent::DrawHearingDebug() const
+{
+	if (!HearingConfig)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FVector Origin = GuardPawn->GetActorLocation();
+	const float Radius = HearingConfig->HearingRange;
+
+	if (Radius <= 0.0f)
+	{
+		return;
+	}
+
+	// 청각 감지 범위
+	DrawDebugSphere(World, Origin, Radius, 48, FColor::Cyan, false, 0.1f, 0, 2.0f);
+
+
+	// 마지막으로 감지한 소음 위치
+	if (bHasHearingLocation)
+	{
+		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.1f, 0, 4.0f);
+	}
+
+}
+
+void UGuardHearingAComponent::ClearHearingDebug()
+{
+	bHasHearingLocation = false;
+	LastHearingLocation = FVector::ZeroVector;
 }
 

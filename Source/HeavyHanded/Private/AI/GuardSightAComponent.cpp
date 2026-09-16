@@ -14,23 +14,23 @@
 #include "AI/GuardTypes.h"
 
 
+#include "DrawDebugHelpers.h"
+#include "GameFramework/Pawn.h"
+#include "AI/GuardAIController.h"
+#include "AI/GuardHearingAComponent.h"
+#include "Character/GuardCharacter.h"
+
+
 // Sets default values for this component's properties
 UGuardSightAComponent::UGuardSightAComponent()
 {
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
-
-
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
-
+	UE_LOG(LogTemp, Warning, TEXT("[SightConfig CONSTRUCTOR] Component=%p | SightConfig=%p | Name=%s"), this, SightConfig.Get(), *GetNameSafe(SightConfig));
 
 	// 플레이어는 IGenericTeamAgentInterface를 구현하지 않아 FGenericTeamId::NoTeam(255)로
 	// 남는다. 경비 입장에서 그런 상대는 "중립"으로 판정되므로 bDetectNeutrals를 켜야
@@ -45,6 +45,17 @@ UGuardSightAComponent::UGuardSightAComponent()
 
 }
 
+void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+{
+	PerceptionComp = InPerceptionComp;
+
+	if (IsValid(PerceptionComp) && IsValid(SightConfig))
+	{
+		PerceptionComp->ConfigureSense(*SightConfig);
+	}
+
+}
+
 
 
 // Called when the game starts
@@ -52,28 +63,18 @@ void UGuardSightAComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// ...
+}
 
 
-	if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-	{
-		PerceptionComp = AIController->GetPerceptionComponent();
-
-		if (!PerceptionComp)
-		{
-			// PerceptionComp 존재하지 않음 로그
-			return;
-		}
-			PerceptionComp->ConfigureSense(*SightConfig);
-			SetSightEnabled(bEnableSight);
-			///PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &UGuardSightComponent::OnTargetPerceptionUpdated);
-	}
-
+void UGuardSightAComponent::OnRegister()
+{
+	Super::OnRegister();
 
 }
 
 
-void UGuardSightAComponent::SetSightConfig(float InSightRadius, float InLoseSightRadius, float InPeripheralVisionAngle)
+void UGuardSightAComponent::SetSightConfig (float InSightRadius, float InLoseSightRadius,
+	float InPeripheralVisionAngle, float InVerticalVisionAngle, float InBinocularVisionAngle)
 {
 	if (!SightConfig)
 	{
@@ -83,15 +84,80 @@ void UGuardSightAComponent::SetSightConfig(float InSightRadius, float InLoseSigh
 
 	SightConfig->SightRadius = InSightRadius;
 	SightConfig->LoseSightRadius = InLoseSightRadius;
-	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle;
+
+
+	SightConfig->PeripheralVisionAngleDegrees = InPeripheralVisionAngle * 0.5f;
+	VerticalVisionAngleDegrees = InVerticalVisionAngle;
+
+	// 전체 시야 안에서 중앙 양안 시야에 해당하는 각도를 저장한다.
+	// 이후 인지 게이지 상승 속도를 계산할 때 사용한다.
+	BinocularVisionAngleDegrees = InBinocularVisionAngle * 0.5f;
 
 }
+
+bool UGuardSightAComponent::IsWithinBinocularVisionAngle(AActor* TargetActor) const
+{
+	if (!IsValid(TargetActor))
+	{
+		return false;
+	}
+
+	const AActor* OwnerActor = GetOwner();
+	if (!IsValid(OwnerActor))
+	{
+		return false;
+	}
+
+	// 대상과 경비 사이의 방향에서 높이 차이를 제거한다.
+	// 양안 시야는 수평 시야 기준으로 판단한다.
+	FVector ToTarget = TargetActor->GetActorLocation() - OwnerActor->GetActorLocation();
+	ToTarget.Z = 0.f;
+
+	if (ToTarget.IsNearlyZero())
+	{
+		return true;
+	}
+
+	ToTarget.Normalize();
+
+	// 경비가 바라보는 방향도 수평 방향만 사용한다.
+	FVector Forward = OwnerActor->GetActorForwardVector();
+	Forward.Z = 0.f;
+
+	if (Forward.IsNearlyZero())
+	{
+		return true;
+	}
+
+	Forward.Normalize();
+
+	// 정면과 대상 사이의 수평 각도를 계산한다.
+	const float Dot = FMath::Clamp(FVector::DotProduct(Forward, ToTarget), -1.f, 1.f);
+	const float AngleDegrees = FMath::RadiansToDegrees(FMath::Acos(Dot));
+
+	// 설정된 양안 시야각은 좌우를 합친 전체 각도이므로 절반을 사용한다.
+	const float BinocularHalfAngle = BinocularVisionAngleDegrees * 0.5f;
+
+	return AngleDegrees <= BinocularHalfAngle;
+}
+
+float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
+{
+	if (IsWithinBinocularVisionAngle(TargetActor))
+	{
+		return 1.f;
+	}
+
+	return 0.5f;
+}
+
 
 void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 {
 	//if (!PerceptionComp) return;
 
-	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), bEnableSight);
+	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), isEnable);
+	PrimaryComponentTick.bCanEverTick = isEnable;
 }
 
 
@@ -106,6 +172,7 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
 		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
 		const float NowSeconds = GetWorld()->GetTimeSeconds();
+
 
 		if (Stimulus.WasSuccessfullySensed())
 		{
@@ -135,23 +202,47 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 
 		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
+
 		if (Stimulus.WasSuccessfullySensed())
 		{
-			if (!bWasSeeing)
+
+			// Sight에서 플레이어를 발견했을 때 Hearing에서 걸어둔 FocalPoint를 해제
+			AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+			if (GuardAIController)
 			{
-				// 필요한지 확인 한번 더하고 주석 풀 것
-				/// OnPlayerSpotted.Broadcast(Actor);
+				GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
+
+
+				if (GuardAIController->GuardHearingComp)
+				{
+					GuardAIController->GuardHearingComp->ClearHearingDebug();
+				}
 			}
 
-			BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
-			BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+			// 경비의 실제 눈높이에서 플레이어 머리까지의 수직 시야각을 검사
+			if (!IsWithinVerticalVisionAngle(Actor))
+			{
+				BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, false);
+			}
 
-			// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
-			// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
-			// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
-			// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
-			// 추격 조건이 영구히 거짓이 된다.
-			BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
+			else
+			{
+				if (!bWasSeeing)
+				{
+					// 필요한지 확인 한번 더하고 주석 풀 것
+					/// OnPlayerSpotted.Broadcast(Actor);
+				}
+
+				BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
+				BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
+
+				// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
+				// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
+				// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
+				// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
+				// 추격 조건이 영구히 거짓이 된다.
+				BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
+			}
 		}
 		// 시야를 잃었다고 해서 여기서 SearchStartTime 을 쓰지 않는다.
 		//
@@ -169,7 +260,8 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 
 
 
-/*
+
+
 
 
 
@@ -178,7 +270,359 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+
+#if WITH_EDITOR
+	DrawSightDebug();
+	DrawPerceivedActorsDebug();
+#endif
+
 	// ...
+
+
 }
-*/
+
+
+
+//경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
+bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const
+{
+
+	if (!IsValid(TargetActor))
+	{
+		return false;
+	}
+
+	const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardAIController)
+	{
+		return false;
+	}
+
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
+	if (!GuardCharacter)
+	{
+		return false;
+	}
+
+	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
+	const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation();// +FVector(0.0f, 0.0f, 80.0f); // 80은 임시값
+	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation(); // +FVector(0.0f, 0.0f, 80.0f);
+	const FVector Direction = (TargetHeadLocation - GuardEyeLocation).GetSafeNormal();
+
+	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Asin(Direction.Z));
+
+	return FMath::Abs(VerticalAngle) <= VerticalVisionAngleDegrees;
+
+}
+
+
+void UGuardSightAComponent::DrawSightDebug() const
+{
+	if (!SightConfig)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardPawn);
+	if (!GuardCharacter || !GuardCharacter->GetMesh())
+	{
+		return;
+	}
+
+	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	const FVector Forward = GuardPawn->GetActorForwardVector().GetSafeNormal();
+	const FVector Up = FVector::UpVector;
+
+	const float SightRadius = SightConfig->SightRadius;
+	const float LoseSightRadius = SightConfig->LoseSightRadius;
+
+	const float HorizontalHalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+	const float VerticalHalfAngle = VerticalVisionAngleDegrees;
+
+	if (SightRadius <= 0.0f || LoseSightRadius <= SightRadius || HorizontalHalfAngle <= 0.0f || VerticalHalfAngle <= 0.0f)
+	{
+		return;
+	}
+
+	constexpr float CharacterDebugOffset = 50.0f;
+
+	const int32 ArcSegments = 24;
+	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
+
+	// ========================================================
+	// 수평 시야 외곽
+	// ========================================================
+
+	FVector PreviousGreenPoint = FVector::ZeroVector;
+	FVector PreviousYellowPoint = FVector::ZeroVector;
+
+	bool bHasPreviousGreenPoint = false;
+	bool bHasPreviousYellowPoint = false;
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / ArcSegments;
+		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
+		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
+
+		const FVector TraceEnd = Origin + Direction * LoseSightRadius;
+
+		FHitResult Hit;
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+		float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+		const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+		if (bHitCharacter)
+		{
+			VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
+
+		const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+		const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
+
+		const FVector GreenPoint = Origin + Direction * GreenDistance;
+		const FVector YellowPoint = Origin + Direction * YellowDistance;
+
+		if (bHasPreviousGreenPoint)
+		{
+			DrawDebugLine(World, PreviousGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 4.0f);
+		}
+
+		if (VisibleDistance > SightRadius && bHasPreviousYellowPoint)
+		{
+			DrawDebugLine(World, PreviousYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (bBlocked)
+		{
+			const FVector RedStart = bHitCharacter ? Hit.Location + Direction * CharacterDebugOffset : Hit.Location;
+
+			DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		PreviousGreenPoint = GreenPoint;
+		bHasPreviousGreenPoint = true;
+
+		if (VisibleDistance > SightRadius)
+		{
+			PreviousYellowPoint = YellowPoint;
+			bHasPreviousYellowPoint = true;
+		}
+		else
+		{
+			bHasPreviousYellowPoint = false;
+		}
+	}
+
+	// ========================================================
+	// 수직 시야 경계
+	// ========================================================
+
+	{
+		const FVector HorizontalForward = Forward.GetSafeNormal2D();
+
+		const FVector UpDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+		const FVector DownDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
+
+		const FVector UpTraceEnd = Origin + UpDirection * LoseSightRadius;
+		const FVector DownTraceEnd = Origin + DownDirection * LoseSightRadius;
+
+		FHitResult UpHit;
+		FHitResult DownHit;
+
+		const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
+		const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
+
+		float UpVisibleDistance = bUpBlocked ? FVector::Distance(Origin, UpHit.Location) : LoseSightRadius;
+		float DownVisibleDistance = bDownBlocked ? FVector::Distance(Origin, DownHit.Location) : LoseSightRadius;
+
+		const bool bUpHitCharacter = bUpBlocked && UpHit.GetActor() && UpHit.GetActor()->IsA<ACharacter>();
+		const bool bDownHitCharacter = bDownBlocked && DownHit.GetActor() && DownHit.GetActor()->IsA<ACharacter>();
+
+		if (bUpHitCharacter)
+		{
+			UpVisibleDistance = FMath::Min(UpVisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
+
+		if (bDownHitCharacter)
+		{
+			DownVisibleDistance = FMath::Min(DownVisibleDistance + CharacterDebugOffset, LoseSightRadius);
+		}
+
+		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
+		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
+
+		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
+
+		if (UpVisibleDistance > SightRadius)
+		{
+			DrawDebugLine(World, Origin + UpDirection * SightRadius, Origin + UpDirection * UpVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (DownVisibleDistance > SightRadius)
+		{
+			DrawDebugLine(World, Origin + DownDirection * SightRadius, Origin + DownDirection * DownVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+		}
+
+		if (bUpBlocked)
+		{
+			const FVector RedStart = bUpHitCharacter ? UpHit.Location + UpDirection * CharacterDebugOffset : UpHit.Location;
+
+			DrawDebugLine(World, RedStart, UpTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+
+		if (bDownBlocked)
+		{
+			const FVector RedStart = bDownHitCharacter ? DownHit.Location + DownDirection * CharacterDebugOffset : DownHit.Location;
+
+			DrawDebugLine(World, RedStart, DownTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+		}
+	}
+
+	// ========================================================
+	// 수평 좌우 경계
+	// ========================================================
+
+	{
+		const FVector LeftDirection = Forward.RotateAngleAxis(-HorizontalHalfAngle, Up);
+		const FVector RightDirection = Forward.RotateAngleAxis(HorizontalHalfAngle, Up);
+
+		// 왼쪽
+		{
+			const FVector TraceEnd = Origin + LeftDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+			if (bHitCharacter)
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+			}
+
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+
+			DrawDebugLine(World, Origin, Origin + LeftDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+
+			if (VisibleDistance > SightRadius)
+			{
+				DrawDebugLine(World, Origin + LeftDirection * SightRadius, Origin + LeftDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			}
+
+			if (bBlocked)
+			{
+				const FVector RedStart = bHitCharacter ? Hit.Location + LeftDirection * CharacterDebugOffset : Hit.Location;
+
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+		}
+
+		// 오른쪽
+		{
+			const FVector TraceEnd = Origin + RightDirection * LoseSightRadius;
+
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+
+			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+
+			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
+
+			if (bHitCharacter)
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + CharacterDebugOffset, LoseSightRadius);
+			}
+
+			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
+
+			DrawDebugLine(World, Origin, Origin + RightDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+
+			if (VisibleDistance > SightRadius)
+			{
+				DrawDebugLine(World, Origin + RightDirection * SightRadius, Origin + RightDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			}
+
+			if (bBlocked)
+			{
+				const FVector RedStart = bHitCharacter ? Hit.Location + RightDirection * CharacterDebugOffset : Hit.Location;
+
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			}
+		}
+	}
+}
+
+
+// 초록색 = 실제 UAIPerceptionComponent에서 현재 Sight로 인식 중인 Actor
+void UGuardSightAComponent::DrawPerceivedActorsDebug() const
+{
+	if (!PerceptionComp)
+	{
+		return;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	const APawn* GuardPawn = GuardController->GetPawn();
+	if (!GuardPawn)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<AActor*> PerceivedActors;
+	PerceptionComp->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), PerceivedActors);
+
+	const FVector Origin = GuardPawn->GetActorLocation();
+
+	for (AActor* Actor : PerceivedActors)
+	{
+		if (!Actor)
+		{
+			continue;
+		}
+
+		const FVector TargetLocation = Actor->GetActorLocation();
+
+		DrawDebugLine(World, Origin, TargetLocation, FColor::Yellow, false, 0.1f, 0, 6.0f);
+		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.1f);
+	}
+}
+
 
