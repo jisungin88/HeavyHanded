@@ -47,6 +47,8 @@ namespace HHTags
 	/** 결과 — 적재 목록 · 기여도 · 최다 소음 유발자 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Phase_Result);
 
+	/** 진입점 루트의 태그 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Entry);
 	// Phase.Lobby / Phase.Hideout 은 선언하지 않는다.
 	//   그 둘은 레벨 자체가 다르고 전환 수단이 ServerTravel 이라 태그로 판정할 것이 없다.
 	//   작업 레벨의 상태머신은 Prep 부터 시작한다.
