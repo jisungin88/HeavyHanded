@@ -24,15 +24,6 @@ enum class EEntryTag : uint8
 	Alley
 };
 
-UENUM(BlueprintType)
-enum class ESiteTag : uint8
-{
-	None,
-	Mansion,
-	Museum,
-	Bank
-};
-
 // .h
 
 
@@ -149,28 +140,14 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_EntryTag, BlueprintReadOnly)
 	EEntryTag EntryTag = EEntryTag::Front; //초기값
 
-	// 현재 선택된 Site
-	UPROPERTY(ReplicatedUsing = OnRep_SiteTag, BlueprintReadOnly)
-	ESiteTag SiteTag = ESiteTag::Mansion;
-
 	// 서버에서 Entry를 변경
 	// PlayerController의 Server RPC에서 호출
 	UFUNCTION(BlueprintCallable)
 	void SetEntryTag(EEntryTag NewTag);
 
-	// 서버에서 Site를 변경
-	// PlayerController의 Server RPC에서 호출
-	UFUNCTION(BlueprintCallable)
-	void SetSiteTag(ESiteTag NewTag);
-
-
 	// EntryTag가 클라이언트에 복제되었을 때 호출
 	UFUNCTION()
 	void OnRep_EntryTag();
-
-	// SiteTag가 클라이언트에 복제되었을 때 호출
-	UFUNCTION()
-	void OnRep_SiteTag();
 
 	// 모든 태그 디버그
 	UFUNCTION(BlueprintCallable)
