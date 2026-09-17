@@ -140,6 +140,9 @@ public:
 	// World Alert (월드 경계도)
 	// ==================================================================================
 
+	// Controller는 "경계도 때문에 속도를 올릴지"만 판단하고
+	// Hearing은 "소음이 계속 발생하고 있는지 / 20초 동안 조용했는지"를 관리하는 구조
+
 public:
 	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반)
 	// BTDecorator_CheckWorldAlert 등이 참조.
@@ -150,12 +153,20 @@ public:
 	UFUNCTION() // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
 	void UpdateMoveSpeedByWorldAlert(float NewGauge01);
 
+	// Hearing이 타이머를 가지고 있으려면 Controller가 지금 속도 증가 상태인지를 알아야 함
+	// 현재 월드 경계도로 인해 이동 속도가 증가된 상태인지 반환한다.
+	bool IsWorldAlertSpeedUp() const { return bWorldAlertSpeedUp; }
+
+
+public:
+	// hearing 이동 예정 ------------------------
 	UFUNCTION() // 타이머 만료 함수
 	void HandleWorldAlertSilenceTimeout();
 
-
+	// hearing 이동 예정 ------------------------
 	UFUNCTION() // 디버그용
 	void LogWorldAlertSilenceRemaining();
+
 
 private:
 
@@ -178,9 +189,13 @@ private:
 	// 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
 	bool bWorldAlertSpeedTriggered = false;
 
+
+private:
+	// hearing 이동 예정 ------------------------
 	// 경계도 속도 증가 상태를 해제하기 위한 무소음 타이머.
 	FTimerHandle WorldAlertSilenceTimerHandle;
 
+	// hearing 이동 예정 ------------------------
 	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
 	FTimerHandle WorldAlertSilenceDebugTimerHandle;
 
