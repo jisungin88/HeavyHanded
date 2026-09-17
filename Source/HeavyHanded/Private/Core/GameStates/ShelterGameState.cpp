@@ -494,35 +494,9 @@ void AShelterGameState::SetEntryTag(EEntryTag NewTag)
 	OnTravelTagChanged.Broadcast();
 }
 
-void AShelterGameState::SetSiteTag(ESiteTag NewTag)
-{
-	// GameState의 공용 값은 서버에서만 변경
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	// 현재 Site 변경
-	SiteTag = NewTag;
-
-	// 호스트의 UI는 RepNotify가 자동으로 호출되지 않으므로 직접 알림
-	OnTravelTagChanged.Broadcast();
-}
-
-
 void AShelterGameState::OnRep_EntryTag()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
-	OnTravelTagChanged.Broadcast();
-
-	UE_LOG(LogTemp, Warning, TEXT(
-		       "[SiteTag] OnRep 실행 | World=%s | NetMode=%d | Tag=%d"
-	       ), *GetWorld()->GetName(), (int32)GetNetMode(), (int32)SiteTag);
-}
-
-void AShelterGameState::OnRep_SiteTag()
-{
-	// 클라이언트에서 SiteTag가 복제되면 UI 갱신
 	OnTravelTagChanged.Broadcast();
 }
 
@@ -546,7 +520,6 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AShelterGameState, JobStateChanged);
 	DOREPLIFETIME(AShelterGameState, bCanStart);
 
-	DOREPLIFETIME(AShelterGameState, SiteTag);
 	DOREPLIFETIME(AShelterGameState, EntryTag);
 
 	DOREPLIFETIME(AShelterGameState, RunProgress);
