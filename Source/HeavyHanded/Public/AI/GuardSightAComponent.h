@@ -17,6 +17,9 @@ class UAISenseConfig_Sight;
 class AActor;
 class AGuardCharacter;
 
+class UProceduralMeshComponent;
+class UMaterialInterface;
+
 
 ///DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
 
@@ -114,10 +117,21 @@ private:
 	//public:
 
 	void DrawSightDebug() const;
+	void DrawSightDebugMesh();
 	void DrawPerceivedActorsDebug() const;
 
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+
+private:
+
+	//UPROPERTY(Transient)
+	//TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
+	UPROPERTY(EditAnywhere, Category = "Debug")
+	TObjectPtr<UMaterialInterface> SightDebugMaterial;
+
 
 
 };

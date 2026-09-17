@@ -9,6 +9,8 @@
 class UPerceptionMeterComponent;
 class UWidgetComponent;
 
+class UProceduralMeshComponent;
+
 UCLASS()
 class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 {
@@ -41,6 +43,9 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bDrawSightDebug = true;
 
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
 
 public:
 
@@ -51,6 +56,9 @@ public:
 	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
 	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
 	void SetDrawSightDebugEnabled(bool bInEnabled) { bDrawSightDebug = bInEnabled; }
+
+	UProceduralMeshComponent* GetSightDebugMesh() const { return SightDebugMesh; }
+
 
 	//// ---------------------------------------------------------------------------------
 

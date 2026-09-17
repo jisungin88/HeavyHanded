@@ -22,6 +22,7 @@
 #include "Components/CapsuleComponent.h"
 
 #include "GameplayTagContainer.h"
+#include "ProceduralMeshComponent.h"
 
 
 // Sets default values for this component's properties
@@ -44,6 +45,9 @@ UGuardSightAComponent::UGuardSightAComponent()
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+
+
+
 
 
 }
@@ -276,8 +280,10 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	if (bDrawSightDebug)
 	{
 		DrawSightDebug();
+		DrawSightDebugMesh();
 		DrawPerceivedActorsDebug();
 	}
+
 #endif
 
 	// ...
@@ -600,6 +606,114 @@ void UGuardSightAComponent::DrawSightDebug() const
 		}
 	}
 }
+
+void UGuardSightAComponent::DrawSightDebugMesh()
+{
+	if (!SightConfig)
+	{
+		return;
+	}
+
+	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
+	if (!GuardCharacter)
+	{
+		return;
+	}
+
+	UProceduralMeshComponent* SightDebugMesh = GuardCharacter->GetSightDebugMesh();
+	if (!SightDebugMesh)
+	{
+		return;
+	}
+
+	const float Radius = SightConfig->SightRadius;
+	const float HalfAngle = FMath::DegreesToRadians(SightConfig->PeripheralVisionAngleDegrees);
+
+	if (Radius <= 0.0f)
+	{
+		return;
+	}
+
+	const int32 ArcSegments = 24;
+
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> VertexColors;
+	TArray<FProcMeshTangent> Tangents;
+
+	Vertices.Reserve(ArcSegments + 2);
+	Triangles.Reserve(ArcSegments * 3);
+
+
+	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return;
+	}
+
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const FVector LocalOrigin = FVector(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
+
+	Vertices.Add(LocalOrigin);
+
+
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / static_cast<float>(ArcSegments);
+		const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+		const float AngleDegrees = FMath::RadiansToDegrees(Angle);
+
+		const FVector Direction = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
+		const FVector Point = LocalOrigin + Direction * Radius;
+
+		Vertices.Add(Point);
+	}
+
+	for (int32 Index = 0; Index < ArcSegments; ++Index)
+	{
+		Triangles.Add(0);
+		Triangles.Add(Index + 2);
+		Triangles.Add(Index + 1);
+	}
+
+	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+	{
+		Normals.Add(FVector::UpVector);
+		UV0.Add(FVector2D::ZeroVector);
+		VertexColors.Add(FLinearColor::White);
+	}
+
+	SightDebugMesh->ClearAllMeshSections();
+
+	SightDebugMesh->CreateMeshSection_LinearColor(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
+		VertexColors,
+		Tangents,
+		false
+	);
+
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	if (SightDebugMaterial)
+	{
+		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
+	}
+}
+
 
 
 // 초록색 = 실제 UAIPerceptionComponent에서 현재 Sight로 인식 중인 Actor
