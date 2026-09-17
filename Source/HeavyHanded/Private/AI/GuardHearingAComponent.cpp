@@ -56,6 +56,10 @@ void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent
 	}
 }
 
+/*
+GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+*/
 
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
@@ -103,87 +107,6 @@ void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 {
 	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), isEnable);
 	PrimaryComponentTick.bCanEverTick = isEnable;
-}
-
-void UGuardHearingAComponent::HandleWorldAlertSilenceTimeout()
-{
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-
-	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
-	{
-		return;
-	}
-
-	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle); // 디버그 해제
-
-	GuardAIController->ResetMoveSpeed();
-
-	
-	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 무소음 타이머 완료 : Silence Timeout | Pawn = %s | Speed Down | Speed = %.1f"),
-		*GuardAIController->GetPossessGuardPawnName(), GuardAIController->GetNormalMoveSpeed());
-
-}
-
-void UGuardHearingAComponent::LogWorldAlertSilenceRemaining()
-{
-	if (!GetWorld())
-	{
-		return;
-	}
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-
-	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
-	{
-		return;
-	}
-
-	const float RemainingTime = GetWorld()->GetTimerManager().GetTimerRemaining(WorldAlertSilenceTimerHandle);
-
-	if (RemainingTime <= 0.0f)
-	{
-		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
-		return;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 무소음 타이머 | Pawn = %s | 남은 시간 = %.1f sec"),
-		*GuardAIController->GetPossessGuardPawnName() , RemainingTime);
-
-
-}
-
-void UGuardHearingAComponent::StartWorldAlertSilenceTimer()
-{
-	if (!GetWorld())
-	{
-		return;
-	}
-
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-
-	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
-	{
-		return;
-	}
-
-
-	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
-	GetWorld()->GetTimerManager().SetTimer
-		(WorldAlertSilenceTimerHandle, this, &UGuardHearingAComponent::HandleWorldAlertSilenceTimeout, GuardAIController->GetWorldAlertSilenceDelay(), false);
-
-	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
-	GetWorld()->GetTimerManager().SetTimer
-		(WorldAlertSilenceDebugTimerHandle, this, &UGuardHearingAComponent::LogWorldAlertSilenceRemaining, 1.0f, true);
-}
-
-void UGuardHearingAComponent::ClearWorldAlertSilenceTimer()
-{
-	if (!GetWorld())
-	{
-		return;
-	}
-
-	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
-	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
 }
 
 
@@ -236,14 +159,14 @@ void UGuardHearingAComponent::DrawHearingDebug() const
 	}
 
 	// 청각 감지 범위
-	DrawDebugSphere(World, Origin, Radius, 24, FColor::Cyan, false, 0.0f, 0, 1.0f);
+	DrawDebugSphere(World, Origin, Radius, 48, FColor::Cyan, false, 0.1f, 0, 2.0f);
 
 
 	// 마지막으로 감지한 소음 위치
 	if (bHasHearingLocation)
 	{
-		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.0f, 0, 4.0f);
-		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.0f, 0, 4.0f);
+		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.1f, 0, 4.0f);
 	}
 
 }

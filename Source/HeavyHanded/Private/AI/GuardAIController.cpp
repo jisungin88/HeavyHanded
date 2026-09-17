@@ -122,8 +122,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	GuardSightComp->SetSightEnabled(PossessGuardPawn->bEnableSight);
 	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->bEnableHearing);
 
-	//DebugLine (개발중에만 필요, 추후 비활성화)
-	GuardSightComp->SetSightDebugEnabled(PossessGuardPawn->IsDrawSightDebugEnabled());
 
 
 	// 경비 스탯 초기화
@@ -271,18 +269,6 @@ void AGuardAIController::UnbindFromGameState()
 
 
 
-void AGuardAIController::ResetMoveSpeed()
-{
-	if (!PossessGuardPawn)
-	{
-		return;
-	}
-
-	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
-	bWorldAlertSpeedUp = false;
-
-}
-
 void AGuardAIController::HandleHeistPhaseChanged(
 	FGameplayTag NewPhase, FGameplayTag /*OldPhase*/, EHeistPhaseReason /*Reason*/)
 {
@@ -368,14 +354,12 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 
 	// 경계값 일정 이상일 시 무소음 타이머
 	if (bWorldAlertSpeedUp) {
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
 
-		// hearing 이동 예정 ------------------------
-		// GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
-		// GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
-		// 
-		// GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
-		// GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceDebugTimerHandle, this, &AGuardAIController::LogWorldAlertSilenceRemaining, 1.0f, true);
-		// UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 소음 재발생 - 타이머 리셋 : Noise Reported | SilenceTimer Reset | Restart=%.1f sec"),WorldAlertSilenceDelay);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceDebugTimerHandle, this, &AGuardAIController::LogWorldAlertSilenceRemaining, 1.0f, true);
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 소음 재발생 - 타이머 리셋 : Noise Reported | SilenceTimer Reset | Restart=%.1f sec"),WorldAlertSilenceDelay);
 	}
 
 
@@ -464,11 +448,6 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 
 }
 
-FString AGuardAIController::GetPossessGuardPawnName() const
-{
-	return PossessGuardPawn ? PossessGuardPawn->GetName() : TEXT("None");
-}
-
 
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
@@ -537,9 +516,8 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 		}
 
 		bWorldAlertSpeedUp = false;
-
-		GuardHearingComp->ClearWorldAlertSilenceTimer();
-
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
 		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
 
 		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 경계도 감소 - Pawn = %s | Alert = %.1f | Speed = %.1f"),
@@ -562,8 +540,11 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 	// 경계도가 올라올 때마다 무소음 타이머를 다시 시작한다.
 	if (bWorldAlertSpeedUp)
 	{
-		// start에 clear 같이 있음
-		GuardHearingComp->StartWorldAlertSilenceTimer();
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceTimerHandle, this, &AGuardAIController::HandleWorldAlertSilenceTimeout, WorldAlertSilenceDelay, false);
+
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(WorldAlertSilenceDebugTimerHandle, this, &AGuardAIController::LogWorldAlertSilenceRemaining, 1.0f, true);
 	}
 
 	PreviousWorldAlertLevel = WorldAlertLevel;
@@ -610,6 +591,40 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 }
 
+void AGuardAIController::HandleWorldAlertSilenceTimeout()
+{
+	if (!PossessGuardPawn || !bWorldAlertSpeedUp)
+	{
+		return;
+	}
+
+	GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle); // 디버그 해제
+
+	bWorldAlertSpeedUp = false;
+	PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NormalMoveSpeed;
+
+	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 무소음 타이머 완료 : Silence Timeout | Pawn = %s | Speed Down | Speed = %.1f"),
+		*PossessGuardPawn->GetName(), NormalMoveSpeed);
+}
+
+void AGuardAIController::LogWorldAlertSilenceRemaining()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	const float RemainingTime = GetWorld()->GetTimerManager().GetTimerRemaining(WorldAlertSilenceTimerHandle);
+
+	if (RemainingTime <= 0.0f)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(WorldAlertSilenceDebugTimerHandle);
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 무소음 타이머 | Pawn = %s | 남은 시간 = %.1f sec"), *PossessGuardPawn->GetName(), RemainingTime);
+
+}
 
 float AGuardAIController::GetDetectionGaugePercent() const
 {
