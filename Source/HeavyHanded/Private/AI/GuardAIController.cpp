@@ -122,6 +122,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	GuardSightComp->SetSightEnabled(PossessGuardPawn->bEnableSight);
 	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->bEnableHearing);
 
+	//DebugLine (개발중에만 필요, 추후 비활성화)
+	GuardSightComp->SetSightDebugEnabled(PossessGuardPawn->IsDrawSightDebugEnabled());
 
 
 	// 경비 스탯 초기화

@@ -236,14 +236,14 @@ void UGuardHearingAComponent::DrawHearingDebug() const
 	}
 
 	// 청각 감지 범위
-	DrawDebugSphere(World, Origin, Radius, 48, FColor::Cyan, false, 0.1f, 0, 2.0f);
+	DrawDebugSphere(World, Origin, Radius, 24, FColor::Cyan, false, 0.0f, 0, 1.0f);
 
 
 	// 마지막으로 감지한 소음 위치
 	if (bHasHearingLocation)
 	{
-		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.1f, 0, 4.0f);
-		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.1f, 0, 4.0f);
+		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.0f, 0, 4.0f);
 	}
 
 }

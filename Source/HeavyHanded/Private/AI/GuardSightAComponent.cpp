@@ -19,6 +19,7 @@
 #include "AI/GuardAIController.h"
 #include "AI/GuardHearingAComponent.h"
 #include "Character/GuardCharacter.h"
+#include "Components/CapsuleComponent.h"
 
 
 // Sets default values for this component's properties
@@ -45,6 +46,7 @@ UGuardSightAComponent::UGuardSightAComponent()
 
 }
 
+// pawn 빙의시 초기화중
 void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
 {
 	PerceptionComp = InPerceptionComp;
@@ -53,7 +55,6 @@ void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* In
 	{
 		PerceptionComp->ConfigureSense(*SightConfig);
 	}
-
 }
 
 
@@ -155,9 +156,7 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 {
 	//if (!PerceptionComp) return;
-
 	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), isEnable);
-	PrimaryComponentTick.bCanEverTick = isEnable;
 }
 
 
@@ -272,8 +271,11 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 
 #if WITH_EDITOR
-	DrawSightDebug();
-	DrawPerceivedActorsDebug();
+	if (bDrawSightDebug)
+	{
+		DrawSightDebug();
+		DrawPerceivedActorsDebug();
+	}
 #endif
 
 	// ...
@@ -304,10 +306,22 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 		return false;
 	}
 
+	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+
 	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
 	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
-	const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation();// +FVector(0.0f, 0.0f, 80.0f); // 80은 임시값
-	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation(); // +FVector(0.0f, 0.0f, 80.0f);
+	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation();// +FVector(0.0f, 0.0f, -80.0f); // 80은 임시값
+	//const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation(); // +FVector(0.0f, 0.0f, -80.0f);
+
+	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
+
+	// 테스트용. 추후 사용시 수정 반드시 필요
+	const FVector GuardEyeLocation =
+		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
 	const FVector Direction = (TargetHeadLocation - GuardEyeLocation).GetSafeNormal();
 
 	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Asin(Direction.Z));
@@ -347,8 +361,14 @@ void UGuardSightAComponent::DrawSightDebug() const
 	{
 		return;
 	}
+	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
 
-	const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	//const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
+	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FVector HorizontalOrigin = GuardCharacter->GetCapsuleComponent()->GetComponentLocation() - FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
 	const FVector Forward = GuardPawn->GetActorForwardVector().GetSafeNormal();
 	const FVector Up = FVector::UpVector;
 
@@ -386,12 +406,12 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const float Angle = FMath::Lerp(-HorizontalHalfAngle, HorizontalHalfAngle, Alpha);
 		const FVector Direction = Forward.RotateAngleAxis(Angle, Up);
 
-		const FVector TraceEnd = Origin + Direction * LoseSightRadius;
+		const FVector TraceEnd = HorizontalOrigin + Direction * LoseSightRadius;
 
 		FHitResult Hit;
-		const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, HorizontalOrigin, TraceEnd, ECC_Visibility, Params);
 
-		float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+		float VisibleDistance = bBlocked ? FVector::Distance(HorizontalOrigin, Hit.Location) : LoseSightRadius;
 
 		const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
 
@@ -403,24 +423,24 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 		const float YellowDistance = FMath::Min(LoseSightRadius, VisibleDistance);
 
-		const FVector GreenPoint = Origin + Direction * GreenDistance;
-		const FVector YellowPoint = Origin + Direction * YellowDistance;
+		const FVector GreenPoint = HorizontalOrigin + Direction * GreenDistance;
+		const FVector YellowPoint = HorizontalOrigin + Direction * YellowDistance;
 
 		if (bHasPreviousGreenPoint)
 		{
-			DrawDebugLine(World, PreviousGreenPoint, GreenPoint, FColor::Green, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, PreviousGreenPoint, GreenPoint, FColor::Green, false, 0.0f, 0, 4.0f);
 		}
 
 		if (VisibleDistance > SightRadius && bHasPreviousYellowPoint)
 		{
-			DrawDebugLine(World, PreviousYellowPoint, YellowPoint, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, PreviousYellowPoint, YellowPoint, FColor::Yellow, false, 0.0f, 0, 4.0f);
 		}
 
 		if (bBlocked)
 		{
 			const FVector RedStart = bHitCharacter ? Hit.Location + Direction * CharacterDebugOffset : Hit.Location;
 
-			DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 		}
 
 		PreviousGreenPoint = GreenPoint;
@@ -475,31 +495,31 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
 		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
 
-		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
-		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.1f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
 
 		if (UpVisibleDistance > SightRadius)
 		{
-			DrawDebugLine(World, Origin + UpDirection * SightRadius, Origin + UpDirection * UpVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, Origin + UpDirection * SightRadius, Origin + UpDirection * UpVisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
 		}
 
 		if (DownVisibleDistance > SightRadius)
 		{
-			DrawDebugLine(World, Origin + DownDirection * SightRadius, Origin + DownDirection * DownVisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, Origin + DownDirection * SightRadius, Origin + DownDirection * DownVisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
 		}
 
 		if (bUpBlocked)
 		{
 			const FVector RedStart = bUpHitCharacter ? UpHit.Location + UpDirection * CharacterDebugOffset : UpHit.Location;
 
-			DrawDebugLine(World, RedStart, UpTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			DrawDebugLine(World, RedStart, UpTraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 		}
 
 		if (bDownBlocked)
 		{
 			const FVector RedStart = bDownHitCharacter ? DownHit.Location + DownDirection * CharacterDebugOffset : DownHit.Location;
 
-			DrawDebugLine(World, RedStart, DownTraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+			DrawDebugLine(World, RedStart, DownTraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 		}
 	}
 
@@ -513,12 +533,12 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 		// 왼쪽
 		{
-			const FVector TraceEnd = Origin + LeftDirection * LoseSightRadius;
+			const FVector TraceEnd = HorizontalOrigin + LeftDirection * LoseSightRadius;
 
 			FHitResult Hit;
-			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, HorizontalOrigin, TraceEnd, ECC_Visibility, Params);
 
-			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			float VisibleDistance = bBlocked ? FVector::Distance(HorizontalOrigin, Hit.Location) : LoseSightRadius;
 
 			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
 
@@ -529,29 +549,29 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 
-			DrawDebugLine(World, Origin, Origin + LeftDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + LeftDirection * GreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
 
 			if (VisibleDistance > SightRadius)
 			{
-				DrawDebugLine(World, Origin + LeftDirection * SightRadius, Origin + LeftDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+				DrawDebugLine(World, HorizontalOrigin + LeftDirection * SightRadius, HorizontalOrigin + LeftDirection * VisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
 			}
 
 			if (bBlocked)
 			{
 				const FVector RedStart = bHitCharacter ? Hit.Location + LeftDirection * CharacterDebugOffset : Hit.Location;
 
-				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 			}
 		}
 
 		// 오른쪽
 		{
-			const FVector TraceEnd = Origin + RightDirection * LoseSightRadius;
+			const FVector TraceEnd = HorizontalOrigin + RightDirection * LoseSightRadius;
 
 			FHitResult Hit;
-			const bool bBlocked = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
+			const bool bBlocked = World->LineTraceSingleByChannel(Hit, HorizontalOrigin, TraceEnd, ECC_Visibility, Params);
 
-			float VisibleDistance = bBlocked ? FVector::Distance(Origin, Hit.Location) : LoseSightRadius;
+			float VisibleDistance = bBlocked ? FVector::Distance(HorizontalOrigin, Hit.Location) : LoseSightRadius;
 
 			const bool bHitCharacter = bBlocked && Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>();
 
@@ -562,18 +582,18 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 			const float GreenDistance = FMath::Min(SightRadius, VisibleDistance);
 
-			DrawDebugLine(World, Origin, Origin + RightDirection * GreenDistance, FColor::Green, false, 0.1f, 0, 4.0f);
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + RightDirection * GreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
 
 			if (VisibleDistance > SightRadius)
 			{
-				DrawDebugLine(World, Origin + RightDirection * SightRadius, Origin + RightDirection * VisibleDistance, FColor::Yellow, false, 0.1f, 0, 4.0f);
+				DrawDebugLine(World, HorizontalOrigin + RightDirection * SightRadius, HorizontalOrigin + RightDirection * VisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
 			}
 
 			if (bBlocked)
 			{
 				const FVector RedStart = bHitCharacter ? Hit.Location + RightDirection * CharacterDebugOffset : Hit.Location;
 
-				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.1f, 0, 2.0f);
+				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 			}
 		}
 	}
@@ -620,8 +640,8 @@ void UGuardSightAComponent::DrawPerceivedActorsDebug() const
 
 		const FVector TargetLocation = Actor->GetActorLocation();
 
-		DrawDebugLine(World, Origin, TargetLocation, FColor::Yellow, false, 0.1f, 0, 6.0f);
-		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.1f);
+		DrawDebugLine(World, Origin, TargetLocation, FColor::Yellow, false, 0.0f, 0, 6.0f);
+		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.0f);
 	}
 }
 
