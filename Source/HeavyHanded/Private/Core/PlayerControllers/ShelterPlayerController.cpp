@@ -635,22 +635,6 @@ void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag
 
 }
 
-void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
-{
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
-	{
-		return;
-	}
-
-
-	 // 서버 GameState의 Site 변경
-	GameState->SetSiteTag(NewTag);
-}
-
-
-
 void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
 {
 	BP_ShowStartGameWindow();
