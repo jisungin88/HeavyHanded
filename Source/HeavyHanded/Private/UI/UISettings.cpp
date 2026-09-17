@@ -143,3 +143,20 @@ TSoftObjectPtr<UTexture2D> UUISettings::GetHeldSlotIcon(const FGameplayTagContai
 
 	return HeldSlotFallbackIcon;
 }
+
+TSoftObjectPtr<UTexture2D> UUISettings::GetSkillIcon(const FGameplayTagContainer& CooldownTags) const
+{
+	for (const FGameplayTag& Tag : CooldownTags)
+	{
+		if (const TSoftObjectPtr<UTexture2D>* Found = SkillIcons.Find(Tag))
+		{
+			// 행은 있는데 그림을 안 꽂아 둔 경우는 없는 것으로 친다
+			if (!Found->IsNull())
+			{
+				return *Found;
+			}
+		}
+	}
+
+	return SkillFallbackIcon;
+}
