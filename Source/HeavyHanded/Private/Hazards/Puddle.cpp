@@ -1,9 +1,11 @@
 ﻿#include "Hazards/Puddle.h"
 
+#include "AbilitySystemComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameplayEffect.h"      // UGameplayEffect 완전한 타입 — TSubclassOf 의 StaticClass() 호출에 필요하다
+#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -65,6 +67,17 @@ void APuddle::OnZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 	if (!IsValid(Target) || !SlowEffectClass)
 	{
 		return;
+	}
+
+	// 그림자 이동 중엔 무시한다 — 다른 Hazard 클래스들과 동일 사유
+	// [임시: 네이티브 선언 대신 문자열 조회] — HeavyHandedGameplayTags.h 를 건드리지 않는다
+	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
+	{
+		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
+		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
+		{
+			return;
+		}
 	}
 
 	Target->ApplyGameplayEffectToSelf(SlowEffectClass);

@@ -1,11 +1,13 @@
 ﻿#include "Hazards/SlipTrap.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "Engine/World.h"
+#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
@@ -71,6 +73,17 @@ void ASlipTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 			TEXT("[SlipTrap:%s] %s 가 밟았지만 이미 State.Downed 상태라 무시했다"),
 			*GetName(), *Target->GetName());
 		return;
+	}
+
+	// 그림자 이동 중엔 무시한다 — 다른 Hazard 클래스들과 동일 사유
+	// [임시: 네이티브 선언 대신 문자열 조회] — HeavyHandedGameplayTags.h 를 건드리지 않는다
+	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
+	{
+		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
+		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
+		{
+			return;
+		}
 	}
 
 	// ── 1. 넉백이 먼저다 — 아직 정상 이동 모드일 때 걸어야 씹히지 않는다 ──
