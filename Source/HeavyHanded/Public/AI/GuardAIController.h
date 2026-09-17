@@ -63,6 +63,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|AI")
 	TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
+public:
+
+	AGuardCharacter* GetPossessGuardPawn() const { return PossessGuardPawn; }
+	FString GetPossessGuardPawnName() const;
+
+
 
 	// AI State 상태 관리
 	// ========================================================
@@ -156,16 +162,10 @@ public:
 	// Hearing이 타이머를 가지고 있으려면 Controller가 지금 속도 증가 상태인지를 알아야 함
 	// 현재 월드 경계도로 인해 이동 속도가 증가된 상태인지 반환한다.
 	bool IsWorldAlertSpeedUp() const { return bWorldAlertSpeedUp; }
+	void SetWorldAlertSpeedUp(bool bInSpeedUp) { bWorldAlertSpeedUp = bInSpeedUp; }
 
-
-public:
-	// hearing 이동 예정 ------------------------
-	UFUNCTION() // 타이머 만료 함수
-	void HandleWorldAlertSilenceTimeout();
-
-	// hearing 이동 예정 ------------------------
-	UFUNCTION() // 디버그용
-	void LogWorldAlertSilenceRemaining();
+	float GetNormalMoveSpeed() const { return NormalMoveSpeed; }
+	float GetWorldAlertSilenceDelay() const { return WorldAlertSilenceDelay; }
 
 
 private:
@@ -189,16 +189,6 @@ private:
 	// 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
 	bool bWorldAlertSpeedTriggered = false;
 
-
-private:
-	// hearing 이동 예정 ------------------------
-	// 경계도 속도 증가 상태를 해제하기 위한 무소음 타이머.
-	FTimerHandle WorldAlertSilenceTimerHandle;
-
-	// hearing 이동 예정 ------------------------
-	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
-	FTimerHandle WorldAlertSilenceDebugTimerHandle;
-
 	// 게이지가 올라갈 때만 리셋 위함
 	float PreviousWorldAlertLevel = 0.0f;
 
@@ -209,6 +199,11 @@ private:
 
 
 	// ==================================================================================
+
+
+public:
+	// 월드 경계도에 의해 증가된 이동 속도를 기본 속도로 복구한다.
+	void ResetMoveSpeed();
 
 
 
