@@ -13,6 +13,24 @@ class UWorld;
 class UInputAction;
 class UInputMappingContext;
 
+USTRUCT()
+struct FHeistEntryOption
+{
+	GENERATED_BODY()
+
+	/** 진입점 루트 식별자 */
+	UPROPERTY(EditAnywhere, Category = "Travel", meta = (Categories = "Entry"))
+	FGameplayTag EntryTag;
+
+	/** 이름 */
+	UPROPERTY(EditAnywhere, Category = "Travel")
+	FText DisplayName;
+
+	/** 설명 */
+	UPROPERTY(EditAnywhere, Category = "Travel", meta = (MultiLine = "true"))
+	FText Description;
+};
+
 /**
  * 장소(Site.*) 하나와 그 작업 레벨.
  * TMap 이 아닌 것은 FGameplayTag 키가 `.ini` 에서 손으로 못 고칠 줄이 되기 때문이고,
@@ -37,6 +55,10 @@ struct FHeistSiteLevel
 	UPROPERTY(EditAnywhere, Category = "Travel",
 		meta = (AllowedClasses = "/Script/Engine.World"))
 	TSoftObjectPtr<UWorld> Level;
+
+	/** 선택할 수 있는 진입점 */
+	UPROPERTY(EditAnywhere, Category = "Travel", meta = (TitleProperty = "EntryTag"))
+	TArray<FHeistEntryOption> Entries;
 };
 
 /**
@@ -88,6 +110,39 @@ public:
 		}
 
 		return FSoftObjectPath();
+	}
+
+	/** 진입점 목록 */
+	const TArray<FHeistEntryOption>& GetSiteEntries(const FGameplayTag& SiteTag) const
+	{
+		static const TArray<FHeistEntryOption> Empty;
+		if (!SiteTag.IsValid())
+		{
+			return Empty;
+		}
+
+		for (const FHeistSiteLevel& Entry : SiteLevels)
+		{
+			if (Entry.SiteTag == SiteTag)
+			{
+				return Entry.Entries;
+			}
+		}
+
+		return Empty;
+	}
+
+	/** 진입점 유무 체크 */
+	bool IsEntryRegistered(const FGameplayTag& SiteTag, const FGameplayTag& EntryTag) const
+	{
+		for (const FHeistEntryOption& Option : GetSiteEntries(SiteTag))
+		{
+			if (Option.EntryTag == EntryTag)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** 겜페인 순서
