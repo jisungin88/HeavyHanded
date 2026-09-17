@@ -31,7 +31,7 @@
 // Sets default values for this component's properties
 UGuardSightAComponent::UGuardSightAComponent()
 {
-
+	PrimaryComponentTick.bCanEverTick = true;
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
@@ -159,6 +159,27 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 	}
 
 	return 0.5f;
+}
+
+void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
+{
+	bDrawSightDebug = bInEnabled;
+	SetComponentTickEnabled(bInEnabled);
+
+	if (!bInEnabled)
+	{
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner()))
+		{
+			if (AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn()))
+			{
+				if (UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh())
+				{
+					Mesh->SetVisibility(false);
+					// 또는 Mesh->ClearAllMeshSections(); 로 지오메트리 자체를 비워도 됨
+				}
+			}
+		}
+	}
 }
 
 

@@ -86,11 +86,7 @@ public:
 	// 양안 시야 안에서는 정상 속도, 주변 시야에서는 감소된 속도를 사용한다.
 	float GetBinocularVisionRate(AActor* TargetActor) const;
 
-	void SetSightDebugEnabled(bool bInEnabled)
-	{
-		bDrawSightDebug = bInEnabled;
-		PrimaryComponentTick.bCanEverTick = bInEnabled;
-	}
+	void SetSightDebugEnabled(bool bInEnabled);
 
 private:
 	UPROPERTY()

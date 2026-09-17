@@ -13,6 +13,7 @@
 
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardSightAComponent.h"
 
 #include "ProceduralMeshComponent.h"
 
@@ -169,9 +170,18 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 	GaugeWidget->SetGaugePercent(GaugePercent);
 }
 
+void AGuardCharacter::SetDrawSightDebugEnabled(bool bInEnabled)
+{
+	bDrawSightDebug = bInEnabled;
 
-
-
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetController()))
+	{
+		if (GuardController->GuardSightComp)
+		{
+			GuardController->GuardSightComp->SetSightDebugEnabled(bInEnabled);
+		}
+	}
+}
 
 void AGuardCharacter::SetGuardMoveSpeed(float NewMoveSpeed)
 {

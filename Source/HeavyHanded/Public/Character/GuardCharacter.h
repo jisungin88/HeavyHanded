@@ -55,7 +55,8 @@ public:
 
 	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
 	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
-	void SetDrawSightDebugEnabled(bool bInEnabled) { bDrawSightDebug = bInEnabled; }
+	UFUNCTION(BlueprintCallable, Category = "Guard|Debug")
+	void SetDrawSightDebugEnabled(bool bInEnabled);
 
 	UProceduralMeshComponent* GetSightDebugMesh() const { return SightDebugMesh; }
 
