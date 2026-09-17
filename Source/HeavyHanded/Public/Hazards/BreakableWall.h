@@ -51,7 +51,8 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/**
-	 * 이 충격이 벽에 타격 하나를 입힌다. (서버 전용)
+	 * 이 충격이 벽에 타격 하나를 입힌다. (서버 전용 — 내부에서 HasAuthority() 를 직접 확인하므로
+	 * 클라이언트에서 예측 실행되는 어빌리티 그래프가 불러도 안전하게 무시된다)
 	 *
 	 * HitPoints 번 맞아야 부서진다 — 한 번 부딪혔다고 바로 안 부서질 수 있다.
 	 * 부서지기 전까지는 맞을 때마다 ApplyCrackVisual() 로 균열이 진행된다.
@@ -61,6 +62,7 @@ public:
 	 * @param ImpactRadius   폭발 반경. 0 이면 직접 타격(돌진)으로 보고 거리 판정을 생략한다
 	 * @return 이번 타격으로 완전히 부서졌으면 true. 범위 밖이거나 아직 HP 가 남았으면 false
 	 */
+	UFUNCTION(BlueprintCallable, Category = "Hazard|Break")
 	bool TryBreak(const AActor* Breacher, const FVector& ImpactLocation, float ImpactRadius = 0.f);
 
 	UFUNCTION(BlueprintPure, Category = "Hazard|Break")
