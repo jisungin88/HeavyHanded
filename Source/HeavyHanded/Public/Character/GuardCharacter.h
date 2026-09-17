@@ -9,6 +9,8 @@
 class UPerceptionMeterComponent;
 class UWidgetComponent;
 
+class UProceduralMeshComponent;
+
 UCLASS()
 class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 {
@@ -26,13 +28,39 @@ public:
 	EGuardType GuardType = EGuardType::Standard;
 
 
+private:
 
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
+	// AllowPrivateAccess
+	// 경비의 시야 감지 기능을 활성화할지 여부
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bEnableSight = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (DisplayPriority = 1))
+	// 경비의 청각 감지 기능을 활성화할지 여부
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bEnableHearing = true;
+
+	// 경비의 시야 디버그 표시를 활성화할지 여부
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
+	bool bDrawSightDebug = true;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
+
+public:
+
+	bool IsSightEnabled() const { return bEnableSight; }
+	bool IsHearingEnabled() const { return bEnableHearing; }
+	bool IsDrawSightDebugEnabled() const { return bDrawSightDebug; }
+
+	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
+	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
+	void SetDrawSightDebugEnabled(bool bInEnabled) { bDrawSightDebug = bInEnabled; }
+
+	UProceduralMeshComponent* GetSightDebugMesh() const { return SightDebugMesh; }
+
+
+	//// ---------------------------------------------------------------------------------
 
 	void SetGuardMoveSpeed(float NewMoveSpeed);
 
@@ -61,9 +89,33 @@ public:
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
 
 
+private:
 
+	// float CapsuleBaseRelativeLocationZ = 0.0f;
 
 protected:
+
+	// // 캡슐의 바닥 위치를 유지하기 위한 기준 Half Height
+	// UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Guard|Collision")
+	// float CapsuleBaseHalfHeight = 88.0f;
+	// 
+	// //// 캡슐의 기본 Relative Location
+	// //UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Guard|Collision")
+	// //FVector CapsuleBaseRelativeLocation = 0// FVector::ZeroVector;
+	// 
+	// virtual void OnConstruction(const FTransform& Transform) override;
+
+
+private:
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Perception", meta = (AllowPrivateAccess = "true"))
+	float EyeHeight = 88.0f;
+
+public:
+
+	float GetEyeHeight() const { return EyeHeight; }
+
+
 	virtual void BeginPlay() override;
 
 

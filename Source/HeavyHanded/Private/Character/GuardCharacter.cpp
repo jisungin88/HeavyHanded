@@ -14,6 +14,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
 
+#include "ProceduralMeshComponent.h"
+
 
 AGuardCharacter::AGuardCharacter()
 {
@@ -60,7 +62,14 @@ AGuardCharacter::AGuardCharacter()
 	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
 	// HearingGaugeWidgetComponent->SetDrawAtDesiredSize(false);
 
+
+	SightDebugMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SightDebugMesh"));
+	SightDebugMesh->SetupAttachment(GetRootComponent());
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SightDebugMesh->SetCastShadow(false);
+
 }
+
 
 void AGuardCharacter::BeginPlay()
 {
@@ -94,6 +103,7 @@ void AGuardCharacter::BeginPlay()
 	}
 
 	UpdatePerceptionWidgets();
+
 
 }
 

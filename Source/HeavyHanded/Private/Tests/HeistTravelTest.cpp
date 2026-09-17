@@ -1,4 +1,5 @@
-﻿#include "Misc/AutomationTest.h"
+﻿#include "Core/HeavyHandedGameplayTags.h"
+#include "Misc/AutomationTest.h"
 
 #include "Core/HeistSettings.h"
 #include "Core/HeistTravel.h"
@@ -154,6 +155,85 @@ bool FHeistSiteLevelsTest::RunTest(const FString& Parameters)
 			// 박물관 맵이 생겨서 등록된 것이라면 정상이다. 그때는 이 블록을 지운다
 			AddInfo(TEXT("Site.Museum 이 등록돼 있다 — 박물관 맵이 생겼다면 정상이다"));
 		}
+	}
+
+	return true;
+}
+
+/** 장소별 진입점 목록 */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHeistSiteEntriesTest,
+	"HeavyHanded.Heist.Travel.SiteEntriesResolve",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHeistSiteEntriesTest::RunTest(const FString& Parameters)
+{
+	const UHeistSettings* Settings = UHeistSettings::Get();
+
+	if (!TestFalse(TEXT("SiteLevels가 비어 있다 - 진입점을 검사할 대상이 없음"),
+		Settings->SiteLevels.IsEmpty()))
+	{
+		return false;
+	}
+
+	// 각 장소의 진입점
+	for (const FHeistSiteLevel& Site : Settings->SiteLevels)
+	{
+		const FString SiteName = Site.SiteTag.ToString();
+		if (Site.Entries.IsEmpty())
+		{
+			AddInfo(FString::Printf(TEXT("%s에 진입점이 없음"), *SiteName));
+			continue;
+		}
+
+		TSet<FGameplayTag> Seen;
+		for (const FHeistEntryOption& Option : Site.Entries)
+		{
+			TestTrue(FString::Printf(TEXT("%s의 진입점 태그 등록 확인"), *SiteName),
+				Option.EntryTag.IsValid());
+
+			TestTrue(FString::Printf(TEXT("%s의 %s는 Entry 루트 아래여야 함"), *SiteName, *Option.EntryTag.ToString()),
+				Option.EntryTag.MatchesTag(HHTags::Entry));
+
+			bool bAlreadySeen = false;
+			Seen.Add(Option.EntryTag, &bAlreadySeen);
+			TestFalse(FString::Printf(TEXT("%s에 %s가 중복 등록되어 있음"), *SiteName, *Option.EntryTag.ToString()),
+				bAlreadySeen);
+
+			TestFalse(FString::Printf(TEXT("%s의 %s에 이름 기입 필요"), *SiteName, *Option.EntryTag.ToString()),
+				Option.DisplayName.IsEmpty());
+
+			TestTrue(FString::Printf(TEXT("%s의 %s를 IsEntryRegistered로 확인"), *SiteName, *Option.EntryTag.ToString()),
+				Settings->IsEntryRegistered(Site.SiteTag, Option.EntryTag));
+		}
+	}
+
+	// 해당 장소에 알맞는 진입점 체크
+	for (const FHeistSiteLevel& Site : Settings->SiteLevels)
+	{
+		for (const FHeistSiteLevel& Other : Settings->SiteLevels)
+		{
+			if (Other.SiteTag == Site.SiteTag)
+			{
+				continue;
+			}
+
+			for (const FHeistEntryOption& Option : Other.Entries)
+			{
+				TestFalse(FString::Printf(TEXT("%s의 진입점 %s가 %s에도 등록되어 있음"),
+					*Other.SiteTag.ToString(), *Option.EntryTag.ToString(), *Site.SiteTag.ToString()),
+					Settings->IsEntryRegistered(Site.SiteTag, Option.EntryTag));
+			}
+		}
+	}
+
+	// 등록되지 않은 장소에 대한 처리
+	const FGameplayTag Unknown = FGameplayTag::RequestGameplayTag(TEXT("Site.Bank"), false);
+	if (Unknown.IsValid() && Settings->GetSiteLevel(Unknown).IsNull())
+	{
+		TestTrue(TEXT("등록되지 않은 장소의 진입점 목록 비움"),
+			Settings->GetSiteEntries(Unknown).IsEmpty());
+		TestFalse(TEXT("등록되지 않은 장소에 진입점은 없음"),
+			Settings->IsEntryRegistered(Unknown, FGameplayTag()));
 	}
 
 	return true;
