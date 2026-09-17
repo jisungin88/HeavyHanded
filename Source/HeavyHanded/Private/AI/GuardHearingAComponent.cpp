@@ -18,6 +18,9 @@
 #include "AI/GuardTypes.h"
 #include "GameplayTagContainer.h"
 
+#include "AbilitySystemGlobals.h"
+#include "AbilitySystemComponent.h"
+
 
 // Sets default values for this component's properties
 UGuardHearingAComponent::UGuardHearingAComponent()
@@ -54,6 +57,16 @@ void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent
 
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
+
+	const FGameplayTag GuardDisguiseTag = FGameplayTag::RequestGameplayTag(FName("Ability.Mimic.GuardDisguise"));
+
+	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
+
+	if (TargetASC && TargetASC->HasMatchingGameplayTag(GuardDisguiseTag))
+	{
+		return;
+	}
+
 
 	// 일단 게이지가 차기 전엔 의심만
 	if (Stimulus.Type != UAISense::GetSenseID<UAISense_Hearing>())

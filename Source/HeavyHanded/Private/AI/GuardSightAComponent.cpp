@@ -24,6 +24,9 @@
 #include "GameplayTagContainer.h"
 #include "ProceduralMeshComponent.h"
 
+#include "AbilitySystemGlobals.h"
+#include "AbilitySystemComponent.h"
+
 
 // Sets default values for this component's properties
 UGuardSightAComponent::UGuardSightAComponent()
@@ -170,6 +173,16 @@ void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
+
+	const FGameplayTag GuardDisguiseTag = FGameplayTag::RequestGameplayTag(FName("Ability.Mimic.GuardDisguise"));
+
+	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
+
+	if (TargetASC && TargetASC->HasMatchingGameplayTag(GuardDisguiseTag))
+	{
+		return;
+	}
+
 
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
