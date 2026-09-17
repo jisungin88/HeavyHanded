@@ -165,10 +165,6 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable)
 	void ServerSetEntryTag(EEntryTag NewTag);
 
-	// 클라이언트에서 Site 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetSiteTag(ESiteTag NewTag);
-
 
 	// --- 로딩 UI ---
 	UFUNCTION(Client, Reliable)

@@ -16,6 +16,8 @@ namespace HHTags
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Escape, "Phase.Escape");
 	UE_DEFINE_GAMEPLAY_TAG(Phase_Result, "Phase.Result");
 
+	UE_DEFINE_GAMEPLAY_TAG(Entry, "Entry");
+
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type,          "Loot.Type");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Heavy,    "Loot.Type.Heavy");
 	UE_DEFINE_GAMEPLAY_TAG(Loot_Type_Fragile,  "Loot.Type.Fragile");

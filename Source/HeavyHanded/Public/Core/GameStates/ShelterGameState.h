@@ -6,6 +6,7 @@
 #include "GameFramework/GameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "GameplayTagContainer.h" // Tag 사용 위함
+#include "Core/RunProgressView.h"
 
 #include "ShelterGameState.generated.h"
 
@@ -23,15 +24,6 @@ enum class EEntryTag : uint8
 	Alley
 };
 
-UENUM(BlueprintType)
-enum class ESiteTag : uint8
-{
-	None,
-	Mansion,
-	Museum,
-	Bank
-};
-
 // .h
 
 
@@ -43,6 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRunProgressChanged, FRunProgressView, Progress);
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -62,12 +55,25 @@ public:
 
     void UpdateLobbyPlayerCount();
 
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Run")
+	FOnRunProgressChanged OnRunProgressChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Run")
+	const FRunProgressView& GetRunProgress() const { return RunProgress; }
+
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Run")
+	void PublishRunProgress();
+
 protected:
 
     virtual void AddPlayerState(APlayerState* PlayerState) override;
     virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RunProgress, BlueprintReadOnly, Category = "Shelter|Run")
+	FRunProgressView RunProgress;
 
+	UFUNCTION()
+	void OnRep_RunProgress();
 // --------------------------------------------------------------
 
 public:
@@ -134,28 +140,14 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_EntryTag, BlueprintReadOnly)
 	EEntryTag EntryTag = EEntryTag::Front; //초기값
 
-	// 현재 선택된 Site
-	UPROPERTY(ReplicatedUsing = OnRep_SiteTag, BlueprintReadOnly)
-	ESiteTag SiteTag = ESiteTag::Mansion;
-
 	// 서버에서 Entry를 변경
 	// PlayerController의 Server RPC에서 호출
 	UFUNCTION(BlueprintCallable)
 	void SetEntryTag(EEntryTag NewTag);
 
-	// 서버에서 Site를 변경
-	// PlayerController의 Server RPC에서 호출
-	UFUNCTION(BlueprintCallable)
-	void SetSiteTag(ESiteTag NewTag);
-
-
 	// EntryTag가 클라이언트에 복제되었을 때 호출
 	UFUNCTION()
 	void OnRep_EntryTag();
-
-	// SiteTag가 클라이언트에 복제되었을 때 호출
-	UFUNCTION()
-	void OnRep_SiteTag();
 
 	// 모든 태그 디버그
 	UFUNCTION(BlueprintCallable)

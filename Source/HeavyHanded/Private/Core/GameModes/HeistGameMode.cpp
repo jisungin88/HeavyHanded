@@ -711,6 +711,12 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 		return;
 	}
 
+	// **SetPhase() 보다 먼저 부른다.** SetPhase() 는 맨 끝에서 OnRep_CurrentPhase() 를 직접
+	// 불러 결과 화면을 그 자리에서 동기로 띄우는데, 그 화면이 GetOutcome() 을 바로 읽는다.
+	// 뒤에 두면 호스트만 FinalizeOutcome() 전의 기본값(Failure)을 읽어 무조건 실패로 나온다
+	// (클라이언트는 복제로 늦게 받아 정상이라, 호스트와 클라 결과가 어긋난다).
+	OnPhaseEntered(Phase, Reason);
+
 	const float Duration = GetPhaseDuration(Phase);
 	GS->SetPhase(Phase, Duration, Reason);
 
@@ -721,8 +727,6 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 	{
 		Timers.SetTimer(PhaseTimerHandle, this, &AHeistGameMode::HandlePhaseElapsed, Duration, false);
 	}
-
-	OnPhaseEntered(Phase, Reason);
 }
 
 void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason)
@@ -760,6 +764,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 		CarryOverArrests();
 		ReleaseServedSpectators();
 		RecordSiteProgress();
+
+		PublishNextSite();
 	}
 }
 
@@ -962,6 +968,24 @@ void AHeistGameMode::RecordSiteProgress()
 	// 무효 태그 경고는 서브시스템이 남긴다 — 목록을 오염시키지 않는 것이 그쪽 책임이라
 	// 판정을 여기서 한 번 더 적지 않는다
 	Run->RecordSiteCleared(SiteTag);
+}
+
+void AHeistGameMode::PublishNextSite()
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+
+	if (!GS || !Run)
+	{
+		return;
+	}
+
+	// 무효 태그면 전 장소를 통과했다는 뜻이다. 결과 화면이 "다음 목표" 대신
+	// 최종 성공을 띄우는 근거가 된다 — 여기서 폴백으로 첫 장소를 채우지 말 것
+	GS->NextSite = Run->GetNextSite();
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 게시 — %s"),
+			GS->NextSite.IsValid() ? *GS->NextSite.ToString() : TEXT("(없음 — 최종 성공)"));
 }
 
 void AHeistGameMode::CarryOverArrests()
@@ -1197,6 +1221,41 @@ static FAutoConsoleCommandWithWorld GPhaseShowCommand(
 	  TEXT("hh.Phase.Show"),
 	  TEXT("현재 페이즈 · 남은 시간 · 적재 금액을 찍는다. 클라이언트 창에서도 동작한다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&PhaseShowCommand),
+	  ECVF_Cheat);
+
+// 목표 금액을 채우려고 매번 실제로 노획물을 날라 밴에 싣는 것은 탈출/결과 페이즈
+// 쪽 코드를 고칠 때마다 7~9분씩 든다. 인자가 없으면 목표 금액까지 정확히 채우고,
+// 인자를 주면 그 액수만큼만 더한다(음수면 깎인다) — AddLoadedValue 를 그대로 태워서
+// LoadedEntries 를 건드리지 않는다는 점은 알아둘 것(결과 화면 적재 목록은 안 늘어난다)
+static void HeistFillValueCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("hh.Heist.FillValue 는 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Delta = Args.IsValidIndex(0)
+		? FCString::Atoi(*Args[0])
+		: GS->GetTargetValue() - GS->GetLoadedValue();
+
+	GS->AddLoadedValue(Delta);
+
+	UE_LOG(LogHeist, Log, TEXT("hh.Heist.FillValue — 적재 $%d of $%d"),
+		GS->GetLoadedValue(), GS->GetTargetValue());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GHeistFillValueCommand(
+	  TEXT("hh.Heist.FillValue"),
+	  TEXT("hh.Heist.FillValue [금액] — 적재 금액을 채운다. 인자가 없으면 목표 금액까지 바로 채운다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&HeistFillValueCommand),
 	  ECVF_Cheat);
 
 // 결과 화면(오유석)이 붙기 전까지 Result 데이터를 눈으로 확인할 유일한 수단이다.
