@@ -26,18 +26,16 @@ public:
 	EGuardType GuardType = EGuardType::Standard;
 
 
+private:
 
-
+	// AllowPrivateAccess
 	// 경비의 시야 감지 기능을 활성화할지 여부
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bEnableSight = true;
 
 	// 경비의 청각 감지 기능을 활성화할지 여부
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bEnableHearing = true;
-
-
-private:
 
 	// 경비의 시야 디버그 표시를 활성화할지 여부
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
@@ -46,9 +44,15 @@ private:
 
 public:
 
+	bool IsSightEnabled() const { return bEnableSight; }
+	bool IsHearingEnabled() const { return bEnableHearing; }
 	bool IsDrawSightDebugEnabled() const { return bDrawSightDebug; }
+
+	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
+	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
 	void SetDrawSightDebugEnabled(bool bInEnabled) { bDrawSightDebug = bInEnabled; }
 
+	//// ---------------------------------------------------------------------------------
 
 	void SetGuardMoveSpeed(float NewMoveSpeed);
 

@@ -119,8 +119,8 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	GuardHearingComp->InitializeHearingPerception(PerceptionComp);
 
 	// 시야, 청각 활성화 여부 결정 (테스트용)
-	GuardSightComp->SetSightEnabled(PossessGuardPawn->bEnableSight);
-	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->bEnableHearing);
+	GuardSightComp->SetSightEnabled(PossessGuardPawn->IsSightEnabled());
+	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->IsHearingEnabled());
 
 	//DebugLine (개발중에만 필요, 추후 비활성화)
 	GuardSightComp->SetSightDebugEnabled(PossessGuardPawn->IsDrawSightDebugEnabled());

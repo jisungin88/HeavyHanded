@@ -62,31 +62,6 @@ AGuardCharacter::AGuardCharacter()
 
 }
 
-// void AGuardCharacter::OnConstruction(const FTransform& Transform)
-// {
-// 
-// 	//Super::OnConstruction(Transform);
-// 	//
-// 	//UCapsuleComponent* Capsule = GetCapsuleComponent();
-// 	//if (!Capsule)
-// 	//{
-// 	//	return;
-// 	//}
-// 	//
-// 	//if (CapsuleBaseRelativeLocation.IsNearlyZero())
-// 	//{
-// 	//	CapsuleBaseRelativeLocation = Capsule->GetRelativeLocation();
-// 	//}
-// 	//
-// 	//const float CurrentHalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
-// 	//const float OffsetZ = CapsuleBaseHalfHeight - CurrentHalfHeight;
-// 	//
-// 	//FVector RelativeLocation = CapsuleBaseRelativeLocation;
-// 	//RelativeLocation.Z += OffsetZ;
-// 	//
-// 	//Capsule->SetRelativeLocation(RelativeLocation);
-// 
-// }
 
 void AGuardCharacter::BeginPlay()
 {
@@ -120,22 +95,6 @@ void AGuardCharacter::BeginPlay()
 	}
 
 	UpdatePerceptionWidgets();
-
-
-
-	// UCapsuleComponent* Capsule = GetCapsuleComponent();
-	// if (!Capsule)
-	// {
-	// 	return;
-	// }
-	// 
-	// const float CurrentHalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
-	// const float OffsetZ = CapsuleBaseHalfHeight - CurrentHalfHeight;
-	// 
-	// FVector RelativeLocation = Capsule->GetRelativeLocation();
-	// RelativeLocation.Z += OffsetZ;
-	// Capsule->SetRelativeLocation(RelativeLocation);
-
 
 
 }

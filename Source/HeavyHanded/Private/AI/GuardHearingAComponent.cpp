@@ -16,17 +16,12 @@
 #include "AI/GuardBlackboardKeys.h"
 
 #include "AI/GuardTypes.h"
+#include "GameplayTagContainer.h"
 
 
 // Sets default values for this component's properties
 UGuardHearingAComponent::UGuardHearingAComponent()
 {
-
-	// 사용시 생성자에 true 필요
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	//PrimaryComponentTick.bCanEverTick = true;
-
 
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서

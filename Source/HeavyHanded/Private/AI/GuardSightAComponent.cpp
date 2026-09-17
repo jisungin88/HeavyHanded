@@ -21,6 +21,8 @@
 #include "Character/GuardCharacter.h"
 #include "Components/CapsuleComponent.h"
 
+#include "GameplayTagContainer.h"
+
 
 // Sets default values for this component's properties
 UGuardSightAComponent::UGuardSightAComponent()
