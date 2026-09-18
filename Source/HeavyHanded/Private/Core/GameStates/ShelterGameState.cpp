@@ -6,6 +6,8 @@
 #include "GameplayTagsManager.h"
 #include "Core/RunProgressSubsystem.h"
 #include "Core/HeistLog.h"
+#include "Core/HeistSettings.h"
+#include "UI/UISettings.h"         // GetSiteDisplayName — 장소 이름의 폴백 문구가 거기 있다
 #include "HAL/IConsoleManager.h"
 #include "Shared/NetAuthority.h"
 
@@ -30,6 +32,8 @@ void AShelterGameState::PublishRunProgress()
 	}
 
 	RunProgress = Run->MakeProgressView();
+
+	EnsureEntrySelected();
 
 	OnRep_RunProgress();
 
@@ -479,22 +483,139 @@ void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
 // 여기서 직접 Server RPC를 호출하는 구조는 적합하지 않음
 // ----------------
 
-void AShelterGameState::SetEntryTag(EEntryTag NewTag)
+void AShelterGameState::SetSelectedEntry(FGameplayTag NewEntry)
 {
-	// GameState의 공용 값은 서버에서만 변경
 	if (!HasAuthority())
 	{
 		return;
 	}
 
-	// 현재 Entry 변경
-	EntryTag = NewTag;
+	if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+		if (NewEntry.IsValid())
+		{
+			Run->TrySelectEntry(NewEntry);
+		}
+		else
+		{
+			Run->ClearSelectedEntry();
+		}
+	}
 
-	// 호스트의 UI 갱신
+	if (SelectedEntry == NewEntry)
+	{
+		return;
+	}
+
+	SelectedEntry = NewEntry;
+
 	OnTravelTagChanged.Broadcast();
 }
 
-void AShelterGameState::OnRep_EntryTag()
+TArray<FHeistEntryOption> AShelterGameState::GetEntryOptions() const
+{
+	return UHeistSettings::Get()->GetSiteEntries(RunProgress.NextSite);
+}
+
+void AShelterGameState::EnsureEntrySelected()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	FHeistEntryOption Found;
+	if (FindEntryOption(SelectedEntry, Found))
+	{
+		return;
+	}
+
+	const TArray<FHeistEntryOption> Options = GetEntryOptions();
+
+	SetSelectedEntry(Options.IsEmpty() ? FGameplayTag() : Options[0].EntryTag);
+}
+
+FGameplayTag AShelterGameState::GetNextEntryOption() const
+{
+	const TArray<FHeistEntryOption> Options = GetEntryOptions();
+	if (Options.IsEmpty())
+	{
+		return FGameplayTag();
+	}
+
+	int32 Index = INDEX_NONE;
+	for (int32 i = 0; i < Options.Num(); ++i)
+	{
+		if (Options[i].EntryTag == SelectedEntry)
+		{
+			Index = i;
+			break;
+		}
+	}
+
+	return Options[(Index + 1) % Options.Num()].EntryTag;
+}
+
+bool AShelterGameState::FindEntryOption(FGameplayTag EntryTag, FHeistEntryOption& OutOption) const
+{
+	if (!EntryTag.IsValid())
+	{
+		return false;
+	}
+
+	for (const FHeistEntryOption& Option : GetEntryOptions())
+	{
+		if (Option.EntryTag == EntryTag)
+		{
+			OutOption = Option;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FHeistSiteView AShelterGameState::GetSiteView(FGameplayTag SiteTag) const
+{
+	FHeistSiteView View;
+	View.SiteTag = SiteTag;
+
+	// 이름은 UUISettings 를 거친다 — 표에 행이 없을 때의 폴백 문구("작업 장소")가 거기 있고,
+	// 그 문구는 UI 소관이다. 이름 자체의 진리원은 UUISettings 안에서도 DT_SiteCatalog 다
+	View.DisplayName = UUISettings::Get()->GetSiteDisplayName(SiteTag);
+
+	const UHeistSettings* Settings = UHeistSettings::Get();
+	const FHeistSiteRow* Site = Settings->FindSite(SiteTag);
+	if (!Site)
+	{
+		// 등록되지 않은 장소. bReady 가 거짓이라 출발 문이 잠긴다
+		return View;
+	}
+
+	View.Description  = Site->Description;
+	View.Image        = Site->Image;
+	View.TargetValue  = Site->TargetValue;
+	View.HeistSeconds = Site->HeistSeconds;
+	View.EscapeSeconds= Site->EscapeSeconds;
+	View.EntryNum     = Site->Entries.Num();
+
+	// ── 여기부터는 표에 없는 값이다 ──
+	View.bCleared = RunProgress.ClearedSites.Contains(SiteTag);
+
+	// 레벨이 없거나 목표가 0 이면 떠나도 판이 성립하지 않는다.
+	// 위젯이 이걸 보고 버튼을 잠근다 — 눌렀는데 아무 일도 안 일어나는 것보다 낫다
+	View.bReady = !Site->Level.IsNull() && Site->TargetValue > 0;
+
+	return View;
+}
+
+FHeistSiteView AShelterGameState::GetNextSiteView() const
+{
+	// 목표는 캠페인 진행이 정한다. RunProgress 는 복제되므로 클라이언트에서도 유효하다
+	return GetSiteView(RunProgress.NextSite);
+}
+
+void AShelterGameState::OnRep_SelectedEntry()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
 	OnTravelTagChanged.Broadcast();
@@ -520,7 +641,7 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AShelterGameState, JobStateChanged);
 	DOREPLIFETIME(AShelterGameState, bCanStart);
 
-	DOREPLIFETIME(AShelterGameState, EntryTag);
+	DOREPLIFETIME(AShelterGameState, SelectedEntry);
 
 	DOREPLIFETIME(AShelterGameState, RunProgress);
 }

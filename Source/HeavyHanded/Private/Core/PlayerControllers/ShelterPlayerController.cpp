@@ -4,6 +4,7 @@
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
 #include "Core/HeistLog.h"   // 직업 확정 → 역할 기록 → 폰 스폰을 한 카테고리로 따라간다
 #include "Core/RunProgressSubsystem.h"
+#include "Core/HeavyHandedGameplayTags.h"
 #include "Core/HeistSettings.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/GameStateBase.h"
@@ -584,55 +585,39 @@ void AShelterPlayerController::ClientHideJobSelect_Implementation()
 
 //-------------------------------------------------------------------------------
 
-
-void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag)
+bool AShelterPlayerController::ServerSetEntryTag_Validate(FGameplayTag NewEntry)
 {
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
+	// 무효 태그 확인
+	return !NewEntry.IsValid() || NewEntry.MatchesTag(HHTags::Entry);
+}
+
+void AShelterPlayerController::ServerSetEntryTag_Implementation(FGameplayTag NewEntry)
+{
+	UWorld* World = GetWorld();
+	AShelterGameState* GameState = World ? World->GetGameState<AShelterGameState>() : nullptr;
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!GameState || !Run)
 	{
+		UE_LOG(LogHeist, Warning, TEXT("진입점 선택 무시 — GameState 또는 런 진행이 없습니다."));
 		return;
 	}
 
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-	if (!Subsystem)
+	if (!NewEntry.IsValid())
 	{
+		GameState->SetSelectedEntry(FGameplayTag());
 		return;
 	}
 
-	// 서버 GameState의 Entry 변경
-	GameState->SetEntryTag(NewTag);
-
-	FGameplayTag EntryTag;
-
-	// config/Phase.ini 참고할 것
-	switch (NewTag)
+	// 실제로 있는 진입점 확인 여부
+	const FGameplayTag Site = Run->GetNextSite();
+	if (!UHeistSettings::Get()->IsEntryRegistered(Site, NewEntry))
 	{
-	case EEntryTag::Front:
-		// GameplayTagList = (Tag = "Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Front"));
-		break;
-
-
-	case EEntryTag::Garage:
-		// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Garage"));
-		break;
-
-	case EEntryTag::Alley:
-		// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Alley"));
-		break;
-
-	default:
-		EntryTag = FGameplayTag();
-		break;
+		UE_LOG(LogHeist, Warning, TEXT("진입점 선택 무시 — %s 는 %s 에 등록돼 있지 않습니다."),
+		       *NewEntry.ToString(), *Site.ToString());
+		return;
 	}
 
-
-	// Entry 정보도 Subsystem에 먼저 전달
-	Subsystem->TrySelectEntry(EntryTag);
-
+	GameState->SetSelectedEntry(NewEntry);
 }
 
 void AShelterPlayerController::ClientShowStartGameWindow_Implementation()

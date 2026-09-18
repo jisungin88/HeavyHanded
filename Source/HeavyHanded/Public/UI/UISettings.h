@@ -119,10 +119,10 @@ public:
 	TSoftObjectPtr<UTexture2D> GetSkillIcon(const FGameplayTagContainer& CooldownTags) const;
 
 	/**
-	 * 장소 표시 이름. 표에 없으면 LoadingUnknownSiteText 를 돌려준다.
+	 * 장소 표시 이름. 이름의 진리원은 **DT_SiteCatalog** 이고 여기서는 받아 넘기기만 한다.
 	 *
-	 * SiteDisplayNames 를 직접 읽지 말 것 — 행이 지워지면 제목이 빈 채로 나가서
-	 * "진입 중…" 만 덩그러니 남는다. 그 방어가 여기 있다
+	 * 행이 없거나 이름이 비어 있으면 LoadingUnknownSiteText 를 돌려준다 — 제목이 통째로
+	 * 비면 "진입 중…" 만 덩그러니 남기 때문이다. 그 폴백 문구가 UI 소관이라 이 함수가 여기 있다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "UI|Loading")
 	FText GetSiteDisplayName(FGameplayTag SiteTag) const;
@@ -326,14 +326,12 @@ public:
 					  RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LoadingTipRow"))
 	TSoftObjectPtr<UDataTable> LoadingTipsTable;
 
-	/**
-	 * 장소 태그 → 화면에 뜰 이름 (Site.Museum → "박물관").
-	 *
-	 * 조회는 GetSiteDisplayName() 으로 한다.
-	 * 목표 금액 · 제한시간은 여기 두지 않는다 — 그건 코어 루프의 값이고 여기는 표시 이름뿐이다
-	 */
-	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading", meta = (Categories = "Site"))
-	TMap<FGameplayTag, FText> SiteDisplayNames;
+	// 장소 표시 이름은 여기 없다 — DT_SiteCatalog 의 DisplayName 이 진리원이다.
+	//
+	// 예전에는 SiteDisplayNames 맵이 여기 있었다. 그런데 장소 하나를 추가하려면 이 맵과
+	// 코어 루프의 장소 표 양쪽을 고쳐야 했고, 한쪽만 채우면 "이름은 나오는데 목표가 0" 처럼
+	// 조용히 어긋났다. 편집 단위가 '장소 하나' 라서 한 행에 모아 둔다.
+	// 조회는 GetSiteDisplayName() 으로 하고, 폴백 문구(LoadingUnknownSiteText)만 여기 남는다.
 
 	/** 제목 위 작은 글씨 — "다음 작업" */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")

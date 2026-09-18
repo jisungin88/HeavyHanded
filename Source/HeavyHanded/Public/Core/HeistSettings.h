@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "GameplayTagContainer.h"       // FGameplayTag 를 값으로 보유 — 전방 선언 불가
+#include "Core/HeistLog.h"
+#include "Core/HeistSiteTypes.h"
 #include "UObject/SoftObjectPtr.h"      // TSoftObjectPtr 를 값으로 보유
 #include "UObject/SoftObjectPath.h"     // FSoftObjectPath 를 값으로 반환
 #include "Core/HeistOutcome.h"          // EHeistOutcome — UPROPERTY 노출 enum 이라 전방 선언 불가
@@ -13,58 +15,11 @@ class UWorld;
 class UInputAction;
 class UInputMappingContext;
 
-USTRUCT()
-struct FHeistEntryOption
-{
-	GENERATED_BODY()
-
-	/** 진입점 루트 식별자 */
-	UPROPERTY(EditAnywhere, Category = "Travel", meta = (Categories = "Entry"))
-	FGameplayTag EntryTag;
-
-	/** 이름 */
-	UPROPERTY(EditAnywhere, Category = "Travel")
-	FText DisplayName;
-
-	/** 설명 */
-	UPROPERTY(EditAnywhere, Category = "Travel", meta = (MultiLine = "true"))
-	FText Description;
-};
-
-/**
- * 장소(Site.*) 하나와 그 작업 레벨.
- * TMap 이 아닌 것은 FGameplayTag 키가 `.ini` 에서 손으로 못 고칠 줄이 되기 때문이고,
- * DataTable 이 아닌 것은 밸런싱이 아니라 경로 배선이고 `.uasset` 은 병합이 안 되기 때문이다.
- */
-USTRUCT()
-struct FHeistSiteLevel
-{
-	GENERATED_BODY()
-
-	// 필드에는 config 를 달지 않는다 — 저장 단위는 바깥의 SiteLevels 배열이고,
-	// 구조체는 통째로 직렬화된다. 여기 달아 봐야 아무 뜻이 없다
-
-	/** 이 장소의 식별자(Site.*). Config/Tags/Phase.ini 에 등록된 것만 의미가 있다 */
-	UPROPERTY(EditAnywhere, Category = "Travel")
-	FGameplayTag SiteTag;
-
-	/**
-	 * 이 장소의 작업 레벨. 소프트 참조인 것은 Settings 가 모듈 로드 시점에 만들어져서,
-	 * 하드 참조면 그때 레벨이 통째로 로드되기 때문이다. 경로만 꺼내 ServerTravel 에 넘긴다.
-	 */
-	UPROPERTY(EditAnywhere, Category = "Travel",
-		meta = (AllowedClasses = "/Script/Engine.World"))
-	TSoftObjectPtr<UWorld> Level;
-
-	/** 선택할 수 있는 진입점 */
-	UPROPERTY(EditAnywhere, Category = "Travel", meta = (TitleProperty = "EntryTag"))
-	TArray<FHeistEntryOption> Entries;
-};
 
 /**
  * 코어 루프 밸런싱. Project Settings → Game → Heist.
  * **C++ / BP 어디에도 수치를 하드코딩하지 말 것** — 여기가 유일한 진리원이다.
- * 목표 금액과 제한 시간은 장소마다 달라 여기 없다 (사이트별 GameMode BP 가 갖는다).
+ * 목표 금액과 제한 시간은 장소마다 달라 여기 없다 (사이트별 DT_SiteCatalog 가 갖는다).
  */
 UCLASS(config = HeistSystem, defaultconfig, meta = (DisplayName = "Heist"))
 class HEAVYHANDED_API UHeistSettings : public UDeveloperSettings
@@ -82,57 +37,61 @@ public:
 	// 기획서 2장 — 은신처에서 다음 목표를 고르고 출발한다. 그 '출발' 이 어느 맵을 여는가가
 	// 이 표다. URunProgressSubsystem::TryDepartToSite 가 유일한 소비자다.
 
-	/**
-	 * 장소(Site.*) → 작업 레벨. **새 장소 맵을 만들면 여기 한 줄을 더한다.**
-	 *
-	 * 맵이 없는 장소는 넣지 말 것.
-	 */
-	UPROPERTY(config, EditAnywhere, Category = "Travel", meta = (TitleProperty = "SiteTag"))
-	TArray<FHeistSiteLevel> SiteLevels;
+	/** 스테이지 데이터 */
+	UPROPERTY(Config, EditAnywhere, Category = "Travel", meta = (AllowedClasses = "/Script/Engine.DataTable",
+		RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.HeistSiteRow"))
+	TSoftObjectPtr<UDataTable> SiteCatalog;
 
-	/**
-	 * 이 장소의 레벨 경로. **등록돼 있지 않으면 빈 경로다** — 호출부가 출발을 막아야 한다.
-	 * 안전한 기본값을 두지 않는다. "모르겠으면 저택" 은 어떤 상황에서도 정답이 아니다.
-	 */
-	FSoftObjectPath GetSiteLevel(const FGameplayTag& SiteTag) const
+private:
+	mutable TObjectPtr<UDataTable> CachedCatalog = nullptr;
+	mutable bool bCatalogResolved = false;
+
+public:
+	const UDataTable* GetSiteCatalog() const
 	{
-		if (!SiteTag.IsValid())
+		if (!bCatalogResolved)
 		{
-			return FSoftObjectPath();
-		}
+			bCatalogResolved = true;
+			CachedCatalog = SiteCatalog.LoadSynchronous();
 
-		for (const FHeistSiteLevel& Entry : SiteLevels)
-		{
-			if (Entry.SiteTag == SiteTag)
-			{
-				return Entry.Level.ToSoftObjectPath();
-			}
+			UE_CLOG(!CachedCatalog, LogHeist, Warning,
+				TEXT("SiteCatalog DataTable이 지정되지 않았습니다. "
+					"Project Settings->Game->Heist 에서 DT_SiteCatalog를 지정하세요."));
 		}
-
-		return FSoftObjectPath();
+		return CachedCatalog;
 	}
 
-	/** 진입점 목록 */
+	FSoftObjectPath GetSiteLevel(const FGameplayTag& SiteTag) const
+	{
+		const FHeistSiteRow* Site = FindSite(SiteTag);
+		return Site ? Site->Level.ToSoftObjectPath() : FSoftObjectPath();
+	}
+
+	int32 GetSiteTargetValue(const FGameplayTag& SiteTag) const
+	{
+		const FHeistSiteRow* Site = FindSite(SiteTag);
+		return Site ? Site->TargetValue : 0;
+	}
+
+	float GetSiteHeistSeconds(const FGameplayTag& SiteTag) const
+	{
+		const FHeistSiteRow* Site = FindSite(SiteTag);
+		return Site ? Site->HeistSeconds : 0.f;
+	}
+
+	float GetSiteEscapeSeconds(const FGameplayTag& SiteTag) const
+	{
+		const FHeistSiteRow* Site = FindSite(SiteTag);
+		return Site ? Site->EscapeSeconds : 0.f;
+	}
+
 	const TArray<FHeistEntryOption>& GetSiteEntries(const FGameplayTag& SiteTag) const
 	{
 		static const TArray<FHeistEntryOption> Empty;
-		if (!SiteTag.IsValid())
-		{
-			return Empty;
-		}
-
-		for (const FHeistSiteLevel& Entry : SiteLevels)
-		{
-			if (Entry.SiteTag == SiteTag)
-			{
-				return Entry.Entries;
-			}
-		}
-
-		return Empty;
+		const FHeistSiteRow* Site = FindSite(SiteTag);
+		return Site ? Site->Entries : Empty;
 	}
 
-	/** 진입점 유무 체크 */
 	bool IsEntryRegistered(const FGameplayTag& SiteTag, const FGameplayTag& EntryTag) const
 	{
 		for (const FHeistEntryOption& Option : GetSiteEntries(SiteTag))
@@ -145,27 +104,72 @@ public:
 		return false;
 	}
 
-	/** 겜페인 순서
-	 * 없는 태그와 중복은 제외
-	 */
+	/** 캠페인 순서(오름차순, 이름순) */
 	TArray<FGameplayTag> GetSiteOrder() const
 	{
-		TArray<FGameplayTag> Order;
-		Order.Reserve(SiteLevels.Num());
-
-		for (const FHeistSiteLevel& Entry : SiteLevels)
+		const UDataTable* Table = GetSiteCatalog();
+		if (!Table)
 		{
-			if (Entry.SiteTag.IsValid() && !Order.Contains(Entry.SiteTag))
+			return {};
+		}
+
+		TArray<TPair<FName, const FHeistSiteRow*>> Rows;
+		for (const TPair<FName, uint8*>& Pair : Table->GetRowMap())
+		{
+			if (const FHeistSiteRow* Row = reinterpret_cast<const FHeistSiteRow*>(Pair.Value))
 			{
-				Order.Add(Entry.SiteTag);
+				Rows.Emplace(Pair.Key, Row);
+			}
+		}
+
+		Rows.Sort([](const TPair<FName, const FHeistSiteRow*>& A, const TPair<FName, const FHeistSiteRow*>& B)
+		{
+			if (A.Value->CampaignOrder != B.Value->CampaignOrder)
+			{
+				return A.Value->CampaignOrder < B.Value->CampaignOrder;
+			}
+			return A.Key.LexicalLess(B.Key);
+		});
+
+		TArray<FGameplayTag> Order;
+		Order.Reserve(Rows.Num());
+		for (const TPair<FName, const FHeistSiteRow*>& Pair : Rows)
+		{
+			const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(Pair.Key, false);
+			if (Tag.IsValid() && !Order.Contains(Tag))
+			{
+				Order.Add(Tag);
 			}
 		}
 
 		return Order;
 	}
 
+	const FHeistSiteRow* FindSite(const FGameplayTag& SiteTag) const
+	{
+		const UDataTable* Table = GetSiteCatalog();
+		if (!Table || !SiteTag.IsValid())
+		{
+			return nullptr;
+		}
+
+		return Table->FindRow<FHeistSiteRow>(SiteTag.GetTagName(), TEXT("FindSite"), false);
+	}
+
+#if WITH_EDITOR
+	/** Settings에서 표를 바꾸면 캐시 버림 */
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override
+	{
+		Super::PostEditChangeProperty(Event);
+		bCatalogResolved = false;
+		CachedCatalog = nullptr;
+	}
+
+#endif
+
+
 	/**
-	 * 판이 끝나면 돌아갈 은신처 레벨. SiteLevels 표에 넣지 않는 것은 은신처가 장소가 아니라서다 —
+	 * 판이 끝나면 돌아갈 은신처 레벨. SiteCatalog 에 넣지 않는 것은 은신처가 장소가 아니라서다 —
 	 * 넣으면 목표 선택 UI 에 섞여 나오고 캠페인 통과 판정도 그것을 센다.
 	 * 비어 있으면 떠나지 않고 결과 화면에 머문다.
 	 */
@@ -206,13 +210,6 @@ public:
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Phase", meta = (ClampMin = "0.0", Units = "s"))
 	float PrepSeconds = 45.f;
-
-	/**
-	 * 도주 시간 (기획서 2장). 경보 100% 또는 제한 시간 만료로 진입한다.
-	 * 장소와 무관하게 90초 고정이라 여기 둔다.
-	 */
-	UPROPERTY(config, EditAnywhere, Category = "Phase", meta = (ClampMin = "0.0", Units = "s"))
-	float EscapeSeconds = 90.f;
 
 	/**
 	 * 결과 화면 체류 시간(초). 전원이 확인을 누르면 그전에도 넘어가므로 이 값은 안전망이다.

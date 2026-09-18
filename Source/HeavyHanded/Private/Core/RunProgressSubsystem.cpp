@@ -858,18 +858,20 @@ static void RunDepartCommand(const TArray<FString>& Args, UWorld* World)
 	{
 		UE_LOG(LogHeist, Warning, TEXT("사용법: hh.Run.Depart Site.Mansion"));
 
-		if (Settings->SiteLevels.IsEmpty())
+		const UDataTable* Catalog = Settings->GetSiteCatalog();
+		if (!Catalog || Catalog->GetRowMap().IsEmpty())
 		{
 			UE_LOG(LogHeist, Warning,
-				TEXT("  등록된 장소가 없습니다 — Project Settings → Game → Heist → Site Levels"));
+				TEXT("등록된 장소가 없습니다. (Project Settings -> Game -> Heist -> Site Catalog"));
 			return;
 		}
 
-		for (const FHeistSiteLevel& Entry : Settings->SiteLevels)
+		for (const FGameplayTag& Site : Settings->GetSiteOrder())
 		{
-			UE_LOG(LogHeist, Log, TEXT("  %s → %s"),
-				*Entry.SiteTag.ToString(), *Entry.Level.ToSoftObjectPath().ToString());
+			UE_LOG(LogHeist, Log, TEXT("%s -> %s"),
+				*Site.ToString(), *Settings->GetSiteLevel(Site).ToString());
 		}
+
 		return;
 	}
 

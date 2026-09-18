@@ -1,5 +1,7 @@
 ﻿#include "UI/UISettings.h"
 
+#include "Core/HeistSettings.h"    // 장소 표시 이름의 진리원. FindSite 로 DT_SiteCatalog 를 읽는다
+#include "Core/HeistSiteTypes.h"   // FHeistSiteRow — 값을 꺼내 쓴다
 #include "Styling/CoreStyle.h"
 #include "UObject/Class.h"
 #include "UObject/ReflectedTypeAccessors.h"
@@ -40,11 +42,12 @@ UUISettings::UUISettings()
 	WaitingStatusFormat        = NSLOCTEXT("HeavyHandedUI", "WaitingStatusFormat", "{0} / {1} 함께하는 중");
 	WaitingStatusUnknownText   = NSLOCTEXT("HeavyHandedUI", "WaitingStatusUnknown", "동료를 기다리는 중…");
 
-	// [SiteDisplayNames 는 여기서 채우지 않는다] 이 생성자는 모듈 로드 중에 도는데
+	// [태그를 키로 쓰는 값은 여기서 채우지 않는다] 이 생성자는 모듈 로드 중에 도는데
 	// 그 시점에 GameplayTag 매니저가 아직 표를 못 읽었을 수 있다. RequestGameplayTag 가
-	// 빈 태그를 돌려주면 세 줄이 전부 같은 키(빈 태그)로 들어가 마지막 하나만 남는다.
-	// 컴파일도 경고도 통과하고 화면에서만 이름이 하나로 보인다.
-	// 그래서 Project Settings → Game → UI → Loading 에서 세 줄을 직접 채운다
+	// 빈 태그를 돌려주면 여러 줄이 전부 같은 키(빈 태그)로 들어가 마지막 하나만 남는다.
+	// 컴파일도 경고도 통과하고 화면에서만 값이 하나로 보인다.
+	// 그래서 HeldSlotIcons · SkillIcons 는 Project Settings 에서 직접 채운다.
+	// (장소 표시 이름은 여기 없다 — DT_SiteCatalog 로 옮겼다)
 }
 
 FSlateFontInfo UUISettings::GetUIFont(EUIFontToken Token)
@@ -111,14 +114,13 @@ FText UUISettings::GetAlertLevelText(EAlertLevel Level)
 
 FText UUISettings::GetSiteDisplayName(FGameplayTag SiteTag) const
 {
-	if (SiteTag.IsValid())
+	// 이름의 진리원은 DT_SiteCatalog 다. 여기에 맵을 또 두면 장소를 추가할 때 두 곳을
+	// 고쳐야 하고, 한쪽만 채우면 로딩 화면과 목표 선택 화면에 다른 이름이 뜬다
+	if (const FHeistSiteRow* Site = UHeistSettings::Get()->FindSite(SiteTag))
 	{
-		if (const FText* Found = SiteDisplayNames.Find(SiteTag))
+		if (!Site->DisplayName.IsEmpty())
 		{
-			if (!Found->IsEmpty())
-			{
-				return *Found;
-			}
+			return Site->DisplayName;
 		}
 	}
 

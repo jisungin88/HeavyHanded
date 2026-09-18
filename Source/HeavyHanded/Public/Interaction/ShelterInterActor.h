@@ -10,7 +10,11 @@
 class AShelterPlayerController;
 
 
-// 이 코드가 굳이 필요한지(gs, pc 처리로 방식을 바꾸어서 필요하지 않다면 삭제)
+/**
+ * [사용하지 않음 — 2026-09-17] 진입점·목표 선택은 AShelterPlayerController 의 Server RPC 와
+ * AShelterGameState 로 옮김. 이 클래스를 새로 상속하거나 배치하지 말 것.
+ * 남겨 둔 것은 초기 선택 방식의 기록을 위해서다.
+ */
 
 UENUM(BlueprintType)
 enum class EEntryTagType : uint8
@@ -35,8 +39,8 @@ UCLASS()
 class HEAVYHANDED_API AShelterInterActor : public AActor
 {
 	GENERATED_BODY()
-	
-public:	
+
+public:
 	// Sets default values for this actor's properties
 	AShelterInterActor();
 
@@ -63,7 +67,7 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-public:	
+public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
