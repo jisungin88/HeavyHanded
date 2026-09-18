@@ -187,7 +187,7 @@ public:
 	// ── 출발 ──
 
 	/**
-	 * 이 장소로 출발한다. 전원을 데리고 ServerTravel 한다. SiteLevels 에 없으면 false. (서버 전용)
+	 * 이 장소로 출발한다. 전원을 데리고 ServerTravel 한다. DT_SiteCatalog 에 없으면 false. (서버 전용)
 	 * 진입점을 안 골랐어도 떠나고, BeginNewRun 도 부르지 않는다 — 재도전 때 산 장비가 사라진다.
 	 * **이 호출 뒤의 코드는 같은 월드에서 이어지지 않는다** (비-심리스 ServerTravel).
 	 */
