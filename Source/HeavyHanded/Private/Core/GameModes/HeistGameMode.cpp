@@ -63,6 +63,24 @@ void AHeistGameMode::InitGame(const FString& MapName, const FString& Options, FS
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
 
+	if (!SiteTag.IsValid())
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("Site가 비어 있습니다. 이 레벨의 GameMode BP에 지정하세요."))
+	}
+	else if (!UHeistSettings::Get()->FindSite(SiteTag))
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("%s 행이 DT_SiteCatalog에 없습니다. 행 이름이 태그와 같아야 합니다."), *SiteTag.ToString())
+	}
+	else
+	{
+		UE_CLOG(GetTargetValue() <= 0, LogHeist, Error,
+		        TEXT("%s 의 목표 금액이 0 입니다. 이 판은 성공 판정이 나지 않습니다."), *SiteTag.ToString());
+		UE_CLOG(GetEscapeSeconds() <= 0.f, LogHeist, Error,
+		        TEXT("%s 의 도주 시간이 0 입니다."), *SiteTag.ToString());
+	}
+
 	ExpectedPlayers = ResolveExpectedPlayers(Options);
 
 	if (ExpectedPlayers <= 0)
@@ -261,6 +279,21 @@ void AHeistGameMode::PlaceVan_Implementation(AVanZone* Van, const FTransform& En
 		*EntryTransform.GetLocation().ToCompactString());
 }
 
+int32 AHeistGameMode::GetTargetValue() const
+{
+	return UHeistSettings::Get()->GetSiteTargetValue(SiteTag);
+}
+
+float AHeistGameMode::GetHeistSeconds() const
+{
+	return UHeistSettings::Get()->GetSiteHeistSeconds(SiteTag);
+}
+
+float AHeistGameMode::GetEscapeSeconds() const
+{
+	return UHeistSettings::Get()->GetSiteEscapeSeconds(SiteTag);
+}
+
 void AHeistGameMode::WarnIfVanBlocksEntry() const
 {
 	const AVanZone* Van = AVanZone::Get(this);
@@ -434,7 +467,7 @@ void AHeistGameMode::HandleMatchHasStarted()
 		return;
 	}
 
-	GS->SetTargetValue(TargetValue);
+	GS->SetTargetValue(GetTargetValue());
 
 	// 진입점 판정이 첫 스폰에서 먼저 끝났다면 그때는 GameState 가 없었을 수 있다.
 	// 여기서 한 번 더 넣는다 — 이미 같은 값이면 복제가 dirty 되지 않는다
@@ -468,7 +501,7 @@ void AHeistGameMode::HandleMatchHasStarted()
 	bStartWindowOpen = true;
 
 	UE_LOG(LogHeist, Log, TEXT("접속 대기 시작 — 목표 $%d / 제한 %.0f초, 상한 %.0f초"),
-		TargetValue, HeistSeconds, UHeistSettings::Get()->PlayerJoinTimeoutSeconds);
+		GetTargetValue(), GetHeistSeconds(), UHeistSettings::Get()->PlayerJoinTimeoutSeconds);
 
 	GetWorldTimerManager().SetTimer(StartWaitHandle, this, &AHeistGameMode::TickStartWait,
 		StartWaitPollSeconds, true);
@@ -685,12 +718,27 @@ float AHeistGameMode::GetPhaseDuration(const FGameplayTag& Phase) const
 
 	if (Phase == HHTags::Phase_Heist)
 	{
-		return HeistSeconds;   // 장소마다 달라서 Settings 가 아니라 이 클래스의 값이다
+		return GetHeistSeconds();   // 장소마다 다르다 — SiteTag 로 DT_SiteCatalog 에서 읽는다
 	}
 
 	if (Phase == HHTags::Phase_Escape)
 	{
-		return Settings->EscapeSeconds;
+		const float Seconds = GetEscapeSeconds();
+
+		// [여기만 폴백이 있는 이유] 레벨 경로는 "모르면 안 떠난다" 가 맞지만, 도주 시간 0 은
+		// AHeistGameState::SetPhase 가 '카운트다운 없음' 으로 읽어 판이 영영 안 끝난다.
+		// 데이터 실수의 벌로는 너무 크다 — 시끄럽게 알리고 기획서 값(2장, 90초)으로 굴린다
+		if (Seconds <= 0.f)
+		{
+			UE_LOG(LogHeist, Error,
+				TEXT("%s 의 도주 시간이 0 입니다. DT_SiteCatalog 의 Escape Seconds 를 확인하세요. "
+					 "기획서 기본값 90초로 진행합니다."),
+				SiteTag.IsValid() ? *SiteTag.ToString() : TEXT("SiteTag 없음"));
+
+			return 90.f;
+		}
+
+		return Seconds;
 	}
 
 	if (Phase == HHTags::Phase_Result)
