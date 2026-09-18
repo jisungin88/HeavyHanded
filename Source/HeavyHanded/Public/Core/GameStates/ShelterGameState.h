@@ -7,22 +7,11 @@
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "GameplayTagContainer.h" // Tag 사용 위함
 #include "Core/RunProgressView.h"
+#include "Core/HeistSettings.h"
+#include "Core/HeistSiteView.h"    // FHeistSiteView 를 값으로 돌려준다 — 전방 선언 불가
 
 #include "ShelterGameState.generated.h"
 
-/**
- *
- */
-
-
-UENUM(BlueprintType)
-enum class EEntryTag : uint8
-{
-	None,
-	Front,
-	Garage,
-	Alley
-};
 
 // .h
 
@@ -41,9 +30,6 @@ UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
 {
 	GENERATED_BODY()
-
-
-
 
 public:
 
@@ -136,18 +122,37 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnTravelTagChanged OnTravelTagChanged;
 
-	// 현재 선택된 Entry
-	UPROPERTY(ReplicatedUsing = OnRep_EntryTag, BlueprintReadOnly)
-	EEntryTag EntryTag = EEntryTag::Front; //초기값
+	/** 선택한 진입점 */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedEntry, BlueprintReadOnly, Category = "Shelter|Travel")
+	FGameplayTag SelectedEntry;
 
-	// 서버에서 Entry를 변경
-	// PlayerController의 Server RPC에서 호출
-	UFUNCTION(BlueprintCallable)
-	void SetEntryTag(EEntryTag NewTag);
+	void SetSelectedEntry(FGameplayTag NewEntry);
 
-	// EntryTag가 클라이언트에 복제되었을 때 호출
+	/** 진입점 리스트 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	TArray<FHeistEntryOption> GetEntryOptions() const;
+
+	void EnsureEntrySelected();
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FGameplayTag GetNextEntryOption() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	bool FindEntryOption(FGameplayTag EntryTag, FHeistEntryOption& OutOption) const;
+
+	/**
+	 * 이 장소를 화면에 그리는 데 필요한 것 전부. 등록되지 않은 장소면 이름만 채운 빈 뷰다.
+	 * 표(DT_SiteCatalog)와 진행 상황을 여기서 합쳐 주므로 위젯은 어디서 왔는지 몰라도 된다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FHeistSiteView GetSiteView(FGameplayTag SiteTag) const;
+
+	/** 지금 갈 장소의 표시 정보. 출발 문 위젯이 이것 하나만 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FHeistSiteView GetNextSiteView() const;
+
 	UFUNCTION()
-	void OnRep_EntryTag();
+	void OnRep_SelectedEntry();
 
 	// 모든 태그 디버그
 	UFUNCTION(BlueprintCallable)

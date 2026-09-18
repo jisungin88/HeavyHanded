@@ -161,9 +161,9 @@ protected:
 
 public:
 	// --- tag 설정 ---
-	// 클라이언트에서 Entry 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetEntryTag(EEntryTag NewTag);
+	/** 진입점을 선택할 때 서버에 요청 */
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "Shelter|Travel")
+	void ServerSetEntryTag(FGameplayTag NewEntry);
 
 
 	// --- 로딩 UI ---
