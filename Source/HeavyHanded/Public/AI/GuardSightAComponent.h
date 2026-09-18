@@ -17,6 +17,9 @@ class UAISenseConfig_Sight;
 class AActor;
 class AGuardCharacter;
 
+class UProceduralMeshComponent;
+class UMaterialInterface;
+
 
 ///DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
 
@@ -83,6 +86,8 @@ public:
 	// 양안 시야 안에서는 정상 속도, 주변 시야에서는 감소된 속도를 사용한다.
 	float GetBinocularVisionRate(AActor* TargetActor) const;
 
+	void SetSightDebugEnabled(bool bInEnabled);
+
 private:
 	UPROPERTY()
 	float BinocularVisionAngleDegrees = 0.0f;
@@ -102,15 +107,27 @@ private:
 	bool IsWithinVerticalVisionAngle(AActor* TargetActor) const;
 
 
+	bool bDrawSightDebug = true;
 
 
 	//public:
 
 	void DrawSightDebug() const;
+	void DrawSightDebugMesh();
 	void DrawPerceivedActorsDebug() const;
 
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+
+private:
+
+	//UPROPERTY(Transient)
+	//TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
+	UPROPERTY(EditAnywhere, Category = "Debug")
+	TObjectPtr<UMaterialInterface> SightDebugMaterial;
+
 
 
 };

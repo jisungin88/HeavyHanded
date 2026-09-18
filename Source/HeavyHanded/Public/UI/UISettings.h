@@ -110,6 +110,15 @@ public:
 	TSoftObjectPtr<UTexture2D> GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const;
 
 	/**
+	 * 스킬 칸에 쓸 아이콘. 쿨다운 태그 여러 개 중 표에 있는 첫 번째를 돌려준다.
+	 *
+	 * 표에 없으면 SkillFallbackIcon 을, 그것도 비었으면 null 이다.
+	 * SkillIcons 를 직접 읽지 말 것 — GetHeldSlotIcon 과 같은 이유다.
+	 * BP 에 열지 않는다. 읽는 곳은 USkillSlotWidget 하나뿐이다
+	 */
+	TSoftObjectPtr<UTexture2D> GetSkillIcon(const FGameplayTagContainer& CooldownTags) const;
+
+	/**
 	 * 장소 표시 이름. 표에 없으면 LoadingUnknownSiteText 를 돌려준다.
 	 *
 	 * SiteDisplayNames 를 직접 읽지 말 것 — 행이 지워지면 제목이 빈 채로 나가서
@@ -253,6 +262,25 @@ public:
 	/** 특성 태그가 표에 없을 때 쓰는 그림. 비워 두면 아이콘 자리가 숨는다 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot")
 	TSoftObjectPtr<UTexture2D> HeldSlotFallbackIcon;
+
+	/**
+	 * 스킬 칸 아이콘. 쿨다운 태그(Cooldown.Ability.*) → 그림.
+	 *
+	 * [왜 어빌리티 태그가 아니라 쿨다운 태그인가] 스킬 칸은 쿨다운 태그로 스킬을 찾는다
+	 *   (USkillSlotWidget 헤더 주석). 어빌리티 태그는 안 붙은 스킬이 있지만
+	 *   쿨다운 태그는 스킬 칸에 뜨는 스킬이라면 반드시 있다.
+	 *
+	 * [왜 어빌리티(GA)가 아니라 여기인가] GA 는 플레이어 · GAS 파트 소유라 UI 사정으로
+	 *   아이콘 칸을 늘리지 않는다. HeldSlotIcons 와 같은 판단이다.
+	 *
+	 * 조회는 GetSkillIcon() 으로 한다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Skill Slot")
+	TMap<FGameplayTag, TSoftObjectPtr<UTexture2D>> SkillIcons;
+
+	/** 쿨다운 태그가 표에 없을 때 쓰는 그림. 비워 두면 아이콘 자리가 숨는다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Skill Slot")
+	TSoftObjectPtr<UTexture2D> SkillFallbackIcon;
 
 	/**
 	 * 무게 바가 가득 차는 질량(kg).

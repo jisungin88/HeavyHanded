@@ -13,6 +13,9 @@
 
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardSightAComponent.h"
+
+#include "ProceduralMeshComponent.h"
 
 
 AGuardCharacter::AGuardCharacter()
@@ -60,7 +63,14 @@ AGuardCharacter::AGuardCharacter()
 	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
 	// HearingGaugeWidgetComponent->SetDrawAtDesiredSize(false);
 
+
+	SightDebugMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SightDebugMesh"));
+	SightDebugMesh->SetupAttachment(GetRootComponent());
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SightDebugMesh->SetCastShadow(false);
+
 }
+
 
 void AGuardCharacter::BeginPlay()
 {
@@ -94,6 +104,7 @@ void AGuardCharacter::BeginPlay()
 	}
 
 	UpdatePerceptionWidgets();
+
 
 }
 
@@ -159,9 +170,18 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 	GaugeWidget->SetGaugePercent(GaugePercent);
 }
 
+void AGuardCharacter::SetDrawSightDebugEnabled(bool bInEnabled)
+{
+	bDrawSightDebug = bInEnabled;
 
-
-
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetController()))
+	{
+		if (GuardController->GuardSightComp)
+		{
+			GuardController->GuardSightComp->SetSightDebugEnabled(bInEnabled);
+		}
+	}
+}
 
 void AGuardCharacter::SetGuardMoveSpeed(float NewMoveSpeed)
 {
