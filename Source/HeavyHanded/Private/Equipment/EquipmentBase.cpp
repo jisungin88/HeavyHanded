@@ -33,6 +33,12 @@ AEquipmentBase::AEquipmentBase()
 	EquipmentMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EquipmentMesh"));
 	SetRootComponent(EquipmentMesh);
 
+	// 장비는 예외 없이 움직인다 — 집히고, 던져지고, 물리로 구른다.
+	// Static 이면 **집기가 조용히 실패한다**: 손 소켓에 AttachToComponent 하는 순간
+	// 엔진이 "Static 을 Movable 부모에 붙일 수 없다" 며 거부하고, SetSimulatePhysics 도 무시된다.
+	// 트레이스는 멀쩡히 맞으므로 겉보기로는 "E 를 눌러도 아무 일이 없다" 로만 드러난다.
+	// (2026-09-18 BP_Drone 이 Static 으로 저장돼 있어 반나절 걸렸다)
+	EquipmentMesh->SetMobility(EComponentMobility::Movable);
 	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
 	EquipmentMesh->SetSimulatePhysics(true);
 	EquipmentMesh->SetNotifyRigidBodyCollision(true);   // OnComponentHit 을 받으려면 필요하다
@@ -78,6 +84,19 @@ void AEquipmentBase::BeginPlay()
 				*GetName());
 		}
 
+
+		// 생성자에서 Movable 로 맞춰 두지만, BP 가 Static 으로 저장돼 있으면 그 값이 이긴다.
+		// Static 이면 집기(Attach)도 물리도 조용히 실패하고 **경고 한 줄 없이** 안 집히는
+		// 물건이 된다 — 트레이스는 멀쩡히 맞아서 콜리전·태그를 의심하며 한참 헤매게 된다.
+		// 고칠 수 있는 자리에서 고치고 알린다.
+		if (EquipmentMesh->Mobility != EComponentMobility::Movable)
+		{
+			UE_LOG(LogLoot, Warning,
+				TEXT("[Equipment:%s] EquipmentMesh 의 Mobility 가 Movable 이 아니다 — 집기와 물리가 "
+					 "동작하지 않는다. 런타임에 Movable 로 바꿨지만 BP 에서도 고칠 것"),
+				*GetName());
+			EquipmentMesh->SetMobility(EComponentMobility::Movable);
+		}
 		EquipmentMesh->OnComponentHit.AddDynamic(this, &AEquipmentBase::HandleMeshHit);
 	}
 }
