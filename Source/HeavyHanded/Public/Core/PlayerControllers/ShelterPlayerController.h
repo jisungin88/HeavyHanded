@@ -9,6 +9,7 @@
 #include "Core/PlayerStates/ShelterPlayerState.h"
 
 #include "GameplayTagContainer.h"
+#include "HeavyHandedPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 
 #include "ShelterPlayerController.generated.h"
@@ -32,7 +33,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 
 
 UCLASS()
-class HEAVYHANDED_API AShelterPlayerController : public APlayerController
+class HEAVYHANDED_API AShelterPlayerController : public AHeavyHandedPlayerController
 {
 	GENERATED_BODY()
 
