@@ -389,7 +389,7 @@ bool AShelterGameState::CanStartGame() const
 			*UEnum::GetValueAsString(ShelterPS->GetSelectedJob())
 		);
 
-		if (ShelterPS->GetSelectedJob() == EJobType::None)
+		if (!ShelterPS->IsJobConfirmed())
 		{
 			UE_LOG(
 				LogTemp,
@@ -475,6 +475,20 @@ TArray<AShelterPlayerState*> AShelterGameState::GetShelterPlayerStates() const
 void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
 {
 	OnJobStateChanged.Broadcast();
+}
+
+TArray<FString> AShelterGameState::GetUnconfirmedPlayerNames() const
+{
+	TArray<FString> Names;
+	for (const APlayerState* PS : PlayerArray)
+	{
+		const AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
+		if (ShelterPS && !ShelterPS->IsJobConfirmed())
+		{
+			Names.Add(ShelterPS->GetName());
+		}
+	}
+	return Names;
 }
 
 

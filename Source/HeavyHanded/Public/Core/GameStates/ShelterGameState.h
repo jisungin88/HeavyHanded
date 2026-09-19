@@ -116,6 +116,9 @@ public:
 	UFUNCTION()
 	void OnPlayerJobChanged(AShelterPlayerState* PlayerState);
 
+	UFUNCTION(BlueprintPure, Category = "Shelter|Roster")
+	TArray<FString> GetUnconfirmedPlayerNames() const;
+
 	// ----------------------------------------------------------------
 
 	// 현재 선택된 장소(Site)가 변경되었을 때 UI에 알림
