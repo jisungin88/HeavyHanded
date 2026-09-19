@@ -43,22 +43,31 @@ public:
 	TSoftObjectPtr<UDataTable> SiteCatalog;
 
 private:
-	mutable TObjectPtr<UDataTable> CachedCatalog = nullptr;
-	mutable bool bCatalogResolved = false;
+	UPROPERTY(Transient)
+	TObjectPtr<UDataTable> CachedCatalog = nullptr;
+
+	bool bCatalogResolved = false;
 
 public:
 	const UDataTable* GetSiteCatalog() const
 	{
-		if (!bCatalogResolved)
-		{
-			bCatalogResolved = true;
-			CachedCatalog = SiteCatalog.LoadSynchronous();
+		UHeistSettings* Self = const_cast<UHeistSettings*>(this);
 
-			UE_CLOG(!CachedCatalog, LogHeist, Warning,
-				TEXT("SiteCatalog DataTable이 지정되지 않았습니다. "
-					"Project Settings->Game->Heist 에서 DT_SiteCatalog를 지정하세요."));
+		if (!Self->bCatalogResolved)
+		{
+			Self->bCatalogResolved = true;
+			Self->CachedCatalog = SiteCatalog.LoadSynchronous();
+
+			UE_CLOG(!Self->CachedCatalog, LogHeist, Warning,
+				TEXT("SiteCatalog DataTable이 지정되지 않았습니다."));
 		}
-		return CachedCatalog;
+
+		if (!IsValid(Self->CachedCatalog))
+		{
+			Self->CachedCatalog = nullptr;
+		}
+		
+		return Self->CachedCatalog;
 	}
 
 	FSoftObjectPath GetSiteLevel(const FGameplayTag& SiteTag) const
