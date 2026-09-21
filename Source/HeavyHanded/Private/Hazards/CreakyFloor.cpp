@@ -1,13 +1,10 @@
 ﻿#include "Hazards/CreakyFloor.h"
 
-#include "AbilitySystemComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
-#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — 임시 문자열 조회용
+#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — Noise.Environment.CreakyFloor 임시 문자열 조회
 #include "Hazards/HazardLog.h"
-#include "Kismet/GameplayStatics.h"
 #include "Noise/NoiseSubsystem.h"
 
 ACreakyFloor::ACreakyFloor()
@@ -56,37 +53,17 @@ void ACreakyFloor::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AA
 	}
 
 	// AGuardCharacter 는 별도 클래스라 여기 안 걸린다 — 경비가 자기 순찰 중 마루를
-	// 스스로 울리지 않는다 (AMovementTrap 과 동일 사유)
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// 스스로 울리지 않는다. 그림자 이동 중에도 무시한다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target))
 	{
 		return;
 	}
 
-	// 그림자 이동 중엔 무시한다 — 다른 Hazard 클래스들과 동일 사유
-	// [임시: 네이티브 선언 대신 문자열 조회] — HeavyHandedGameplayTags.h 를 건드리지 않는다
-	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
-	{
-		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-		{
-			return;
-		}
-	}
-
-	const UWorld* World = GetWorld();
-	if (!World)
+	if (!ShouldRetrigger(MinRetriggerInterval))
 	{
 		return;
 	}
-
-	const float Now = World->GetTimeSeconds();
-	if (LastTriggerTime >= 0.f && Now - LastTriggerTime < MinRetriggerInterval)
-	{
-		// 오버랩 경계에서 스치듯 들락거린 것 — 진짜 재진입이 아니다
-		return;
-	}
-	LastTriggerTime = Now;
 
 	// 기획서 6장 — 밟은 사람이 Instigator. Noise.ini(지성인)에 이미 등록된 태그를 참조만 한다.
 	//
@@ -108,16 +85,5 @@ void ACreakyFloor::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AA
 
 void ACreakyFloor::Multicast_PlayCreakSound_Implementation()
 {
-	const UWorld* World = GetWorld();
-
-	// 데디케이티드 서버는 화면도 스피커도 없다 (AMovementTrap::Multicast_PlayTriggerEffect 와 동일 사유)
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
-
-	if (IsValid(CreakSound))
-	{
-		UGameplayStatics::PlaySoundAtLocation(World, CreakSound, GetActorLocation());
-	}
+	PlayHazardSound(CreakSound);
 }

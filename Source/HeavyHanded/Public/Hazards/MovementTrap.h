@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "MovementTrap.generated.h"
 
 class UStaticMeshComponent;
@@ -42,7 +42,7 @@ class ABaseCharacter;
  *   는 순간의 연출뿐이라 CLAUDE.md 3절 규칙대로 Unreliable Multicast 로 처리한다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API AMovementTrap : public AActor
+class HEAVYHANDED_API AMovementTrap : public AHazardBase
 {
 	GENERATED_BODY()
 
