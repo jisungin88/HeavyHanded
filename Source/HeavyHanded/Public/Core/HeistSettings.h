@@ -66,7 +66,7 @@ public:
 		{
 			Self->CachedCatalog = nullptr;
 		}
-		
+
 		return Self->CachedCatalog;
 	}
 
@@ -190,6 +190,10 @@ public:
 	{
 		return HideoutLevel.ToSoftObjectPath();
 	}
+
+	/** 출발 연출을 보여주는 시간 */
+	UPROPERTY(Config, EditAnywhere, Category = "Travel", meta = (ClampMin = "0.0", Units = "s"))
+	float DepartDelaySeconds = 1.5f;
 
 	// ── 접속 대기 (Phase.Prep 이전) ──
 	// 리슨 서버라 호스트는 즉시 들어와 있고 클라이언트는 로딩이 늦다. 바로 시작하면

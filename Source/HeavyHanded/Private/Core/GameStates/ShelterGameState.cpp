@@ -630,6 +630,23 @@ FHeistSiteView AShelterGameState::GetNextSiteView() const
 	return GetSiteView(RunProgress.NextSite);
 }
 
+void AShelterGameState::SetDeparting(bool bNewDeparting)
+{
+	if (!HasAuthority() || bDeparting == bNewDeparting)
+	{
+		return;
+	}
+
+	bDeparting = bNewDeparting;
+
+	OnRep_bDeparting();
+}
+
+void AShelterGameState::OnRep_bDeparting()
+{
+	OnDepartingChanged.Broadcast(bDeparting);
+}
+
 void AShelterGameState::OnRep_SelectedEntry()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
@@ -659,6 +676,8 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AShelterGameState, SelectedEntry);
 
 	DOREPLIFETIME(AShelterGameState, RunProgress);
+
+	DOREPLIFETIME(AShelterGameState, bDeparting);
 }
 
 FString AShelterGameState::SanitizeNickname(const FString& Raw)
