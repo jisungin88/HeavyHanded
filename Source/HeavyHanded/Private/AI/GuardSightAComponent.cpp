@@ -343,7 +343,7 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if WITH_EDITOR
 	if (bDrawSightDebug)
 	{
-		DrawSightDebug();
+		//DrawSightDebug();
 		DrawSightDebugMesh();
 		DrawPerceivedActorsDebug();
 	}
@@ -671,6 +671,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 	}
 }
 
+/*
 void UGuardSightAComponent::DrawSightDebugMesh()
 {
 	if (!SightConfig)
@@ -684,7 +685,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		return;
 	}
 
-	AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
+	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
 	if (!GuardCharacter)
 	{
 		return;
@@ -696,15 +697,35 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		return;
 	}
 
-	const float Radius = SightConfig->SightRadius;
-	const float HalfAngle = FMath::DegreesToRadians(SightConfig->PeripheralVisionAngleDegrees);
-
-	if (Radius <= 0.0f)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
 
-	const int32 ArcSegments = 24;
+	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return;
+	}
+
+	const float SightRadius = SightConfig->SightRadius;
+	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	if (SightRadius <= 0.0f || HalfAngle <= 0.0f)
+	{
+		SightDebugMesh->ClearAllMeshSections();
+		return;
+	}
+
+	const int32 ArcSegments = 48;
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
+	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
+	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
 
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
@@ -716,29 +737,34 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	Vertices.Reserve(ArcSegments + 2);
 	Triangles.Reserve(ArcSegments * 3);
 
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-	if (!Capsule)
-	{
-		return;
-	}
-
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-	const FVector LocalOrigin = FVector(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
-
 	Vertices.Add(LocalOrigin);
-
 
 	for (int32 Index = 0; Index <= ArcSegments; ++Index)
 	{
 		const float Alpha = static_cast<float>(Index) / static_cast<float>(ArcSegments);
-		const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
-		const float AngleDegrees = FMath::RadiansToDegrees(Angle);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
 
-		const FVector Direction = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
-		const FVector Point = LocalOrigin + Direction * Radius;
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
+		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
 
-		Vertices.Add(Point);
+		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
+
+		FHitResult Hit;
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, WorldOrigin, TraceEnd, ECC_Visibility, Params);
+
+		float VisibleDistance = SightRadius;
+
+		if (bBlocked)
+		{
+			VisibleDistance = FMath::Clamp(FVector::Distance(WorldOrigin, Hit.Location), 0.0f, SightRadius);
+
+			if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
+			}
+		}
+
+		Vertices.Add(LocalOrigin + LocalDirection * VisibleDistance);
 	}
 
 	for (int32 Index = 0; Index < ArcSegments; ++Index)
@@ -772,6 +798,187 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	SightDebugMesh->SetHiddenInGame(false);
 	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	if (SightDebugMaterial)
+	{
+		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
+	}
+}
+*/
+
+void UGuardSightAComponent::DrawSightDebugMesh()
+{
+	if (!SightConfig)
+	{
+		return;
+	}
+
+	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
+	if (!GuardCharacter)
+	{
+		return;
+	}
+
+	UProceduralMeshComponent* SightDebugMesh = GuardCharacter->GetSightDebugMesh();
+	if (!SightDebugMesh)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return;
+	}
+
+
+	// 실제 시야 거리와 수평 시야각을 가져온다.
+	// VerticalVisionAngleDegrees는 여기서는 사용하지 않는다.
+	const float SightRadius = SightConfig->SightRadius;
+	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	if (SightRadius <= 0.0f || HalfAngle <= 0.0f)
+	{
+		SightDebugMesh->ClearAllMeshSections();
+		return;
+	}
+
+	// 시야 부채꼴을 몇 개의 조각으로 나눌지 결정한다.
+	// 숫자가 높을수록 곡선이 부드러워지지만 Mesh 계산량이 증가한다.
+	const int32 ArcSegments = 48;
+
+	// 캡슐의 절반 높이를 구한다.
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	// Mesh의 중심점.
+	// 캐릭터의 캡슐 바닥에서 2cm 위에 배치한다.
+	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
+
+	// Procedural Mesh가 실제로 배치된 Transform을 사용한다.
+	// Trace는 World 좌표를 사용하고 Mesh Vertex는 Local 좌표를 사용해야 하므로
+	// 두 좌표계를 변환할 때 이 Transform을 기준으로 사용한다.
+	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
+
+	// Mesh 중심점을 World 좌표로 변환한다.
+	// Line Trace의 시작점은 World 좌표여야 한다.
+	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
+
+	// Guard 자신은 시야 Trace에 맞지 않으므로 무시한다.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
+
+	// Procedural Mesh에 사용할 Vertex와 Triangle 데이터를 준비한다.
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> VertexColors;
+	TArray<FProcMeshTangent> Tangents;
+
+	// 중심점 1개 + 부채꼴 외곽점들을 저장한다.
+	Vertices.Reserve(ArcSegments + 2);
+
+	// 각 구간마다 Triangle 하나씩 생성한다.
+	Triangles.Reserve(ArcSegments * 3);
+
+	// 부채꼴의 중심점을 첫 번째 Vertex로 등록한다.
+	Vertices.Add(LocalOrigin);
+
+	// 왼쪽 시야 끝에서 오른쪽 시야 끝까지 한 칸씩 검사한다.
+	for (int32 Index = 0; Index <= ArcSegments; ++Index)
+	{
+		// 현재 지점이 전체 시야각에서 몇 % 위치인지 계산한다.
+		const float Alpha = static_cast<float>(Index) / static_cast<float>(ArcSegments);
+
+		// -HalfAngle ~ +HalfAngle 사이의 현재 각도를 계산한다.
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+
+		// Mesh 기준의 로컬 방향을 만든다.
+		// 캐릭터 정면을 기준으로 좌우로 회전시키므로 수평 시야만 만들어진다.
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
+
+		// Trace를 하기 위해 로컬 방향을 World 방향으로 변환한다.
+		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+
+		// 현재 방향으로 SightRadius만큼 Line Trace한다.
+		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
+
+		FHitResult Hit;
+
+		// 장애물이 있는지 검사한다.
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, WorldOrigin, TraceEnd, ECC_Visibility, Params);
+
+		// 기본적으로 장애물이 없으면 SightRadius까지 Mesh를 만든다.
+		float VisibleDistance = SightRadius;
+
+		if (bBlocked)
+		{
+			// 장애물이 있다면 장애물이 맞은 지점까지만 Mesh를 만든다.
+			VisibleDistance = FMath::Clamp(FVector::Distance(WorldOrigin, Hit.Location), 0.0f, SightRadius);
+
+			// 캐릭터를 맞춘 경우에는 Mesh가 캐릭터 중심에서 너무 빨리 끊겨 보이지 않도록
+			// 50cm를 추가한다.
+			if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
+			}
+		}
+
+		// Mesh Vertex는 Local 좌표로 넣어야 한다.
+		// 따라서 LocalDirection을 사용해서 실제 보이는 거리까지만 Vertex를 만든다.
+		Vertices.Add(LocalOrigin + LocalDirection * VisibleDistance);
+	}
+
+	// 중심점과 인접한 외곽점 2개를 연결해서 삼각형을 만든다.
+	// 모든 삼각형이 위쪽을 향하도록 Vertex 순서를 반대로 구성한다.
+	for (int32 Index = 0; Index < ArcSegments; ++Index)
+	{
+		Triangles.Add(0);
+		Triangles.Add(Index + 2);
+		Triangles.Add(Index + 1);
+	}
+
+	// 모든 Vertex가 수평면을 향하도록 Normal을 설정한다.
+	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+	{
+		Normals.Add(FVector::UpVector);
+		UV0.Add(FVector2D::ZeroVector);
+		VertexColors.Add(FLinearColor::White);
+	}
+
+	// 이전 프레임에 만들어진 Mesh를 제거한다.
+	SightDebugMesh->ClearAllMeshSections();
+
+	// 계산한 Vertex와 Triangle로 새로운 시야 Mesh를 만든다.
+	SightDebugMesh->CreateMeshSection_LinearColor(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
+		VertexColors,
+		Tangents,
+		false
+	);
+
+	// 디버그 Mesh를 화면에 표시한다.
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+
+	// 시야 디버그 Mesh가 충돌에 영향을 주지 않도록 한다.
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// 지정된 디버그용 Material을 적용한다.
 	if (SightDebugMaterial)
 	{
 		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
