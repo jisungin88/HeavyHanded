@@ -166,20 +166,50 @@ void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 	bDrawSightDebug = bInEnabled;
 	SetComponentTickEnabled(bInEnabled);
 
+	//if (!bInEnabled)
+	//{
+	//	if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner()))
+	//	{
+	//		if (AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn()))
+	//		{
+	//			if (UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh())
+	//			{
+	//				Mesh->SetVisibility(false);
+	//				// 또는 Mesh->ClearAllMeshSections(); 로 지오메트리 자체를 비워도 됨
+	//			}
+	//		}
+	//	}
+	// 
+	//}
+
+
+	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	if (!GuardController)
+	{
+		return;
+	}
+
+	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
+	if (!GuardCharacter)
+	{
+		return;
+	}
+
+	UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh();
+	if (!Mesh)
+	{
+		return;
+	}
+
+	Mesh->SetVisibility(bInEnabled);
+
 	if (!bInEnabled)
 	{
-		if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner()))
-		{
-			if (AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn()))
-			{
-				if (UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh())
-				{
-					Mesh->SetVisibility(false);
-					// 또는 Mesh->ClearAllMeshSections(); 로 지오메트리 자체를 비워도 됨
-				}
-			}
-		}
+		Mesh->ClearAllMeshSections();
 	}
+
+
+
 }
 
 

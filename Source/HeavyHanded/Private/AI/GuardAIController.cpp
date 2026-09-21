@@ -469,6 +469,16 @@ FString AGuardAIController::GetPossessGuardPawnName() const
 	return PossessGuardPawn ? PossessGuardPawn->GetName() : TEXT("None");
 }
 
+void AGuardAIController::SetSightDebugEnabled(bool bInEnabled)
+{
+	if (!GuardSightComp)
+	{
+		return;
+	}
+
+	GuardSightComp->SetSightDebugEnabled(bInEnabled);
+}
+
 
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {

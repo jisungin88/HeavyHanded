@@ -68,6 +68,9 @@ public:
 	AGuardCharacter* GetPossessGuardPawn() const { return PossessGuardPawn; }
 	FString GetPossessGuardPawnName() const;
 
+	UGuardSightAComponent* GetGuardSightComponent() const { return GuardSightComp; }
+	void SetSightDebugEnabled(bool bInEnabled);
+
 
 
 	// AI State 상태 관리
