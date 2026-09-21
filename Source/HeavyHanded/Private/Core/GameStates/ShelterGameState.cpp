@@ -479,13 +479,14 @@ void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
 
 TArray<FString> AShelterGameState::GetUnconfirmedPlayerNames() const
 {
+	// bCanStart와 같은 기준(IsJobConfirmed)을 본다.
 	TArray<FString> Names;
 	for (const APlayerState* PS : PlayerArray)
 	{
 		const AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
 		if (ShelterPS && !ShelterPS->IsJobConfirmed())
 		{
-			Names.Add(ShelterPS->GetName());
+			Names.Add(ShelterPS->GetPlayerName());
 		}
 	}
 	return Names;
@@ -629,6 +630,23 @@ FHeistSiteView AShelterGameState::GetNextSiteView() const
 	return GetSiteView(RunProgress.NextSite);
 }
 
+void AShelterGameState::SetDeparting(bool bNewDeparting)
+{
+	if (!HasAuthority() || bDeparting == bNewDeparting)
+	{
+		return;
+	}
+
+	bDeparting = bNewDeparting;
+
+	OnRep_bDeparting();
+}
+
+void AShelterGameState::OnRep_bDeparting()
+{
+	OnDepartingChanged.Broadcast(bDeparting);
+}
+
 void AShelterGameState::OnRep_SelectedEntry()
 {
 	// 클라이언트에서 EntryTag가 복제되면 UI 갱신
@@ -658,6 +676,8 @@ void AShelterGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AShelterGameState, SelectedEntry);
 
 	DOREPLIFETIME(AShelterGameState, RunProgress);
+
+	DOREPLIFETIME(AShelterGameState, bDeparting);
 }
 
 FString AShelterGameState::SanitizeNickname(const FString& Raw)

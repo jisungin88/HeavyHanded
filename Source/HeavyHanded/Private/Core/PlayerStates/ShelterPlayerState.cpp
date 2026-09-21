@@ -135,12 +135,7 @@ void AShelterPlayerState::OnRep_SelectedJob()
 void AShelterPlayerState::SetJobConfirmed(bool bNewConfirmed)
 {
 	// 확정 판정은 서버에서만
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	if (bJobConfirmed == bNewConfirmed)
+	if (!HasAuthority() || bJobConfirmed == bNewConfirmed)
 	{
 		return;
 	}
@@ -149,6 +144,11 @@ void AShelterPlayerState::SetJobConfirmed(bool bNewConfirmed)
 
 	// 서버에서는 RepNotify가 자동 호출되지 않으므로 호스트 UI를 위해 직접 알린다
 	OnJobConfirmedChanged.Broadcast(this);
+
+	if (AShelterGameState* GS = GetWorld() ? GetWorld()->GetGameState<AShelterGameState>() : nullptr)
+	{
+		GS->UpdateCanStart();
+	}
 }
 
 void AShelterPlayerState::OnRep_JobConfirmed()

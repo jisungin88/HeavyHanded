@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "LaserTrap.generated.h"
 
 class UNiagaraComponent;
@@ -35,7 +35,7 @@ class ABaseCharacter;
  * 서버 권위 — 세계 경계도 변경은 서버 판정 사항이다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ALaserTrap : public AActor
+class HEAVYHANDED_API ALaserTrap : public AHazardBase
 {
 	GENERATED_BODY()
 
@@ -91,6 +91,4 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayAlarmSound();
 	void Multicast_PlayAlarmSound_Implementation();
-
-	float LastTriggerTime = -1.f;
 };

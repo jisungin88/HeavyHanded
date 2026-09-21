@@ -72,9 +72,10 @@ void AForceMovementZone::OnZoneBeginOverlap(UPrimitiveComponent* OverlappedCompo
 		return;
 	}
 
-	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유. 그림자 이동 중에도
+	// 밀리게 두는 게 맞다고 판단해 ShadowStep 은 원래부터 안 가렸다(변경 없음)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target, /*bCheckShadowStep=*/false))
 	{
 		return;
 	}
@@ -101,8 +102,8 @@ void AForceMovementZone::OnZoneEndOverlap(UPrimitiveComponent* OverlappedCompone
 		return;
 	}
 
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target, /*bCheckShadowStep=*/false))
 	{
 		return;
 	}

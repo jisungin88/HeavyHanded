@@ -24,6 +24,8 @@
 #include "UI/Shelter/ShelterHUD.h"
 
 #include "Core/GameModes/ShelterGameMode.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "UI/LoadingScreenSubsystem.h"
 
 void AShelterPlayerController::BeginPlay()
 {
@@ -53,8 +55,56 @@ void AShelterPlayerController::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("=== AFTER BEGIN PLAY ==="));
 	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("=== AFTER BEGIN PLAY ==="));
 
+	if (UWorld* World = GetWorld())
+	{
+		BindToGameState(World->GetGameState());
+		GameStateSetHandle = World->GameStateSetEvent.AddUObject(this, &AShelterPlayerController::BindToGameState);
+	}
+}
 
+void AShelterPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	UnbindFromGameState();
+	if (UWorld* World = GetWorld())
+	{
+		if (GameStateSetHandle.IsValid())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+			GameStateSetHandle.Reset();
+		}
+	}
 
+	Super::EndPlay(EndPlayReason);
+}
+
+void AShelterPlayerController::BindToGameState(AGameStateBase* GameState)
+{
+	AShelterGameState* ShelterGS = Cast<AShelterGameState>(GameState);
+	if (!ShelterGS || ShelterGS == BoundGameState)
+	{
+		return;
+	}
+
+	UnbindFromGameState();
+
+	BoundGameState = ShelterGS;
+	ShelterGS->OnDepartingChanged.AddDynamic(this, &AShelterPlayerController::HandleDepartingChanged);
+
+	if (ShelterGS->bDeparting)
+	{
+		HandleDepartingChanged(true);
+	}
+}
+
+void AShelterPlayerController::UnbindFromGameState()
+{
+	if (!BoundGameState)
+	{
+		return;
+	}
+
+	BoundGameState->OnDepartingChanged.RemoveDynamic(this, &AShelterPlayerController::HandleDepartingChanged);
+	BoundGameState = nullptr;
 }
 
 void AShelterPlayerController::SetupInputComponent()
@@ -572,6 +622,40 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 }
 
+void AShelterPlayerController::Client_BeginTravel_Implementation(FGameplayTag SiteTag)
+{
+	if (ULoadingScreenSubsystem* Loading = GetGameInstance()->GetSubsystem<ULoadingScreenSubsystem>())
+	{
+		Loading->SetNextDestination(SiteTag);
+	}
+}
+
+void AShelterPlayerController::Client_NotifyDepartBlocked_Implementation()
+{
+	BP_OnDepartBlocked();
+}
+
+void AShelterPlayerController::HandleDepartingChanged(bool bNewDeparting)
+{
+	if (!bNewDeparting || !IsLocalController())
+	{
+		return;
+	}
+
+	EnterUIFocus(this, EHHUIFocusMode::UIOnly);
+
+	if (APawn* MyPawn = GetPawn())
+	{
+		MyPawn->DisableInput(this);
+		if (UCharacterMovementComponent* Move = MyPawn->FindComponentByClass<UCharacterMovementComponent>())
+		{
+			Move->StopMovementImmediately();
+		}
+	}
+
+	BP_OnDepartBegin();
+}
+
 void AShelterPlayerController::ClientShowJobSelect_Implementation()
 {
 	BP_ShowJobSelect();
@@ -686,16 +770,39 @@ void AShelterPlayerController::IngameTravel()
 
 	Run->SetConfirmedRoster(Roster);
 
+	// --- 출발 절차 시작
+
+	if (AShelterGameState* GS = World->GetGameState<AShelterGameState>())
+	{
+		GS->SetDeparting(true);
+	}
+
+	if (ULoadingScreenSubsystem* Loading = GetGameInstance()->GetSubsystem<ULoadingScreenSubsystem>())
+	{
+		Loading->SetNextDestination(NextSite);
+	}
+
 	// ── 로딩창 ──
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get()))
 		{
+			PC->Client_BeginTravel(NextSite);
 			PC->ClientShowStartGameWindow();
 		}
 	}
 
-	Run->TryDepartToNextSite();
+	// 연출
+	FTimerHandle DepartHandle;
+	World->GetTimerManager().SetTimer(DepartHandle,
+		FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+			{
+				Run->TryDepartToNextSite();
+			}
+		}),
+		FMath::Max(0.01f, UHeistSettings::Get()->DepartDelaySeconds), false);
 }
 
 void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)

@@ -30,8 +30,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 );
 
 
-
-
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerController : public AHeavyHandedPlayerController
 {
@@ -41,7 +39,17 @@ class HEAVYHANDED_API AShelterPlayerController : public AHeavyHandedPlayerContro
 protected:
 
     virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+private:
+	FDelegateHandle GameStateSetHandle;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AShelterGameState> BoundGameState;
+
+
+	void BindToGameState(AGameStateBase* GameState);
+	void UnbindFromGameState();
 
 public:
 	UFUNCTION(BlueprintPure)
@@ -166,7 +174,25 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "Shelter|Travel")
 	void ServerSetEntryTag(FGameplayTag NewEntry);
 
+	/** 출발 시작 알림 */
+	UFUNCTION(Client, Reliable)
+	void Client_BeginTravel(FGameplayTag SiteTag);
 
+	/** 출발 거부 알림 */
+	UFUNCTION(Client, Reliable)
+	void Client_NotifyDepartBlocked();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
+	void BP_OnDepartBlocked();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
+	void BP_OnDepartBegin();
+
+protected:
+	UFUNCTION()
+	void HandleDepartingChanged(bool bNewDeparting);
+
+public:
 	// --- 로딩 UI ---
 	UFUNCTION(Client, Reliable)
 	void ClientShowStartGameWindow();

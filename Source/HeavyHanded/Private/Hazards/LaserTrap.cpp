@@ -1,13 +1,9 @@
 ﻿#include "Hazards/LaserTrap.h"
 
-#include "AbilitySystemComponent.h"
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
-#include "Engine/World.h"
-#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
-#include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 
 ALaserTrap::ALaserTrap()
@@ -54,38 +50,19 @@ void ALaserTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 		return;
 	}
 
-	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유. 그림자 이동 중에도
+	// 무시한다 — State.ini 의 State.ShadowStep 코멘트에 이미 "압력판 무시" 라고 명시돼
+	// 있고, 레이저도 같은 종류의 감지 장치라 동일하게 적용한다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target))
 	{
 		return;
 	}
 
-	// 그림자 이동 중엔 무시한다 — State.ini 의 State.ShadowStep 코멘트에 이미 "압력판 무시"
-	// 라고 명시돼 있고, 레이저도 같은 종류의 감지 장치라 동일하게 적용한다
-	// (APressurePlate 와 동일 사유 — 문자열 조회로 HeavyHandedGameplayTags.h 를 안 건드린다)
-	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
-	{
-		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-		{
-			return;
-		}
-	}
-
-	const UWorld* World = GetWorld();
-	if (!World)
+	if (!ShouldRetrigger(MinRetriggerInterval))
 	{
 		return;
 	}
-
-	const float Now = World->GetTimeSeconds();
-	if (LastTriggerTime >= 0.f && Now - LastTriggerTime < MinRetriggerInterval)
-	{
-		// 오버랩 경계에서 스치듯 들락거린 것 — 진짜 재진입이 아니다 (다른 Hazard 클래스와 동일 사유)
-		return;
-	}
-	LastTriggerTime = Now;
 
 	// 세계 경계도를 직접 올린다. SetAlertGauge01 은 "치트 · 스크립트 이벤트용" 으로 이미
 	// 열려 있는 통로다(AlertComponent.h) — 소음 태그를 새로 만들 필요가 없다.
@@ -105,16 +82,5 @@ void ALaserTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 
 void ALaserTrap::Multicast_PlayAlarmSound_Implementation()
 {
-	const UWorld* World = GetWorld();
-
-	// 데디케이티드 서버는 화면도 스피커도 없다 (다른 Hazard 클래스들과 동일 사유)
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
-
-	if (IsValid(AlarmSound))
-	{
-		UGameplayStatics::PlaySoundAtLocation(World, AlarmSound, GetActorLocation());
-	}
+	PlayHazardSound(AlarmSound);
 }

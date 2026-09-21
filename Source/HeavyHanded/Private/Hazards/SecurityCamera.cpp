@@ -1,6 +1,5 @@
 #include "Hazards/SecurityCamera.h"
 
-#include "AbilitySystemComponent.h"
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/SpotLightComponent.h"
@@ -9,9 +8,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"            // TActorIterator — 소수의 캐릭터를 매 판정마다 순회한다 (AStickyBomb 와 동일 사유)
 #include "GameFramework/GameStateBase.h"
-#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
-#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -208,14 +205,13 @@ void ASecurityCamera::CheckDetection()
 		}
 
 		// 그림자 이동 중엔 무시한다 — State.ini 의 State.ShadowStep 코멘트("압력판 무시")를
-		// 감지 장치 전체로 동일 적용한다 (ALaserTrap::OnTriggerOverlap 과 동일 사유)
-		if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
+		// 감지 장치 전체로 동일 적용한다(AHazardBase::IsValidHazardTarget 참고).
+		// Target 은 이미 TActorIterator<ABaseCharacter> 가 준 타입이라 캐스팅 결과는 항상
+		// 자기 자신이고, 여기서는 순수하게 ShadowStep 판정만 재사용하는 것이다.
+		ABaseCharacter* ShadowCheckTarget = nullptr;
+		if (!IsValidHazardTarget(Target, ShadowCheckTarget))
 		{
-			static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-			if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-			{
-				continue;
-			}
+			continue;
 		}
 
 		FHitResult Hit;
@@ -287,16 +283,5 @@ void ASecurityCamera::ReEnable()
 
 void ASecurityCamera::Multicast_PlayAlarmSound_Implementation()
 {
-	const UWorld* World = GetWorld();
-
-	// 데디케이티드 서버는 화면도 스피커도 없다 (다른 Hazard 클래스들과 동일 사유)
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
-
-	if (IsValid(AlarmSound))
-	{
-		UGameplayStatics::PlaySoundAtLocation(World, AlarmSound, GetActorLocation());
-	}
+	PlayHazardSound(AlarmSound);
 }
