@@ -20,6 +20,8 @@ class AGuardCharacter;
 class UProceduralMeshComponent;
 class UMaterialInterface;
 
+class UCapsuleComponent;
+
 
 ///DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
 
@@ -34,11 +36,13 @@ public:
 	// Sets default values for this component's properties
 	UGuardSightAComponent();
 
-	void InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp);
+	//void InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp);
 
 	//UPROPERTY(BlueprintAssignable, Category = "Guard|Perception")
 	///FOnPlayerSpotted OnPlayerSpotted;
 
+public:
+	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
 
 protected:
 
@@ -122,12 +126,19 @@ private:
 
 private:
 
-	//UPROPERTY(Transient)
-	//TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
-
 	UPROPERTY(EditAnywhere, Category = "Debug")
 	TObjectPtr<UMaterialInterface> SightDebugMaterial;
 
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardAIController> GuardAIController;
 
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardCharacter> GuardCharacter;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };

@@ -7,7 +7,6 @@
 #include "Perception/AISense_Sight.h"
 #include "Perception/AISenseConfig_Sight.h"
 
-#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AI/GuardBlackboardKeys.h"
 
@@ -15,7 +14,6 @@
 
 
 #include "DrawDebugHelpers.h"
-#include "GameFramework/Pawn.h"
 #include "AI/GuardAIController.h"
 #include "AI/GuardHearingAComponent.h"
 #include "Character/GuardCharacter.h"
@@ -50,20 +48,64 @@ UGuardSightAComponent::UGuardSightAComponent()
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
 
 
-
-
-
 }
 
-// pawn 빙의시 초기화중
-void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+//// pawn 빙의시 초기화중
+//void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+//{
+//
+//}
+
+
+void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp)
 {
+	if (!IsValid(InGuardCharacter))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardCharacter is invalid."));
+		return;
+	}
+
+	if (!IsValid(InPerceptionComp))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: PerceptionComp is invalid."));
+		return;
+	}
+
+	if (!IsValid(SightConfig))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: SightConfig is invalid."));
+		return;
+	}
+
+	GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(GuardAIController))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardAIController is invalid."));
+		return;
+	}
+
+	GuardCharacter = InGuardCharacter;
 	PerceptionComp = InPerceptionComp;
 
-	if (IsValid(PerceptionComp) && IsValid(SightConfig))
+	SightDebugMesh = GuardCharacter->GetSightDebugMesh();
+	if (!IsValid(SightDebugMesh))
 	{
-		PerceptionComp->ConfigureSense(*SightConfig);
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: SightDebugMesh is invalid."));
+		return;
 	}
+
+	GuardCapsule = GuardCharacter->GetCapsuleComponent();
+	if (!IsValid(GuardCapsule))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardCapsule is invalid."));
+		return;
+	}
+
+	PerceptionComp->ConfigureSense(*SightConfig);
+
+	SetSightEnabled(GuardCharacter->IsSightEnabled());
+	SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
+
 }
 
 
@@ -164,48 +206,12 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 {
 	bDrawSightDebug = bInEnabled;
+	SightDebugMesh->SetVisibility(bInEnabled);
 	SetComponentTickEnabled(bInEnabled);
-
-	//if (!bInEnabled)
-	//{
-	//	if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner()))
-	//	{
-	//		if (AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn()))
-	//		{
-	//			if (UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh())
-	//			{
-	//				Mesh->SetVisibility(false);
-	//				// 또는 Mesh->ClearAllMeshSections(); 로 지오메트리 자체를 비워도 됨
-	//			}
-	//		}
-	//	}
-	// 
-	//}
-
-
-	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
-	if (!GuardCharacter)
-	{
-		return;
-	}
-
-	UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh();
-	if (!Mesh)
-	{
-		return;
-	}
-
-	Mesh->SetVisibility(bInEnabled);
 
 	if (!bInEnabled)
 	{
-		Mesh->ClearAllMeshSections();
+		SightDebugMesh->ClearAllMeshSections();
 	}
 
 
@@ -276,7 +282,7 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		{
 
 			// Sight에서 플레이어를 발견했을 때 Hearing에서 걸어둔 FocalPoint를 해제
-			AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+			//AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
 			if (GuardAIController)
 			{
 				GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
@@ -357,6 +363,8 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 
 
+
+
 //경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
 bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const
 {
@@ -366,19 +374,19 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 		return false;
 	}
 
-	const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardAIController)
-	{
-		return false;
-	}
+	//const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	//if (!GuardAIController)
+	//{
+	//	return false;
+	//}
+	//
+	//const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
+	//if (!GuardCharacter)
+	//{
+	//	return false;
+	//}
 
-	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
-	if (!GuardCharacter)
-	{
-		return false;
-	}
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+	//const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
 
 	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
 	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
@@ -390,7 +398,7 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 	// 테스트용. 추후 사용시 수정 반드시 필요
 	const FVector GuardEyeLocation =
-		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
@@ -405,43 +413,17 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 void UGuardSightAComponent::DrawSightDebug() const
 {
-	if (!SightConfig)
-	{
-		return;
-	}
-
-	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	const APawn* GuardPawn = GuardController->GetPawn();
-	if (!GuardPawn)
-	{
-		return;
-	}
-
+	
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
 
-	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardPawn);
-	if (!GuardCharacter || !GuardCharacter->GetMesh())
-	{
-		return;
-	}
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-
-	//const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
-	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
-	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	const FVector HorizontalOrigin = GuardCharacter->GetCapsuleComponent()->GetComponentLocation() - FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
-	const FVector Forward = GuardPawn->GetActorForwardVector().GetSafeNormal();
+	const FVector Forward = GuardCharacter->GetActorForwardVector().GetSafeNormal();
 	const FVector Up = FVector::UpVector;
 
 	const float SightRadius = SightConfig->SightRadius;
@@ -460,7 +442,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 	const int32 ArcSegments = 24;
 	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
 
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
 
 	// ========================================================
 	// 수평 시야 외곽
@@ -671,177 +653,15 @@ void UGuardSightAComponent::DrawSightDebug() const
 	}
 }
 
-/*
+
 void UGuardSightAComponent::DrawSightDebugMesh()
 {
-	if (!SightConfig)
-	{
-		return;
-	}
-
-	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
-	if (!GuardCharacter)
-	{
-		return;
-	}
-
-	UProceduralMeshComponent* SightDebugMesh = GuardCharacter->GetSightDebugMesh();
-	if (!SightDebugMesh)
-	{
-		return;
-	}
-
+	
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-	if (!Capsule)
-	{
-		return;
-	}
-
-	const float SightRadius = SightConfig->SightRadius;
-	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
-
-	if (SightRadius <= 0.0f || HalfAngle <= 0.0f)
-	{
-		SightDebugMesh->ClearAllMeshSections();
-		return;
-	}
-
-	const int32 ArcSegments = 48;
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-
-	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
-	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
-	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
-
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
-
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
-	TArray<FLinearColor> VertexColors;
-	TArray<FProcMeshTangent> Tangents;
-
-	Vertices.Reserve(ArcSegments + 2);
-	Triangles.Reserve(ArcSegments * 3);
-
-	Vertices.Add(LocalOrigin);
-
-	for (int32 Index = 0; Index <= ArcSegments; ++Index)
-	{
-		const float Alpha = static_cast<float>(Index) / static_cast<float>(ArcSegments);
-		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
-
-		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
-		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
-
-		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
-
-		FHitResult Hit;
-		const bool bBlocked = World->LineTraceSingleByChannel(Hit, WorldOrigin, TraceEnd, ECC_Visibility, Params);
-
-		float VisibleDistance = SightRadius;
-
-		if (bBlocked)
-		{
-			VisibleDistance = FMath::Clamp(FVector::Distance(WorldOrigin, Hit.Location), 0.0f, SightRadius);
-
-			if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
-			{
-				VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
-			}
-		}
-
-		Vertices.Add(LocalOrigin + LocalDirection * VisibleDistance);
-	}
-
-	for (int32 Index = 0; Index < ArcSegments; ++Index)
-	{
-		Triangles.Add(0);
-		Triangles.Add(Index + 2);
-		Triangles.Add(Index + 1);
-	}
-
-	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
-	{
-		Normals.Add(FVector::UpVector);
-		UV0.Add(FVector2D::ZeroVector);
-		VertexColors.Add(FLinearColor::White);
-	}
-
-	SightDebugMesh->ClearAllMeshSections();
-
-	SightDebugMesh->CreateMeshSection_LinearColor(
-		0,
-		Vertices,
-		Triangles,
-		Normals,
-		UV0,
-		VertexColors,
-		Tangents,
-		false
-	);
-
-	SightDebugMesh->SetVisibility(true);
-	SightDebugMesh->SetHiddenInGame(false);
-	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	if (SightDebugMaterial)
-	{
-		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
-	}
-}
-*/
-
-void UGuardSightAComponent::DrawSightDebugMesh()
-{
-	if (!SightConfig)
-	{
-		return;
-	}
-
-	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	AGuardCharacter* GuardCharacter = GuardController->GetPossessGuardPawn();
-	if (!GuardCharacter)
-	{
-		return;
-	}
-
-	UProceduralMeshComponent* SightDebugMesh = GuardCharacter->GetSightDebugMesh();
-	if (!SightDebugMesh)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-	if (!Capsule)
-	{
-		return;
-	}
-
 
 	// 실제 시야 거리와 수평 시야각을 가져온다.
 	// VerticalVisionAngleDegrees는 여기서는 사용하지 않는다.
@@ -859,7 +679,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	const int32 ArcSegments = 48;
 
 	// 캡슐의 절반 높이를 구한다.
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float CapsuleHalfHeight = GuardCapsule->GetScaledCapsuleHalfHeight();
 
 	// Mesh의 중심점.
 	// 캐릭터의 캡슐 바닥에서 2cm 위에 배치한다.

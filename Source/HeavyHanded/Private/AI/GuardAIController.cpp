@@ -113,17 +113,13 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 		Alert->OnAlertGaugeChanged.AddDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
 	}
 
+	GuardSightComp->Initialize(PossessGuardPawn, PerceptionComp);
 
 	// PerceptionComp 넘겨주기 (추후 수정 필요)
-	GuardSightComp->InitializeSightPerception(PerceptionComp);
 	GuardHearingComp->InitializeHearingPerception(PerceptionComp);
 
 	// 시야, 청각 활성화 여부 결정 (테스트용)
-	GuardSightComp->SetSightEnabled(PossessGuardPawn->IsSightEnabled());
 	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->IsHearingEnabled());
-
-	//DebugLine (개발중에만 필요, 추후 비활성화)
-	GuardSightComp->SetSightDebugEnabled(PossessGuardPawn->IsDrawSightDebugEnabled());
 
 
 	// 경비 스탯 초기화
