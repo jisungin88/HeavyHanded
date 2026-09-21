@@ -479,13 +479,14 @@ void AShelterGameState::OnPlayerJobChanged(AShelterPlayerState* PlayerState)
 
 TArray<FString> AShelterGameState::GetUnconfirmedPlayerNames() const
 {
+	// bCanStart와 같은 기준(IsJobConfirmed)을 본다.
 	TArray<FString> Names;
 	for (const APlayerState* PS : PlayerArray)
 	{
 		const AShelterPlayerState* ShelterPS = Cast<AShelterPlayerState>(PS);
 		if (ShelterPS && !ShelterPS->IsJobConfirmed())
 		{
-			Names.Add(ShelterPS->GetName());
+			Names.Add(ShelterPS->GetPlayerName());
 		}
 	}
 	return Names;
