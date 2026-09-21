@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "PressurePlate.generated.h"
 
 class UStaticMeshComponent;
@@ -40,7 +40,7 @@ class ABaseCharacter;
  * 서버 권위 — 세계 경계도 변경·아이템 드롭 둘 다 서버 판정 사항이다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API APressurePlate : public AActor
+class HEAVYHANDED_API APressurePlate : public AHazardBase
 {
 	GENERATED_BODY()
 
@@ -86,6 +86,4 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayAlarmSound();
 	void Multicast_PlayAlarmSound_Implementation();
-
-	float LastTriggerTime = -1.f;
 };

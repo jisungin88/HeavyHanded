@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "SecurityCamera.generated.h"
 
 class UStaticMeshComponent;
@@ -52,7 +52,7 @@ class ABaseCharacter;
  * 서버 권위 — 판정(감지·경계도 변경)은 서버에서만 한다. 회전 연출은 각 머신이 각자 계산한다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ASecurityCamera : public AActor
+class HEAVYHANDED_API ASecurityCamera : public AHazardBase
 {
 	GENERATED_BODY()
 

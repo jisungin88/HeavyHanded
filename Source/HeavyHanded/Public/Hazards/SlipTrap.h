@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "SlipTrap.generated.h"
 
 class UStaticMeshComponent;
@@ -41,7 +41,7 @@ class ABaseCharacter;
  *   같은 이유로, 밟는 순간과 사라지는 순간을 프레임 하나에 몰지 않는다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ASlipTrap : public AActor
+class HEAVYHANDED_API ASlipTrap : public AHazardBase
 {
 	GENERATED_BODY()
 
