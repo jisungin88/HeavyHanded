@@ -62,7 +62,17 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 			}
 		}
 
-		Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
+		/// Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
+
+
+		// 양안각 안에서는 1.0배, 양안각 밖에서는 0.25배로 인지 게이지 증가 속도를 조절한다.
+		// BinocularRate: 양안각 내 위치 비율 (0.0 ~ 1.0)
+		const float BinocularMultiplier = FMath::Lerp(0.25f, 1.0f, BinocularRate);
+
+		// 기본 증가 속도에 거리 보정과 양안각 보정값을 적용해 최종 게이지 증가량을 계산한다.
+		Delta = GaugeIncreaseRate * DistanceRate * BinocularMultiplier * DeltaSeconds;
+
+
 		// -------------------------------------------------------------------------
 
 		// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
