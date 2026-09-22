@@ -179,7 +179,7 @@ public:
 	void Client_BeginTravel(FGameplayTag SiteTag);
 
 	/** 출발 거부 알림 */
-	UFUNCTION(Client, Reliable)
+	UFUNCTION(Client, Reliable, BlueprintCallable, Category = "Shelter|Travel")
 	void Client_NotifyDepartBlocked();
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
