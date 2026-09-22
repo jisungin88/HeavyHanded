@@ -14,6 +14,7 @@ class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
 class AGuardCharacter;
 class AGuardAIController;
+class UCapsuleComponent;
 
 UCLASS( ClassGroup=(AI), meta=(BlueprintSpawnableComponent) )
 class HEAVYHANDED_API UGuardHearingAComponent : public UActorComponent
@@ -73,6 +74,8 @@ private:
 	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
 	FTimerHandle WorldAlertSilenceDebugTimerHandle;
 
+	bool bDrawHearingDebug = true;
+
 
 	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
@@ -94,5 +97,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AGuardCharacter> GuardCharacter;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };

@@ -14,6 +14,7 @@
 //#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AI/GuardBlackboardKeys.h"
+#include "Components/CapsuleComponent.h"
 
 #include "AI/GuardTypes.h"
 #include "GameplayTagContainer.h"
@@ -63,12 +64,14 @@ void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIP
 		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: GuardCharacter is invalid."));
 		return;
 	}
+	GuardCharacter = InGuardCharacter;
 
 	if (!IsValid(InPerceptionComp))
 	{
 		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: PerceptionComp is invalid."));
 		return;
 	}
+	PerceptionComp = InPerceptionComp;
 
 	if (!IsValid(HearingConfig))
 	{
@@ -83,14 +86,21 @@ void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIP
 		return;
 	}
 
-	GuardCharacter = InGuardCharacter;
-	PerceptionComp = InPerceptionComp;
+	GuardCapsule = GuardCharacter->GetCapsuleComponent();
+	if (!IsValid(GuardCapsule))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardCapsule is invalid."));
+		return;
+	}
+
+
 
 
 
 	PerceptionComp->ConfigureSense(*HearingConfig);
 
-	SetHearingEnabled(GuardCharacter->IsSightEnabled());
+	SetHearingEnabled(GuardCharacter->IsHearingEnabled());
+	bDrawHearingDebug = GuardCharacter->IsHearingEnabled();
 	//SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
 }
 
@@ -146,6 +156,7 @@ void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 {
 	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), isEnable);
 	PrimaryComponentTick.bCanEverTick = isEnable;
+	bDrawHearingDebug = isEnable; // 이미 tick을 끄고 있어서 안해도 상관없음
 }
 
 void UGuardHearingAComponent::HandleWorldAlertSilenceTimeout()
@@ -238,7 +249,10 @@ void UGuardHearingAComponent::TickComponent(float DeltaTime, ELevelTick TickType
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	DrawHearingDebug();
+	if (bDrawHearingDebug)
+	{
+		DrawHearingDebug();
+	}
 }
 
 void UGuardHearingAComponent::DrawHearingDebug() const
@@ -267,6 +281,8 @@ void UGuardHearingAComponent::DrawHearingDebug() const
 	}
 
 	const FVector HearingOrigin = GuardCharacter->GetActorLocation();
+	const FVector HorizontalOrigin = GuardCharacter->GetCapsuleComponent()->GetComponentLocation() - FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
 	const float HearingRadius = HearingConfig->HearingRange;
 
 	if (HearingRadius <= 0.0f)
@@ -275,8 +291,8 @@ void UGuardHearingAComponent::DrawHearingDebug() const
 	}
 
 	// 청각 감지 범위
-	//DrawDebugSphere(World, HearingOrigin, HearingRadius, 24, FColor::Cyan, false, 0.0f, 0, 1.0f);
-	DrawDebugCircle(World, HearingOrigin, HearingRadius, 24, FColor::Cyan, false, 0.0f, 0, 3.0f, FVector::ForwardVector, FVector::RightVector, false);
+	//DrawDebugSphere(World, HearingOrigin, HearingRadius, 24, FColor::Orange, false, 0.0f, 0, 1.0f);
+	DrawDebugCircle(World, HorizontalOrigin, HearingRadius, 24, FColor::Orange, false, 0.0f, 0, 3.0f, FVector::ForwardVector, FVector::RightVector, false);
 
 
 	// 마지막으로 감지한 소음 위치

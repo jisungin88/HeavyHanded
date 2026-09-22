@@ -210,10 +210,10 @@ void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 	SightDebugMesh->SetVisibility(bInEnabled);
 	SetComponentTickEnabled(bInEnabled);
 
-	if (!bInEnabled)
-	{
-		SightDebugMesh->ClearAllMeshSections();
-	}
+	//if (!bInEnabled)
+	//{
+	//	SightDebugMesh->ClearAllMeshSections();
+	//}
 
 
 
@@ -550,8 +550,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
 		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
 
-		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
-		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
 
 		if (UpVisibleDistance > SightRadius)
 		{
