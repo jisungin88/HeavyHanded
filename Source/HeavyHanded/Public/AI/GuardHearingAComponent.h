@@ -12,6 +12,8 @@
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
+class AGuardCharacter;
+class AGuardAIController;
 
 UCLASS( ClassGroup=(AI), meta=(BlueprintSpawnableComponent) )
 class HEAVYHANDED_API UGuardHearingAComponent : public UActorComponent
@@ -24,6 +26,8 @@ public:
 
 	void InitializeHearingPerception(UAIPerceptionComponent* InPerceptionComp);
 
+public:
+	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
 
 
 	UFUNCTION()
@@ -82,5 +86,13 @@ private:
 public:
 	void ClearHearingDebug();
 
+
+private:
+
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardAIController> GuardAIController;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardCharacter> GuardCharacter;
 
 };

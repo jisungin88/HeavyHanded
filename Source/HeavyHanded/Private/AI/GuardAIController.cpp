@@ -114,12 +114,13 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	}
 
 	GuardSightComp->Initialize(PossessGuardPawn, PerceptionComp);
+	GuardHearingComp->Initialize(PossessGuardPawn, PerceptionComp);
 
 	// PerceptionComp 넘겨주기 (추후 수정 필요)
-	GuardHearingComp->InitializeHearingPerception(PerceptionComp);
-
-	// 시야, 청각 활성화 여부 결정 (테스트용)
-	GuardHearingComp->SetHearingEnabled(PossessGuardPawn->IsHearingEnabled());
+	//GuardHearingComp->InitializeHearingPerception(PerceptionComp);
+	//
+	//// 시야, 청각 활성화 여부 결정 (테스트용)
+	//GuardHearingComp->SetHearingEnabled(PossessGuardPawn->IsHearingEnabled());
 
 
 	// 경비 스탯 초기화

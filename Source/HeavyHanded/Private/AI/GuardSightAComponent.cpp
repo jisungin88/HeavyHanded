@@ -19,6 +19,7 @@
 #include "Character/GuardCharacter.h"
 #include "Components/CapsuleComponent.h"
 
+
 #include "GameplayTagContainer.h"
 #include "ProceduralMeshComponent.h"
 
@@ -197,10 +198,10 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 {
 	if (IsWithinBinocularVisionAngle(TargetActor))
 	{
-		return 1.f;
+		return BinocularVisionRate;
 	}
 
-	return 0.5f;
+	return PeripheralVisionRate;
 }
 
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
@@ -349,7 +350,7 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if WITH_EDITOR
 	if (bDrawSightDebug)
 	{
-		//DrawSightDebug();
+		DrawSightDebug();
 		DrawSightDebugMesh();
 		DrawPerceivedActorsDebug();
 	}
@@ -650,6 +651,23 @@ void UGuardSightAComponent::DrawSightDebug() const
 				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 			}
 		}
+
+		// ========================================================
+		// 양안 시야 경계
+		// ========================================================
+
+		if (BinocularVisionAngleDegrees > 0.0f)
+		{
+			const float BinocularHalfAngle = BinocularVisionAngleDegrees * 0.5f;
+
+			const FVector BinocularLeftDirection = Forward.RotateAngleAxis(-BinocularHalfAngle, Up);
+			const FVector BinocularRightDirection = Forward.RotateAngleAxis(BinocularHalfAngle, Up);
+
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularLeftDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularRightDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
+		}
+
+
 	}
 }
 

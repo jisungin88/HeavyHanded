@@ -21,6 +21,8 @@
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemComponent.h"
 
+#include "Character/GuardCharacter.h"
+
 
 // Sets default values for this component's properties
 UGuardHearingAComponent::UGuardHearingAComponent()
@@ -54,6 +56,44 @@ void UGuardHearingAComponent::InitializeHearingPerception(UAIPerceptionComponent
 	}
 }
 
+void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp)
+{
+	if (!IsValid(InGuardCharacter))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: GuardCharacter is invalid."));
+		return;
+	}
+
+	if (!IsValid(InPerceptionComp))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: PerceptionComp is invalid."));
+		return;
+	}
+
+	if (!IsValid(HearingConfig))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: SightConfig is invalid."));
+		return;
+	}
+
+	GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(GuardAIController))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardHearingAComponent Initialize failed: GuardAIController is invalid."));
+		return;
+	}
+
+	GuardCharacter = InGuardCharacter;
+	PerceptionComp = InPerceptionComp;
+
+
+
+	PerceptionComp->ConfigureSense(*HearingConfig);
+
+	SetHearingEnabled(GuardCharacter->IsSightEnabled());
+	//SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
+}
+
 
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
@@ -83,11 +123,6 @@ void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FA
 	LastHearingLocation = Stimulus.StimulusLocation;
 	bHasHearingLocation = true;
 
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardAIController)
-	{
-		return;
-	}
 
 	// 현재 추적 대상이 있으면 청각 위치를 바라보지 않는다.
 	if (BlackboardComp && BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor))
@@ -115,7 +150,6 @@ void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
 
 void UGuardHearingAComponent::HandleWorldAlertSilenceTimeout()
 {
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
 
 	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
 	{
@@ -138,7 +172,6 @@ void UGuardHearingAComponent::LogWorldAlertSilenceRemaining()
 	{
 		return;
 	}
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
 
 	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
 	{
@@ -165,8 +198,6 @@ void UGuardHearingAComponent::StartWorldAlertSilenceTimer()
 	{
 		return;
 	}
-
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
 
 	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
 	{
@@ -212,22 +243,22 @@ void UGuardHearingAComponent::TickComponent(float DeltaTime, ELevelTick TickType
 
 void UGuardHearingAComponent::DrawHearingDebug() const
 {
-	if (!HearingConfig)
-	{
-		return;
-	}
-
-	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	const APawn* GuardPawn = GuardController->GetPawn();
-	if (!GuardPawn)
-	{
-		return;
-	}
+	//if (!HearingConfig)
+	//{
+	//	return;
+	//}
+	//
+	//const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	//if (!GuardController)
+	//{
+	//	return;
+	//}
+	//
+	//const APawn* GuardPawn = GuardController->GetPawn();
+	//if (!GuardPawn)
+	//{
+	//	return;
+	//}
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -235,23 +266,24 @@ void UGuardHearingAComponent::DrawHearingDebug() const
 		return;
 	}
 
-	const FVector Origin = GuardPawn->GetActorLocation();
-	const float Radius = HearingConfig->HearingRange;
+	const FVector HearingOrigin = GuardCharacter->GetActorLocation();
+	const float HearingRadius = HearingConfig->HearingRange;
 
-	if (Radius <= 0.0f)
+	if (HearingRadius <= 0.0f)
 	{
 		return;
 	}
 
 	// 청각 감지 범위
-	DrawDebugSphere(World, Origin, Radius, 24, FColor::Cyan, false, 0.0f, 0, 1.0f);
+	//DrawDebugSphere(World, HearingOrigin, HearingRadius, 24, FColor::Cyan, false, 0.0f, 0, 1.0f);
+	DrawDebugCircle(World, HearingOrigin, HearingRadius, 24, FColor::Cyan, false, 0.0f, 0, 3.0f, FVector::ForwardVector, FVector::RightVector, false);
 
 
 	// 마지막으로 감지한 소음 위치
 	if (bHasHearingLocation)
 	{
 		DrawDebugSphere(World, LastHearingLocation, 35.0f, 16, FColor::Red, false, 0.0f, 0, 4.0f);
-		DrawDebugLine(World, Origin, LastHearingLocation, FColor::Red, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, HearingOrigin, LastHearingLocation, FColor::Red, false, 0.0f, 0, 4.0f);
 	}
 
 }
