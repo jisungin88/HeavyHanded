@@ -76,7 +76,7 @@ void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
+	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
 
 	UPerceptionMeterWidget* PerceptionWidget = Cast<UPerceptionMeterWidget>(HearingGaugeWidgetComponent->GetUserWidgetObject());
 	if (!PerceptionWidget)
@@ -86,7 +86,7 @@ void AGuardCharacter::BeginPlay()
 		return;
 	}
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterWidget 연결 성공."), *GetName());
+	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterWidget 연결 성공."), *GetName());
 	PerceptionWidget->BindToGuard(this);
 
 
@@ -95,11 +95,11 @@ void AGuardCharacter::BeginPlay()
 	{
 		UUserWidget* Widget = HearingGaugeWidgetComponent->GetUserWidgetObject();
 
-		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DrawSize = %s"), *GetName(), *HearingGaugeWidgetComponent->GetDrawSize().ToString());
+		//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DrawSize = %s"), *GetName(), *HearingGaugeWidgetComponent->GetDrawSize().ToString());
 
 		if (Widget)
 		{
-			UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DesiredSize = %s"), *GetName(), *Widget->GetDesiredSize().ToString());
+			//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DesiredSize = %s"), *GetName(), *Widget->GetDesiredSize().ToString());
 		}
 	}
 

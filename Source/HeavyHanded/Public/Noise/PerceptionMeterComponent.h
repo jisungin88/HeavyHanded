@@ -37,6 +37,10 @@ public:
 	virtual FVector GetListenerLocation_Implementation() const override;
 	//~ End
 
+
+	virtual float GetListenerHearingRange_Implementation() const override;
+
+
 	/** 조사 종료 후 반드시 호출할 것. 이게 없으면 경비가 영원히 100% 에 박혀 있다 */
 	UFUNCTION(BlueprintCallable, Category = "Noise|Perception")
 	void ResetPerception();

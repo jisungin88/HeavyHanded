@@ -426,6 +426,8 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 		Row->PeripheralVisionAngleDegrees, Row->VerticalVisionAngleDegrees, Row->BinocularVisionAngleDegrees);
 
 	GuardHearingComp->SetHearingRange(Row->HearingRange);
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] ApplyGuardStats HearingRange = %.1f, Actual = %.1f"),
+		*GetName(), Row->HearingRange, GuardHearingComp->GetHearingRange());
 
 	// 반경/각도를 런타임에 바꿨으니 Perception 시스템에 다시 알려야 실제 감지에 반영된다.
 	PerceptionComp->RequestStimuliListenerUpdate();

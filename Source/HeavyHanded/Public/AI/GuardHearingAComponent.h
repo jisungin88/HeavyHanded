@@ -25,7 +25,6 @@ public:
 	// Sets default values for this component's properties
 	UGuardHearingAComponent();
 
-	void InitializeHearingPerception(UAIPerceptionComponent* InPerceptionComp);
 
 public:
 	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
@@ -61,7 +60,12 @@ protected:
 
 
 	
-public:	
+public:
+
+	UFUNCTION(BlueprintPure, Category = "GuardHearing")
+	float GetHearingRange() const;
+
+
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	
