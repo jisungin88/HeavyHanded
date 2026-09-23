@@ -2,6 +2,7 @@
 
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
+#include "Components/AudioComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
@@ -9,6 +10,7 @@
 #include "EngineUtils.h"            // TActorIterator — 소수의 캐릭터를 매 판정마다 순회한다 (AStickyBomb 와 동일 사유)
 #include "GameFramework/GameStateBase.h"
 #include "Hazards/HazardLog.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -27,7 +29,7 @@ ASecurityCamera::ASecurityCamera()
 	// 회전 연출·감지 판정 둘 다 매 프레임 값이 필요하다 — Hazards 중 Tick 을 쓰는 유일한 클래스다
 	PrimaryActorTick.bCanEverTick = true;
 
-	// Multicast_PlayAlarmSound 를 쓰고 bDisabled 를 복제하려면 복제 액터여야 한다
+	// bDisabled·bAlarmed 를 복제하려면 복제 액터여야 한다
 	bReplicates = true;
 
 	CameraBase = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CameraBase"));
@@ -54,6 +56,7 @@ void ASecurityCamera::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ASecurityCamera, bDisabled);
+	DOREPLIFETIME(ASecurityCamera, bAlarmed);
 }
 
 void ASecurityCamera::OnConstruction(const FTransform& Transform)
@@ -109,14 +112,22 @@ void ASecurityCamera::Tick(float DeltaTime)
 		return;
 	}
 
-	// 무력화 중엔 정면(오프셋 0)에 고정한다 — 회전이 멈추는 것 자체가 "지금 안 통한다" 는 시각 피드백이다
-	const float YawOffset = bDisabled ? 0.f : ComputeSweepYawOffset();
-
+	// 무력화 중(bDisabled)이면 정면에 고정한다 — 회전이 멈추는 것 자체가 "지금 안 통한다" 는
+	// 시각 피드백이다. 경보 유지 중(bAlarmed)이면 포착한 각도 그대로 멈춰 선다 — 실제 CCTV가
+	// 대상을 포착한 뒤 잠깐 멈칫하는 느낌을 준다. 둘 다 아니면 평소처럼 스윕한다.
+	//
 	// CameraBase(루트) 를 돌리면 그 자식인 CameraHead·VisionCone 도 통째로 같이 돈다 —
 	// CheckDetection() 은 CameraHead 의 월드 트랜스폼을 매번 새로 읽으므로 감지 로직은 그대로 맞는다
-	FRotator NewRotation = BaseBodyRotation;
-	NewRotation.Yaw += YawOffset;
-	CameraBase->SetRelativeRotation(NewRotation);
+	if (bDisabled)
+	{
+		CameraBase->SetRelativeRotation(BaseBodyRotation);
+	}
+	else if (!bAlarmed)
+	{
+		FRotator NewRotation = BaseBodyRotation;
+		NewRotation.Yaw += ComputeSweepYawOffset();
+		CameraBase->SetRelativeRotation(NewRotation);
+	}
 
 	// 무력화 중엔 시야도 꺼서 "지금 안 통한다" 는 걸 확실히 보여준다
 	if (IsValid(VisionCone))
@@ -145,7 +156,10 @@ float ASecurityCamera::ComputeSweepYawOffset() const
 
 void ASecurityCamera::CheckDetection()
 {
-	// 서버 권위 판정 (다른 Hazard 클래스들과 동일 사유)
+	// 서버 권위 판정. 무력화 중(bDisabled)이면 훑지 않는다. bAlarmed 여도 계속 훑는다 —
+	// 대상이 아직도 보이는지 확인해서 경보를 계속 유지(타이머 연장)할지, 놓쳐서 풀어줄지
+	// 결정해야 하기 때문이다. 사운드·경계도·연출 훅은 "새로 포착한 순간"(아래 bAlarmed==false
+	// 분기)에만 한 번 나간다 — 계속 보이는 동안은 반복 재생되지 않는다.
 	if (!HasAuthority() || bDisabled)
 	{
 		return;
@@ -154,13 +168,6 @@ void ASecurityCamera::CheckDetection()
 	UWorld* World = GetWorld();
 	if (!World || !IsValid(CameraHead))
 	{
-		return;
-	}
-
-	const float Now = World->GetTimeSeconds();
-	if (LastTriggerTime >= 0.f && Now - LastTriggerTime < MinRetriggerInterval)
-	{
-		// 계속 시야 안에 있어도 매번 울리지 않게 하는 디바운스 (다른 센서 클래스들과 동일 사유)
 		return;
 	}
 
@@ -241,26 +248,92 @@ void ASecurityCamera::CheckDetection()
 			continue;
 		}
 
-		LastTriggerTime = Now;
-
-		// 세계 경계도를 직접 올린다. ALaserTrap/APressurePlate 와 동일 사유 —
-		// Noise.ini 에 맞는 태그가 없어 SetAlertGauge01() 로 우회한다
-		if (UAlertComponent* Alert = UAlertComponent::Get(this))
+		// 지금 이 순간에도 보인다. 새로 포착한 순간(bAlarmed 가 꺼져 있던 상태)에만
+		// 사운드·경계도·연출 훅을 한 번 내보낸다 — 계속 보이는 동안 매번 반복되지 않는다.
+		if (!bAlarmed)
 		{
-			Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + AlertGaugeIncrease, 0.f, 1.f));
+			// 서버에서 직접 대입하면 RepNotify 가 안 불리므로 손으로도 불러야
+			// 호스트 화면에도 바로 반영된다 (ABreakableWall 과 동일 사유)
+			bAlarmed = true;
+			OnRep_bAlarmed();
+
+			// 세계 경계도를 직접 올린다. ALaserTrap/APressurePlate 와 동일 사유 —
+			// Noise.ini 에 맞는 태그가 없어 SetAlertGauge01() 로 우회한다
+			if (UAlertComponent* Alert = UAlertComponent::Get(this))
+			{
+				Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + AlertGaugeIncrease, 0.f, 1.f));
+			}
+
+			UE_LOG(LogHazard, Log, TEXT("[SecurityCamera:%s] %s 를 발견했다 — 경보"),
+				*GetName(), *Target->GetName());
+		}
+		else if (ContinuousAlertGaugeRate > 0.f)
+		{
+			// 이미 잡혀있는 상태로 또 확인된 것 — 최초 발각 몫과 별개로, 노출 시간에 비례해
+			// 조금씩 더 올린다(기획서 3장 "대형 금고 절단 +3%/초"와 동일한 성격의 지속 압박)
+			if (UAlertComponent* Alert = UAlertComponent::Get(this))
+			{
+				Alert->SetAlertGauge01(FMath::Clamp(
+					Alert->GetAlertGauge01() + ContinuousAlertGaugeRate * DetectionCheckInterval, 0.f, 1.f));
+			}
 		}
 
-		Multicast_PlayAlarmSound();
+		// 계속 보이는 한 타이머를 매번 새로 걸어 경보를 연장한다 — 시야에서 벗어나
+		// MinRetriggerInterval 동안 다시 걸리지 않아야만 ClearAlarm() 이 실행돼 스윕으로 돌아간다
+		GetWorldTimerManager().SetTimer(AlarmTimer, this, &ASecurityCamera::ClearAlarm, MinRetriggerInterval, false);
 
-		// 판정은 여기서 끝났다. 경고등 연출 등은 BP 몫이다 (헤더 주석 참고)
-		OnPlayerDetected();
-
-		UE_LOG(LogHazard, Log, TEXT("[SecurityCamera:%s] %s 를 발견했다 — 경보"),
-			*GetName(), *Target->GetName());
-
-		// 디바운스는 카메라 하나 기준이다 — 같은 프레임에 여럿이 걸려도 하나만 처리하고 끝낸다
+		// 같은 프레임에 여럿이 걸려도 하나만 처리하고 끝낸다
 		break;
 	}
+}
+
+void ASecurityCamera::ClearAlarm()
+{
+	bAlarmed = false;
+	OnRep_bAlarmed();
+}
+
+void ASecurityCamera::OnRep_bAlarmed()
+{
+	if (bAlarmed)
+	{
+		// 판정은 이미 끝났다. 경고등 연출 등은 BP 몫이다 (헤더 주석 참고)
+		OnPlayerDetected();
+		StartAlarmSound();
+	}
+	else
+	{
+		OnAlarmCleared();
+		StopAlarmSound();
+	}
+}
+
+void ASecurityCamera::StartAlarmSound()
+{
+	const UWorld* World = GetWorld();
+
+	// 데디케이티드 서버는 화면도 스피커도 없다 (다른 Hazard 클래스들과 동일 사유)
+	if (!World || World->GetNetMode() == NM_DedicatedServer || !IsValid(AlarmSound))
+	{
+		return;
+	}
+
+	// 이미 재생 중이면 다시 만들지 않는다 — 인스턴스가 두 개 겹쳐 재생되는 것을 막는다
+	if (IsValid(AlarmAudioComponent) && AlarmAudioComponent->IsPlaying())
+	{
+		return;
+	}
+
+	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation());
+}
+
+void ASecurityCamera::StopAlarmSound()
+{
+	if (IsValid(AlarmAudioComponent))
+	{
+		AlarmAudioComponent->Stop();
+	}
+	AlarmAudioComponent = nullptr;
 }
 
 void ASecurityCamera::Disable(float Duration)
@@ -279,9 +352,4 @@ void ASecurityCamera::Disable(float Duration)
 void ASecurityCamera::ReEnable()
 {
 	bDisabled = false;
-}
-
-void ASecurityCamera::Multicast_PlayAlarmSound_Implementation()
-{
-	PlayHazardSound(AlarmSound);
 }
