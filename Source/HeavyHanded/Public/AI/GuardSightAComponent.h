@@ -20,6 +20,8 @@ class AGuardCharacter;
 class UProceduralMeshComponent;
 class UMaterialInterface;
 
+class UCapsuleComponent;
+
 
 ///DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerSpotted, AActor*, SpottedActor);
 
@@ -34,11 +36,13 @@ public:
 	// Sets default values for this component's properties
 	UGuardSightAComponent();
 
-	void InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp);
+	//void InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp);
 
 	//UPROPERTY(BlueprintAssignable, Category = "Guard|Perception")
 	///FOnPlayerSpotted OnPlayerSpotted;
 
+public:
+	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
 
 protected:
 
@@ -95,6 +99,16 @@ private:
 	float VerticalVisionAngleDegrees = 0.0f;
 
 
+	// 양안 시야 안에서의 게이지 배율
+	UPROPERTY()
+	float BinocularVisionRate = 1.0f;
+
+	// 양안 시야 밖, 주변 시야에서의 게이지 배율
+	UPROPERTY()
+	float PeripheralVisionRate = 0.5f;
+
+
+
 	// 진단용. 시야를 잃은 시각. 되찾을 때 상실이 몇 초 지속됐는지 찍는다.
 	// 음수는 "현재 상실 상태가 아님".
 	float SightLostAtTime = -1.f;
@@ -122,12 +136,19 @@ private:
 
 private:
 
-	//UPROPERTY(Transient)
-	//TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
-
 	UPROPERTY(EditAnywhere, Category = "Debug")
 	TObjectPtr<UMaterialInterface> SightDebugMaterial;
 
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardAIController> GuardAIController;
 
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardCharacter> GuardCharacter;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };

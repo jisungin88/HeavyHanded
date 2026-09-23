@@ -129,3 +129,43 @@ struct FGuardStatsRow : public FTableRowBase
 	float PerceptionDecayPerSecond = 0.2f;
 };
 
+
+
+// 경비의 월드 경계도 반응에 필요한 설정 및 런타임 상태.
+// 월드 경계도 자체는 UAlertComponent가 관리하고,
+// 이 구조체는 경비가 월드 경계도에 반응하는 데 필요한 값만 관리한다.
+USTRUCT(BlueprintType)
+struct FGuardWorldAlertSettings
+{
+	GENERATED_BODY()
+
+	// 월드 경계도가 이 값 이상이면 경비가 추적 속도로 이동한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertSpeedThreshold = 34.0f;
+
+	// 월드 경계도가 임계값 이상일 때 기본 이동 속도에 적용할 증가율.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertMoveSpeedMultiplier = 1.3f;
+
+	// 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
+	// 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	float WorldAlertSilenceDelay = 20.0f;
+
+
+	// GuardStats DataTable에서 적용한 기본 이동 속도.
+	// 월드 경계도가 다시 내려가면 이 속도로 복구한다.
+	float NormalMoveSpeed = 0.0f;
+
+	// 현재 월드 경계도에 의해 가속된 상태인지 여부.
+	// 상태가 실제로 변경될 때만 이동 속도를 갱신하기 위해 사용한다.
+	bool bWorldAlertSpeedUp = false;
+
+	// 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
+	bool bWorldAlertSpeedTriggered = false;
+
+	// 게이지가 올라갈 때만 리셋 위함.
+	float PreviousWorldAlertLevel = 0.0f;
+
+};
+

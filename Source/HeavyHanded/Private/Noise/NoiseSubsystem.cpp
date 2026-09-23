@@ -382,8 +382,29 @@ void UNoiseSubsystem::Propagate(const FNoiseEvent& Event, const FNoiseProfileRow
 			}
 #endif
 
-			Strength *= ComputeAttenuation(Event.Location, ListenerLocation, Event.Radius,
-										   InstigatorActor, ListenerActor);
+
+
+			// 0922수정임시
+			const float ListenerHearingRange = INoiseListener::Execute_GetListenerHearingRange(ListenerObject);
+			const float EffectiveRadius = FMath::Min(Event.Radius, ListenerHearingRange);
+
+			UE_LOG(LogTemp, Warning, TEXT("Noise Listener=%s EventRadius=%.1f HearingRange=%.1f EffectiveRadius=%.1f Distance=%.1f"),
+				*GetNameSafe(ListenerActor),
+				Event.Radius,
+				ListenerHearingRange,
+				EffectiveRadius,
+				FVector::Dist(Event.Location, ListenerLocation));
+
+			if (EffectiveRadius <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			Strength *= ComputeAttenuation(Event.Location, ListenerLocation, EffectiveRadius,
+				InstigatorActor, ListenerActor);
+
+			// Strength *= ComputeAttenuation(Event.Location, ListenerLocation, Event.Radius,
+			//							   InstigatorActor, ListenerActor);
 		}
 		if (Strength < MinAudible)
 		{

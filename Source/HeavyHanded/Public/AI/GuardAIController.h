@@ -68,6 +68,9 @@ public:
 	AGuardCharacter* GetPossessGuardPawn() const { return PossessGuardPawn; }
 	FString GetPossessGuardPawnName() const;
 
+	UGuardSightAComponent* GetGuardSightComponent() const { return GuardSightComp; }
+	void SetSightDebugEnabled(bool bInEnabled);
+
 
 
 	// AI State 상태 관리
@@ -79,7 +82,7 @@ private:
 	EGuardAIState AIState = EGuardAIState::Patrol;
 
 public:
-	void SetAIState(EGuardAIState NewState) { AIState = NewState; }
+	void SetAIState(EGuardAIState NewState);
 	EGuardAIState GetAIState() const { return AIState; }
 
 	bool SelectNextAction(EGuardAIState State);
@@ -152,50 +155,71 @@ public:
 public:
 	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반)
 	// BTDecorator_CheckWorldAlert 등이 참조.
-	float GetWorldAlertLevel() const;
+	float GetWorldAlertLevel() const;					// 1
 
 	// 현재 월드 경계도에 따라 경비의 이동 속도를 갱신한다.
 	// 임계값을 넘으면 경계 속도를 적용하고, 다시 내려가면 기본 속도로 복구한다.
 	UFUNCTION() // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
-	void UpdateMoveSpeedByWorldAlert(float NewGauge01);
+	void UpdateMoveSpeedByWorldAlert(float NewGauge01);		// 2
 
 	// Hearing이 타이머를 가지고 있으려면 Controller가 지금 속도 증가 상태인지를 알아야 함
 	// 현재 월드 경계도로 인해 이동 속도가 증가된 상태인지 반환한다.
-	bool IsWorldAlertSpeedUp() const { return bWorldAlertSpeedUp; }
-	void SetWorldAlertSpeedUp(bool bInSpeedUp) { bWorldAlertSpeedUp = bInSpeedUp; }
+	bool IsWorldAlertSpeedUp() const { return WorldAlertSet.bWorldAlertSpeedUp; }   // 3
+	void SetWorldAlertSpeedUp(bool bInSpeedUp) { WorldAlertSet.bWorldAlertSpeedUp = bInSpeedUp; }
+	
+	float GetNormalMoveSpeed() const { return WorldAlertSet.NormalMoveSpeed; }    // 4
+	void SetNormalMoveSpeed(float normalSpeed) { WorldAlertSet.NormalMoveSpeed = normalSpeed; }  // 5
 
-	float GetNormalMoveSpeed() const { return NormalMoveSpeed; }
-	float GetWorldAlertSilenceDelay() const { return WorldAlertSilenceDelay; }
+	float GetWorldAlertSilenceDelay() const { return WorldAlertSet.WorldAlertSilenceDelay; }
 
+
+	// float GetWorldAlertSpeedThreshold() const { return WorldAlertSet.WorldAlertSpeedThreshold; }
+	// 
+	// float WorldAlertMoveSpeedMultiplier() const { return WorldAlertSet.WorldAlertMoveSpeedMultiplier; }
+	// 
+	// 
+	// bool IsbWorldAlertSpeedTrigger() const { return WorldAlertSet.bWorldAlertSpeedTriggered; }
+	// void SetbWorldAlertSpeedTrigger(bool bWorldAlertSpeedTrig) { WorldAlertSet.bWorldAlertSpeedTriggered = bWorldAlertSpeedTrig; }
+	// 
+	// void SetPreviousWorldAlertLevel(float prevWorldAlertLevel) { WorldAlertSet.PreviousWorldAlertLevel = prevWorldAlertLevel; }
 
 private:
 
-	// 월드 경계도가 이 값 이상이면 경비가 추적 속도로 이동한다.
+	// 월드 경계도에 따른 경비 이동 속도 설정 및 런타임 상태.
+	// 실제 월드 경계도 게이지는 UAlertComponent가 관리하고,
+	// 이 구조체는 경비가 해당 경계도에 반응하는 데 필요한 값만 관리한다.
 	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
-	float WorldAlertSpeedThreshold = 34.0f;
+	FGuardWorldAlertSettings WorldAlertSet;
 
-	// 월드 경계도가 임계값 이상일 때 기본 이동 속도에 적용할 증가율.
-	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
-	float WorldAlertMoveSpeedMultiplier = 1.3f;
 
-	// GuardStats DataTable에서 적용한 기본 이동 속도.
-	// 월드 경계도가 다시 내려가면 이 속도로 복구한다.
-	float NormalMoveSpeed = 0.0f;
+	// ---------------------------정리 후엔 삭제할 것
 
-	// 현재 월드 경계도에 의해 가속된 상태인지 여부.
-	// 상태가 실제로 변경될 때만 이동 속도를 갱신하기 위해 사용한다.
-	bool bWorldAlertSpeedUp = false;
-
-	// 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
-	bool bWorldAlertSpeedTriggered = false;
-
-	// 게이지가 올라갈 때만 리셋 위함
-	float PreviousWorldAlertLevel = 0.0f;
-
-	// 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
-	// 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
-	UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
-	float WorldAlertSilenceDelay = 20.0f;
+	/// // 월드 경계도가 이 값 이상이면 경비가 추적 속도로 이동한다.
+	/// UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	/// float WorldAlertSpeedThreshold = 34.0f;
+	/// 
+	/// // 월드 경계도가 임계값 이상일 때 기본 이동 속도에 적용할 증가율.
+	/// UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	/// float WorldAlertMoveSpeedMultiplier = 1.3f;
+	/// 
+	/// // GuardStats DataTable에서 적용한 기본 이동 속도.
+	/// // 월드 경계도가 다시 내려가면 이 속도로 복구한다.
+	/// float NormalMoveSpeed = 0.0f;
+	/// 
+	/// // 현재 월드 경계도에 의해 가속된 상태인지 여부.
+	/// // 상태가 실제로 변경될 때만 이동 속도를 갱신하기 위해 사용한다.
+	/// bool bWorldAlertSpeedUp = false;
+	/// 
+	/// // 현재 경계도 임계값 구간에서 이미 속도 증가를 발동했는지 여부.
+	/// bool bWorldAlertSpeedTriggered = false;
+	/// 
+	/// // 게이지가 올라갈 때만 리셋 위함
+	/// float PreviousWorldAlertLevel = 0.0f;
+	/// 
+	/// // 월드 경계도가 속도 증가 임계값 이상일 때 새로운 소음이 발생하지 않아야 하는 시간.
+	/// // 이 시간이 지나면 경비의 속도 증가 상태를 해제한다.
+	/// UPROPERTY(EditDefaultsOnly, Category = "Guard|Movement")
+	/// float WorldAlertSilenceDelay = 20.0f;
 
 
 	// ==================================================================================
