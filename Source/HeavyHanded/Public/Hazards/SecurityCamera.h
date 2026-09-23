@@ -7,6 +7,7 @@
 class UStaticMeshComponent;
 class USpotLightComponent;
 class USoundBase;
+class UAudioComponent;
 class ABaseCharacter;
 
 /**
@@ -119,25 +120,52 @@ protected:
 		meta = (ClampMin = "0.05", Units = "s"))
 	float DetectionCheckInterval = 0.2f;
 
-	/** 반응할 때 세계 경계도(0~1)에 더할 양 */
+	/** 새로 발견하는 순간(bAlarmed 가 켜질 때) 한 번 세계 경계도(0~1)에 더할 양 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float AlertGaugeIncrease = 0.25f;
 
-	/** 한 번 걸린 뒤 다시 걸릴 때까지의 최소 간격 — 계속 시야 안에 있어도 매번 울리지 않게 한다 */
+	/**
+	 * 계속 시야 안에 잡혀있는(bAlarmed 유지) 동안 초당 추가로 올릴 경계도(0~1) —
+	 * 기획서 3장의 "대형 금고 절단 +3%/초"와 같은 성격이다. 오래 노출될수록 더 위험해지는
+	 * 압박을 준다. 0 이면 최초 발각 몫(AlertGaugeIncrease)만 오르고 더 이상 안 오른다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ContinuousAlertGaugeRate = 0.01f;
+
+	/**
+	 * 발견한 뒤 다시 안 보이게 될 때까지 경보를 유지하는 최소 시간. 계속 보이는 동안은
+	 * 매 판정마다 이 시간만큼 타이머가 새로 걸려 계속 연장되고(bAlarmed 유지 — 스윕이
+	 * 멈추고 포착한 각도에 고정된다), 사운드·경계도·연출 훅은 "새로 포착한 순간"에만
+	 * 한 번 나간다. 시야에서 벗어나 이 시간이 다 지나야 다시 정상 스윕으로 돌아간다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
 		meta = (ClampMin = "0.0", Units = "s"))
 	float MinRetriggerInterval = 3.f;
 
 	/**
-	 * 발견하는 순간 호출된다. 판정(경보·경계도)은 이미 끝난 뒤이므로 여기서 게임 상태를
-	 * 더 바꾸지 않는다 — 경고등이 빨갛게 바뀌는 등 연출은 BP 에서 이 이벤트에 붙인다
-	 * (ALaserTrap::OnLaserTriggered 와 같은 역할의 훅).
+	 * 발견하는 순간(bAlarmed 가 켜질 때) 호출된다. 판정(경보·경계도)은 이미 끝난 뒤이므로
+	 * 여기서 게임 상태를 더 바꾸지 않는다 — 경고등이 빨갛게 바뀌는 등 연출은 BP 에서 이
+	 * 이벤트에 붙인다 (ALaserTrap::OnLaserTriggered 와 같은 역할의 훅).
+	 * MinRetriggerInterval 뒤 OnAlarmCleared() 가 불리니 그때 연출을 되돌리면 된다.
 	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|Camera")
 	void OnPlayerDetected();
 
-	/** 경보음 */
+	/**
+	 * MinRetriggerInterval 이 끝나 경보가 풀리고 다시 정상 순찰로 돌아갈 때(bAlarmed 가
+	 * 꺼질 때) 호출된다. OnPlayerDetected() 에서 켠 연출을 여기서 원래대로 되돌리면 된다.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Hazard|Camera")
+	void OnAlarmCleared();
+
+	/**
+	 * 경보음. bAlarmed 가 켜져 있는 동안 재생되다가 꺼지는 즉시 멈춘다 — 계속 시야 안에
+	 * 있으면 계속 들리게 해서 플레이어가 시야를 벗어나도록 유도한다. 그러려면 이 에셋
+	 * 자체가 루프로 설정돼 있어야 한다(SoundWave 라면 Looping 체크, SoundCue 라면 Looping
+	 * 노드) — 한 번만 울리게 만든 에셋을 넣으면 그 길이만큼만 재생되고 자연히 멈춘다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> AlarmSound;
 
@@ -154,13 +182,33 @@ private:
 	/** Disable() 이 건 타이머가 Duration 뒤 호출해 bDisabled 를 다시 끈다 */
 	void ReEnable();
 
-	/** 경보가 울린 순간 모든 머신에서 재생한다. 상태를 남기지 않으므로 Unreliable 이다 */
-	UFUNCTION(NetMulticast, Unreliable)
-	void Multicast_PlayAlarmSound();
-	void Multicast_PlayAlarmSound_Implementation();
+	/** MinRetriggerInterval 이 끝나면 호출돼 bAlarmed 를 끄고 스윕·재판정을 재개한다 */
+	void ClearAlarm();
+
+	/**
+	 * bAlarmed 가 바뀔 때 OnPlayerDetected()/OnAlarmCleared() 를 부른다. 서버에서 직접
+	 * 대입하면 RepNotify 가 안 불리므로 손으로도 불러야 한다 (ABreakableWall::OnRep_bIsBroken 과 동일 패턴).
+	 */
+	UFUNCTION()
+	void OnRep_bAlarmed();
+
+	/**
+	 * AlarmSound 재생을 시작한다(에셋이 루프로 설정돼 있으면 계속 반복된다). OnRep_bAlarmed()
+	 * 에서 호출되므로 서버·클라이언트 각자 자기 화면에서 재생한다 — 늦게 관련성이 생긴
+	 * 클라이언트도 bAlarmed 복제값을 받으면 그대로 재생을 시작해, Multicast RPC 였다면
+	 * 놓쳤을 상황(CLAUDE.md 3절)이 생기지 않는다.
+	 */
+	void StartAlarmSound();
+
+	/** 재생 중인 AlarmAudioComponent 를 즉시 멈춘다. OnRep_bAlarmed() 에서 호출된다 */
+	void StopAlarmSound();
 
 	/** CameraBase 의 초기 상대 회전 — 스윕 오프셋은 이 값에 더해진다 */
 	FRotator BaseBodyRotation;
+
+	/** 경보 중 재생 중인 오디오 컴포넌트. StopAlarmSound() 에서 즉시 멈추려면 참조를 들고 있어야 한다 */
+	UPROPERTY()
+	TObjectPtr<UAudioComponent> AlarmAudioComponent;
 
 	/**
 	 * true 면 감지를 멈추고 렌즈도 정면에 고정된다(Tick 에서 읽는다). EMP 등으로
@@ -170,8 +218,14 @@ private:
 	UPROPERTY(Replicated)
 	bool bDisabled = false;
 
-	float LastTriggerTime = -1.f;
+	/**
+	 * 발견해서 경보를 유지 중인가. 서버가 정하고 복제된다 — 켜져 있는 동안 스윕·재판정이
+	 * 멈춘다는 걸 클라이언트도 똑같이 봐야 해서(bDisabled 와 동일 사유) 복제 프로퍼티로 둔다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_bAlarmed)
+	bool bAlarmed = false;
 
 	FTimerHandle DetectionTimer;
 	FTimerHandle DisableTimer;
+	FTimerHandle AlarmTimer;
 };
