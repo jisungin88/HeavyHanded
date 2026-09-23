@@ -245,6 +245,11 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
+
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight 콜백: Actor=%s Sensed=%d AIState=%d"),
+			*GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed(), static_cast<int32>(GuardAIController->GetAIState()));
+
+
 		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
 		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
 		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.

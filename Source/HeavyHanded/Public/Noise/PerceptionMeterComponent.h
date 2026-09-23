@@ -96,7 +96,11 @@ protected:
 	/** Strength 1.0 짜리 자극 1건이 올리는 양 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception",
 					  meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float GainPerStimulus = 0.35f;
+
+	// 테스트용으로 조정
+	//float GainPerStimulus = 0.35f;
+	//float GainPerStimulus = 0.5f;
+	float GainPerStimulus = 1.0f;
 
 	/** 무자극 유예. 이 시간이 지나야 감소가 시작된다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception",

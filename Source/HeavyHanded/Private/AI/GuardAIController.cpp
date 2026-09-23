@@ -459,14 +459,41 @@ void AGuardAIController::SetSightDebugEnabled(bool bInEnabled)
 }
 
 
+void AGuardAIController::SetAIState(EGuardAIState NewState)
+{
+	if (AIState == NewState)
+	{
+		return;
+	}
+
+	AGuardCharacter* GuardPawn = PossessGuardPawn.Get();
+	const FString PawnName = IsValid(GuardPawn) ? GuardPawn->GetName() : TEXT("InvalidPawn");
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] AI State 변경: %d -> %d"),
+		*PawnName, static_cast<int32>(AIState), static_cast<int32>(NewState));
+
+	AIState = NewState;
+}
+
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
 
 	if (!IsValid(GuardPatrolComp))
 	{
 		// 에러 로그
+		UE_LOG(LogGuardAI, Error, TEXT("[%s] SelectNextAction 실패: GuardPatrolComp invalid"),
+			*GetNameSafe(PossessGuardPawn));
 		return false;
 	}
+
+	//if (AIState == State)
+	//{
+	//	return false;
+	//}
+
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] SelectNextAction: 요청 State = %d"),
+		*GetNameSafe(PossessGuardPawn), static_cast<int32>(State));
 
 	SetAIState(State);
 
@@ -479,8 +506,9 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 	case EGuardAIState::Search:
 		return GuardPatrolComp->SelectNextSearchPoint2();
 
-	case EGuardAIState::Chase:
-		return true;
+	//case EGuardAIState::Chase:
+	//	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Chase 전환 요청"),*GetNameSafe(PossessGuardPawn));
+	//	return true;
 	}
 
 	return false;

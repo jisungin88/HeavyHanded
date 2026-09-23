@@ -82,7 +82,7 @@ private:
 	EGuardAIState AIState = EGuardAIState::Patrol;
 
 public:
-	void SetAIState(EGuardAIState NewState) { AIState = NewState; }
+	void SetAIState(EGuardAIState NewState);
 	EGuardAIState GetAIState() const { return AIState; }
 
 	bool SelectNextAction(EGuardAIState State);
