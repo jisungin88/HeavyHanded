@@ -60,8 +60,8 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 			{
 				BinocularRate = GuardSightComp->GetBinocularVisionRate(Target);
 
-				UE_LOG(LogGuardAI, Log, TEXT("[%s] 양안각: Rate=%.2f Multiplier=%.2f Target=%s"),
-					*GetNameSafe(AIController->GetPawn()), BinocularRate, FMath::Lerp(0.25f, 1.0f, BinocularRate), *GetNameSafe(Target));
+				//UE_LOG(LogGuardAI, Log, TEXT("[%s] 양안각: Rate=%.2f Multiplier=%.2f Target=%s"),
+				//	*GetNameSafe(AIController->GetPawn()), BinocularRate, FMath::Lerp(0.25f, 1.0f, BinocularRate), *GetNameSafe(Target));
 			}
 		}
 
