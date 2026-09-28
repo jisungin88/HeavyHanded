@@ -7,6 +7,7 @@
 class UStaticMeshComponent;
 class UBoxComponent;
 class USoundBase;
+class UAudioComponent;
 class ABaseCharacter;
 
 /**
@@ -30,9 +31,13 @@ class ABaseCharacter;
  *   있다. HeavyHandedGameplayTags.h 에는 아직 이 태그가 선언돼 있지 않아 문자열 조회로
  *   참조한다(.ini 에는 이미 등록돼 있어 안전하다).
  *
- * [경보 다음에 놓친다]
+ * [경보 다음에 손상시킨다 — 놓치는 대신]
  *   순서 자체에 필연적 이유는 없지만, "경보가 울렸다" 를 먼저 보여줘야 플레이어가
- *   무슨 일이 일어났는지 바로 이해한다.
+ *   무슨 일이 일어났는지 바로 이해한다. 손상은 ALootBase::ReportImpact() 로 확정
+ *   충격 하나를 그대로 방송한다 — 게이팅을 안 거치므로 반드시 한 번의 유효한 충격으로
+ *   세진다. 구독자(ULootDurabilityComponent)가 붙어 있는 파손형 노획물만 실제로
+ *   금이 가고, 그 컴포넌트가 없는 노획물은 조용히 아무 일도 안 일어난다 — 압력판이
+ *   벌하려는 건 "비싼 걸 들고 지나간 것"이지 모든 노획물을 부수는 게 아니므로 의도한 동작이다.
  *
  * [경비는 안 걸린다]
  *   다른 Hazard 클래스들과 동일 원칙 — ABaseCharacter 로만 캐스트한다.
@@ -77,6 +82,15 @@ protected:
 		meta = (ClampMin = "0.0", Units = "s"))
 	float MinRetriggerInterval = 1.f;
 
+	/**
+	 * 노획물에 등록할 충격 세기. ULootDurabilityComponent::DamageImpulseThreshold(기본 3000,
+	 * 무게에 비례해 더 높을 수 있음)를 넘어야 실제로 파손 카운트가 오른다 — 넉넉하게 잡아
+	 * 대부분의 노획물에서 항상 유효한 충격 한 번으로 세지게 한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|PressurePlate",
+		meta = (ClampMin = "0.0"))
+	float LootDamageImpulse = 10000.f;
+
 	/** 경보음 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> AlarmSound;
@@ -86,4 +100,12 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayAlarmSound();
 	void Multicast_PlayAlarmSound_Implementation();
+
+	/**
+	 * 직전 재생 인스턴스를 붙잡아 두는 참조. 재발동 시 이전 소리를 먼저 멈추고 새로
+	 * 재생해야, 밟고 나갔다가 금방 다시 밟았을 때 두 소리가 겹쳐 들리지 않는다
+	 * (ASecurityCamera::AlarmAudioComponent 와 동일 사유 — 한 번 마주친 뒤 이미 고친 패턴).
+	 */
+	UPROPERTY()
+	TObjectPtr<UAudioComponent> AlarmAudioComponent;
 };
