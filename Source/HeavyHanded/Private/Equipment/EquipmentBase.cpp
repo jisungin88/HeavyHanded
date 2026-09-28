@@ -33,6 +33,12 @@ AEquipmentBase::AEquipmentBase()
 	EquipmentMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EquipmentMesh"));
 	SetRootComponent(EquipmentMesh);
 
+	// 장비는 예외 없이 움직인다 — 집히고, 던져지고, 물리로 구른다.
+	// Static 이면 **집기가 조용히 실패한다**: 손 소켓에 AttachToComponent 하는 순간
+	// 엔진이 "Static 을 Movable 부모에 붙일 수 없다" 며 거부하고, SetSimulatePhysics 도 무시된다.
+	// 트레이스는 멀쩡히 맞으므로 겉보기로는 "E 를 눌러도 아무 일이 없다" 로만 드러난다.
+	// (2026-09-18 BP_Drone 이 Static 으로 저장돼 있어 반나절 걸렸다)
+	EquipmentMesh->SetMobility(EComponentMobility::Movable);
 	EquipmentMesh->SetCollisionProfileName(EquipmentSimulatingProfile);
 	EquipmentMesh->SetSimulatePhysics(true);
 	EquipmentMesh->SetNotifyRigidBodyCollision(true);   // OnComponentHit 을 받으려면 필요하다
@@ -78,6 +84,19 @@ void AEquipmentBase::BeginPlay()
 				*GetName());
 		}
 
+
+		// 생성자에서 Movable 로 맞춰 두지만, BP 가 Static 으로 저장돼 있으면 그 값이 이긴다.
+		// Static 이면 집기(Attach)도 물리도 조용히 실패하고 **경고 한 줄 없이** 안 집히는
+		// 물건이 된다 — 트레이스는 멀쩡히 맞아서 콜리전·태그를 의심하며 한참 헤매게 된다.
+		// 고칠 수 있는 자리에서 고치고 알린다.
+		if (EquipmentMesh->Mobility != EComponentMobility::Movable)
+		{
+			UE_LOG(LogLoot, Warning,
+				TEXT("[Equipment:%s] EquipmentMesh 의 Mobility 가 Movable 이 아니다 — 집기와 물리가 "
+					 "동작하지 않는다. 런타임에 Movable 로 바꿨지만 BP 에서도 고칠 것"),
+				*GetName());
+			EquipmentMesh->SetMobility(EComponentMobility::Movable);
+		}
 		EquipmentMesh->OnComponentHit.AddDynamic(this, &AEquipmentBase::HandleMeshHit);
 	}
 }
@@ -434,11 +453,39 @@ void AEquipmentBase::Activate()
 	{
 		World->GetTimerManager().SetTimer(EffectTimer, this,
 			&AEquipmentBase::Finish, EffectDuration, false);
+
+		// 발동한 뒤에도 계속 소리를 내는 장비가 있다 — 미끼가 그것이다.
+		// 이 소리가 경비의 InvestigateLocation 이 되어 경비를 끌어온다.
+		//
+		// EffectDuration 이 0 인 장비(폭탄)에는 걸지 않는다. Active 구간이 한 프레임도
+		// 없어서 타이머가 첫 발화 전에 Finish 에서 지워지고, 태그만 지정돼 있으면
+		// "왜 소리가 안 나지" 로 헷갈린다.
+		if (ActiveNoiseTag.IsValid())
+		{
+			EmitActiveNoise();
+
+			World->GetTimerManager().SetTimer(ActiveNoiseTimer, this,
+				&AEquipmentBase::EmitActiveNoise, ActiveNoiseInterval, /*bLoop=*/true);
+		}
 	}
 	else
 	{
 		Finish();
 	}
+}
+
+void AEquipmentBase::FinishEffectEarly()
+{
+	if (!HasAuthority() || State != EEquipmentState::Active)
+	{
+		return;
+	}
+
+	// 타이머를 먼저 지운다. 남겨 두면 Spent 가 된 뒤에 Finish 가 한 번 더 돌고,
+	// 그쪽은 State 검사로 조용히 빠져나가서 무해하지만 흔적이 남지 않아 헷갈린다.
+	GetWorldTimerManager().ClearTimer(EffectTimer);
+
+	Finish();
 }
 
 void AEquipmentBase::Finish()
@@ -447,6 +494,9 @@ void AEquipmentBase::Finish()
 	{
 		return;
 	}
+
+	// 효과가 끝났으면 소리도 그친다. 미끼가 20초 뒤에도 계속 울면 경비가 영영 붙잡힌다.
+	GetWorldTimerManager().ClearTimer(ActiveNoiseTimer);
 
 	SetEquipmentState(EEquipmentState::Spent);
 	OnSpent();
@@ -490,6 +540,24 @@ void AEquipmentBase::EmitDeployNoise()
 	{
 		// 권위 검사는 ReportTaggedNoise 안에 있다. 클라이언트에서 불려도 조용히 무시된다.
 		NoiseEmitter->ReportTaggedNoise(DeployNoiseTag);
+	}
+}
+
+void AEquipmentBase::EmitActiveNoise()
+{
+	// EmitDeployNoise 와 같은 이유의 검사다. 효과가 끝난 프레임에 타이머가 이미 큐에
+	// 들어가 있으면 ClearTimer 로는 못 막고 이 검사만 남는다.
+	if (State != EEquipmentState::Active)
+	{
+		return;
+	}
+
+	if (IsValid(NoiseEmitter) && ActiveNoiseTag.IsValid())
+	{
+		// NoiseEmitter 를 거치는 것이 중요하다. 소음 파트의 스팸 필터가 여기서 돌면서,
+		// 같은 자리에서 반복되는 소리의 경계도 기여를 알아서 깎는다.
+		// UNoiseSubsystem::ReportNoise 를 직접 부르면 그 판단을 건너뛰게 된다.
+		NoiseEmitter->ReportTaggedNoise(ActiveNoiseTag);
 	}
 }
 
