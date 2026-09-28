@@ -501,6 +501,14 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 	switch (State)
 	{
 	case EGuardAIState::Patrol:
+
+		if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
+		{
+			// 정찰 상태로 진입했으므로 이전 추격 대상을 해제한다.
+			// 수색 중에는 기존 TargetActor를 유지하고, 실제 Patrol 복귀 시에만 초기화한다.
+			BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+		}
+
 		GuardPatrolComp->SelectNextPatrolPoint2();
 		return true;
 
