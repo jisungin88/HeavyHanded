@@ -37,6 +37,10 @@ public:
 	virtual FVector GetListenerLocation_Implementation() const override;
 	//~ End
 
+
+	virtual float GetListenerHearingRange_Implementation() const override;
+
+
 	/** 조사 종료 후 반드시 호출할 것. 이게 없으면 경비가 영원히 100% 에 박혀 있다 */
 	UFUNCTION(BlueprintCallable, Category = "Noise|Perception")
 	void ResetPerception();
@@ -92,7 +96,11 @@ protected:
 	/** Strength 1.0 짜리 자극 1건이 올리는 양 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception",
 					  meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float GainPerStimulus = 0.35f;
+
+	// 테스트용으로 조정
+	//float GainPerStimulus = 0.35f;
+	//float GainPerStimulus = 0.5f;
+	float GainPerStimulus = 1.0f;
 
 	/** 무자극 유예. 이 시간이 지나야 감소가 시작된다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Noise|Perception",

@@ -8,6 +8,9 @@
 #include "Shared/NetAuthority.h"
 #include "Noise/NoiseSubsystem.h"
 
+#include "AI/GuardHearingAComponent.h"
+#include "AI/GuardAIController.h"
+
 UPerceptionMeterComponent::UPerceptionMeterComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -84,6 +87,29 @@ FVector UPerceptionMeterComponent::GetListenerLocation_Implementation() const
 	}
 
 	return Owner->GetActorLocation() + FVector(0.f, 0.f, EarHeight);
+}
+
+float UPerceptionMeterComponent::GetListenerHearingRange_Implementation() const
+{
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!IsValid(OwnerPawn))
+	{
+		return 0.0f;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(OwnerPawn->GetController());
+	if (!IsValid(GuardController))
+	{
+		return 0.0f;
+	}
+
+	const UGuardHearingAComponent* HearingComp = GuardController->FindComponentByClass<UGuardHearingAComponent>();
+	if (!IsValid(HearingComp))
+	{
+		return 0.0f;
+	}
+
+	return HearingComp->GetHearingRange();
 }
 
 void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus& Stimulus)

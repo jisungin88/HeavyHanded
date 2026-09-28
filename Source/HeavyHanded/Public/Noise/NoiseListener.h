@@ -31,6 +31,11 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Noise")
 	FVector GetListenerLocation() const;
+
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Noise")
+	float GetListenerHearingRange() const;
+
 };
 
 //BlueprintNativeEvent로 둔 이유 경비 BP에서 직접 오버라이드할 수 있게 하기 위해서

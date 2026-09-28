@@ -25,6 +25,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRunProgressChanged, FRunProgressView, Progress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDepartingChanged, bool, bDeparting);
+
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
@@ -116,6 +118,9 @@ public:
 	UFUNCTION()
 	void OnPlayerJobChanged(AShelterPlayerState* PlayerState);
 
+	UFUNCTION(BlueprintPure, Category = "Shelter|Roster")
+	TArray<FString> GetUnconfirmedPlayerNames() const;
+
 	// ----------------------------------------------------------------
 
 	// 현재 선택된 장소(Site)가 변경되었을 때 UI에 알림
@@ -150,6 +155,18 @@ public:
 	/** 지금 갈 장소의 표시 정보. 출발 문 위젯이 이것 하나만 쓴다 */
 	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
 	FHeistSiteView GetNextSiteView() const;
+
+	// ---- 출발
+	UPROPERTY(ReplicatedUsing = OnRep_bDeparting, BlueprintReadOnly, Category = "Shelter|Travel")
+	bool bDeparting = false;
+
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Travel")
+	FOnDepartingChanged OnDepartingChanged;
+
+	void SetDeparting(bool bNewDeparting);
+
+	UFUNCTION()
+	void OnRep_bDeparting();
 
 	UFUNCTION()
 	void OnRep_SelectedEntry();

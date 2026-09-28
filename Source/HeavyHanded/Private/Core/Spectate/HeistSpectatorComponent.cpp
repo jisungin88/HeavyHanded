@@ -1,4 +1,4 @@
-#include "Core/Spectate/HeistSpectatorComponent.h"
+﻿#include "Core/Spectate/HeistSpectatorComponent.h"
 
 #include "Engine/World.h"
 #include "Camera/PlayerCameraManager.h"

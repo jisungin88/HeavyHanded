@@ -7,7 +7,6 @@
 #include "Perception/AISense_Sight.h"
 #include "Perception/AISenseConfig_Sight.h"
 
-#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AI/GuardBlackboardKeys.h"
 
@@ -15,11 +14,11 @@
 
 
 #include "DrawDebugHelpers.h"
-#include "GameFramework/Pawn.h"
 #include "AI/GuardAIController.h"
 #include "AI/GuardHearingAComponent.h"
 #include "Character/GuardCharacter.h"
 #include "Components/CapsuleComponent.h"
+
 
 #include "GameplayTagContainer.h"
 #include "ProceduralMeshComponent.h"
@@ -37,7 +36,8 @@ UGuardSightAComponent::UGuardSightAComponent()
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
-	UE_LOG(LogTemp, Warning, TEXT("[SightConfig CONSTRUCTOR] Component=%p | SightConfig=%p | Name=%s"), this, SightConfig.Get(), *GetNameSafe(SightConfig));
+	//삭제
+	//UE_LOG(LogTemp, Warning, TEXT("[SightConfig CONSTRUCTOR] Component=%p | SightConfig=%p | Name=%s"), this, SightConfig.Get(), *GetNameSafe(SightConfig));
 
 	// 플레이어는 IGenericTeamAgentInterface를 구현하지 않아 FGenericTeamId::NoTeam(255)로
 	// 남는다. 경비 입장에서 그런 상대는 "중립"으로 판정되므로 bDetectNeutrals를 켜야
@@ -50,20 +50,64 @@ UGuardSightAComponent::UGuardSightAComponent()
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
 
 
-
-
-
 }
 
-// pawn 빙의시 초기화중
-void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+//// pawn 빙의시 초기화중
+//void UGuardSightAComponent::InitializeSightPerception(UAIPerceptionComponent* InPerceptionComp)
+//{
+//
+//}
+
+
+void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp)
 {
+	if (!IsValid(InGuardCharacter))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardCharacter is invalid."));
+		return;
+	}
+
+	if (!IsValid(InPerceptionComp))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: PerceptionComp is invalid."));
+		return;
+	}
+
+	if (!IsValid(SightConfig))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: SightConfig is invalid."));
+		return;
+	}
+
+	GuardAIController = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(GuardAIController))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardAIController is invalid."));
+		return;
+	}
+
+	GuardCharacter = InGuardCharacter;
 	PerceptionComp = InPerceptionComp;
 
-	if (IsValid(PerceptionComp) && IsValid(SightConfig))
+	SightDebugMesh = GuardCharacter->GetSightDebugMesh();
+	if (!IsValid(SightDebugMesh))
 	{
-		PerceptionComp->ConfigureSense(*SightConfig);
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: SightDebugMesh is invalid."));
+		return;
 	}
+
+	GuardCapsule = GuardCharacter->GetCapsuleComponent();
+	if (!IsValid(GuardCapsule))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GuardSightAComponent Initialize failed: GuardCapsule is invalid."));
+		return;
+	}
+
+	PerceptionComp->ConfigureSense(*SightConfig);
+
+	SetSightEnabled(GuardCharacter->IsSightEnabled());
+	SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
+
 }
 
 
@@ -155,31 +199,25 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 {
 	if (IsWithinBinocularVisionAngle(TargetActor))
 	{
-		return 1.f;
+		return BinocularVisionRate;
 	}
 
-	return 0.5f;
+	return PeripheralVisionRate;
 }
 
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 {
 	bDrawSightDebug = bInEnabled;
+	SightDebugMesh->SetVisibility(bInEnabled);
 	SetComponentTickEnabled(bInEnabled);
 
-	if (!bInEnabled)
-	{
-		if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner()))
-		{
-			if (AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn()))
-			{
-				if (UProceduralMeshComponent* Mesh = GuardCharacter->GetSightDebugMesh())
-				{
-					Mesh->SetVisibility(false);
-					// 또는 Mesh->ClearAllMeshSections(); 로 지오메트리 자체를 비워도 됨
-				}
-			}
-		}
-	}
+	//if (!bInEnabled)
+	//{
+	//	SightDebugMesh->ClearAllMeshSections();
+	//}
+
+
+
 }
 
 
@@ -207,6 +245,11 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 
 	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
+
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight 콜백: Actor=%s Sensed=%d AIState=%d"),
+			*GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed(), static_cast<int32>(GuardAIController->GetAIState()));
+
+
 		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
 		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
 		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
@@ -246,7 +289,7 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		{
 
 			// Sight에서 플레이어를 발견했을 때 Hearing에서 걸어둔 FocalPoint를 해제
-			AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+			//AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
 			if (GuardAIController)
 			{
 				GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
@@ -327,6 +370,8 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 
 
+
+
 //경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
 bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const
 {
@@ -336,19 +381,19 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 		return false;
 	}
 
-	const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardAIController)
-	{
-		return false;
-	}
+	//const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	//if (!GuardAIController)
+	//{
+	//	return false;
+	//}
+	//
+	//const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
+	//if (!GuardCharacter)
+	//{
+	//	return false;
+	//}
 
-	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardAIController->GetPawn());
-	if (!GuardCharacter)
-	{
-		return false;
-	}
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
+	//const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
 
 	//const FVector GuardEyeLocation = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
 	//const FVector TargetHeadLocation = TargetActor->GetMesh()->GetSocketLocation(TEXT("head"));
@@ -360,7 +405,7 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 	// 테스트용. 추후 사용시 수정 반드시 필요
 	const FVector GuardEyeLocation =
-		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
@@ -375,43 +420,17 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 void UGuardSightAComponent::DrawSightDebug() const
 {
-	if (!SightConfig)
-	{
-		return;
-	}
-
-	const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
-	{
-		return;
-	}
-
-	const APawn* GuardPawn = GuardController->GetPawn();
-	if (!GuardPawn)
-	{
-		return;
-	}
-
+	
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
 
-	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardPawn);
-	if (!GuardCharacter || !GuardCharacter->GetMesh())
-	{
-		return;
-	}
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-
-	//const FVector Origin = GuardCharacter->GetMesh()->GetSocketLocation(TEXT("head"));
-	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-	//const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
-	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * Capsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	const FVector HorizontalOrigin = GuardCharacter->GetCapsuleComponent()->GetComponentLocation() - FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
-	const FVector Forward = GuardPawn->GetActorForwardVector().GetSafeNormal();
+	const FVector Forward = GuardCharacter->GetActorForwardVector().GetSafeNormal();
 	const FVector Up = FVector::UpVector;
 
 	const float SightRadius = SightConfig->SightRadius;
@@ -430,7 +449,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 	const int32 ArcSegments = 24;
 	const float VerticalAngleRadians = FMath::DegreesToRadians(VerticalHalfAngle);
 
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardPawn);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
 
 	// ========================================================
 	// 수평 시야 외곽
@@ -537,8 +556,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
 		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
 
-		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
-		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Emerald, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
+		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
 
 		if (UpVisibleDistance > SightRadius)
 		{
@@ -638,44 +657,71 @@ void UGuardSightAComponent::DrawSightDebug() const
 				DrawDebugLine(World, RedStart, TraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 			}
 		}
+
+		// ========================================================
+		// 양안 시야 경계
+		// ========================================================
+
+		if (BinocularVisionAngleDegrees > 0.0f)
+		{
+			const float BinocularHalfAngle = BinocularVisionAngleDegrees * 0.5f;
+
+			const FVector BinocularLeftDirection = Forward.RotateAngleAxis(-BinocularHalfAngle, Up);
+			const FVector BinocularRightDirection = Forward.RotateAngleAxis(BinocularHalfAngle, Up);
+
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularLeftDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
+			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularRightDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
+		}
+
+
 	}
 }
 
+
 void UGuardSightAComponent::DrawSightDebugMesh()
 {
-	if (!SightConfig)
+	
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
 
-	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
-	if (!GuardController)
+	// 실제 시야 거리와 수평 시야각을 가져온다.
+	// VerticalVisionAngleDegrees는 여기서는 사용하지 않는다.
+	const float SightRadius = SightConfig->SightRadius;
+	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+
+	if (SightRadius <= 0.0f || HalfAngle <= 0.0f)
 	{
+		SightDebugMesh->ClearAllMeshSections();
 		return;
 	}
 
-	AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(GuardController->GetPawn());
-	if (!GuardCharacter)
-	{
-		return;
-	}
+	// 시야 부채꼴을 몇 개의 조각으로 나눌지 결정한다.
+	// 숫자가 높을수록 곡선이 부드러워지지만 Mesh 계산량이 증가한다.
+	const int32 ArcSegments = 48;
 
-	UProceduralMeshComponent* SightDebugMesh = GuardCharacter->GetSightDebugMesh();
-	if (!SightDebugMesh)
-	{
-		return;
-	}
+	// 캡슐의 절반 높이를 구한다.
+	const float CapsuleHalfHeight = GuardCapsule->GetScaledCapsuleHalfHeight();
 
-	const float Radius = SightConfig->SightRadius;
-	const float HalfAngle = FMath::DegreesToRadians(SightConfig->PeripheralVisionAngleDegrees);
+	// Mesh의 중심점.
+	// 캐릭터의 캡슐 바닥에서 2cm 위에 배치한다.
+	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
 
-	if (Radius <= 0.0f)
-	{
-		return;
-	}
+	// Procedural Mesh가 실제로 배치된 Transform을 사용한다.
+	// Trace는 World 좌표를 사용하고 Mesh Vertex는 Local 좌표를 사용해야 하므로
+	// 두 좌표계를 변환할 때 이 Transform을 기준으로 사용한다.
+	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
 
-	const int32 ArcSegments = 24;
+	// Mesh 중심점을 World 좌표로 변환한다.
+	// Line Trace의 시작점은 World 좌표여야 한다.
+	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
 
+	// Guard 자신은 시야 Trace에 맞지 않으므로 무시한다.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
+
+	// Procedural Mesh에 사용할 Vertex와 Triangle 데이터를 준비한다.
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
 	TArray<FVector> Normals;
@@ -683,34 +729,62 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	TArray<FLinearColor> VertexColors;
 	TArray<FProcMeshTangent> Tangents;
 
+	// 중심점 1개 + 부채꼴 외곽점들을 저장한다.
 	Vertices.Reserve(ArcSegments + 2);
+
+	// 각 구간마다 Triangle 하나씩 생성한다.
 	Triangles.Reserve(ArcSegments * 3);
 
-
-	const UCapsuleComponent* Capsule = GuardCharacter->GetCapsuleComponent();
-	if (!Capsule)
-	{
-		return;
-	}
-
-	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-	const FVector LocalOrigin = FVector(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
-
+	// 부채꼴의 중심점을 첫 번째 Vertex로 등록한다.
 	Vertices.Add(LocalOrigin);
 
-
+	// 왼쪽 시야 끝에서 오른쪽 시야 끝까지 한 칸씩 검사한다.
 	for (int32 Index = 0; Index <= ArcSegments; ++Index)
 	{
+		// 현재 지점이 전체 시야각에서 몇 % 위치인지 계산한다.
 		const float Alpha = static_cast<float>(Index) / static_cast<float>(ArcSegments);
-		const float Angle = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
-		const float AngleDegrees = FMath::RadiansToDegrees(Angle);
 
-		const FVector Direction = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
-		const FVector Point = LocalOrigin + Direction * Radius;
+		// -HalfAngle ~ +HalfAngle 사이의 현재 각도를 계산한다.
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
 
-		Vertices.Add(Point);
+		// Mesh 기준의 로컬 방향을 만든다.
+		// 캐릭터 정면을 기준으로 좌우로 회전시키므로 수평 시야만 만들어진다.
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, FVector::UpVector);
+
+		// Trace를 하기 위해 로컬 방향을 World 방향으로 변환한다.
+		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+
+		// 현재 방향으로 SightRadius만큼 Line Trace한다.
+		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
+
+		FHitResult Hit;
+
+		// 장애물이 있는지 검사한다.
+		const bool bBlocked = World->LineTraceSingleByChannel(Hit, WorldOrigin, TraceEnd, ECC_Visibility, Params);
+
+		// 기본적으로 장애물이 없으면 SightRadius까지 Mesh를 만든다.
+		float VisibleDistance = SightRadius;
+
+		if (bBlocked)
+		{
+			// 장애물이 있다면 장애물이 맞은 지점까지만 Mesh를 만든다.
+			VisibleDistance = FMath::Clamp(FVector::Distance(WorldOrigin, Hit.Location), 0.0f, SightRadius);
+
+			// 캐릭터를 맞춘 경우에는 Mesh가 캐릭터 중심에서 너무 빨리 끊겨 보이지 않도록
+			// 50cm를 추가한다.
+			if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+			{
+				VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
+			}
+		}
+
+		// Mesh Vertex는 Local 좌표로 넣어야 한다.
+		// 따라서 LocalDirection을 사용해서 실제 보이는 거리까지만 Vertex를 만든다.
+		Vertices.Add(LocalOrigin + LocalDirection * VisibleDistance);
 	}
 
+	// 중심점과 인접한 외곽점 2개를 연결해서 삼각형을 만든다.
+	// 모든 삼각형이 위쪽을 향하도록 Vertex 순서를 반대로 구성한다.
 	for (int32 Index = 0; Index < ArcSegments; ++Index)
 	{
 		Triangles.Add(0);
@@ -718,6 +792,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		Triangles.Add(Index + 1);
 	}
 
+	// 모든 Vertex가 수평면을 향하도록 Normal을 설정한다.
 	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
 	{
 		Normals.Add(FVector::UpVector);
@@ -725,8 +800,10 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		VertexColors.Add(FLinearColor::White);
 	}
 
+	// 이전 프레임에 만들어진 Mesh를 제거한다.
 	SightDebugMesh->ClearAllMeshSections();
 
+	// 계산한 Vertex와 Triangle로 새로운 시야 Mesh를 만든다.
 	SightDebugMesh->CreateMeshSection_LinearColor(
 		0,
 		Vertices,
@@ -738,10 +815,14 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		false
 	);
 
+	// 디버그 Mesh를 화면에 표시한다.
 	SightDebugMesh->SetVisibility(true);
 	SightDebugMesh->SetHiddenInGame(false);
+
+	// 시야 디버그 Mesh가 충돌에 영향을 주지 않도록 한다.
 	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	// 지정된 디버그용 Material을 적용한다.
 	if (SightDebugMaterial)
 	{
 		SightDebugMesh->SetMaterial(0, SightDebugMaterial);

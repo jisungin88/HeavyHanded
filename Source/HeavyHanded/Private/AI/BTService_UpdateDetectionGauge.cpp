@@ -12,7 +12,7 @@
 UBTService_UpdateDetectionGauge::UBTService_UpdateDetectionGauge()
 {
 	NodeName = TEXT("Update Detection Gauge");
-	Interval = 0.1f; // 0.1초마다 갱신 (매 프레임 갱신은 과함)
+	Interval = 1.0f; // 0.1초마다 갱신 (매 프레임 갱신은 과함)
 }
 
 void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
@@ -59,10 +59,23 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 			if (const UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>())
 			{
 				BinocularRate = GuardSightComp->GetBinocularVisionRate(Target);
+
+				UE_LOG(LogGuardAI, Log, TEXT("[%s] 양안각: Rate=%.2f Multiplier=%.2f Target=%s"),
+					*GetNameSafe(AIController->GetPawn()), BinocularRate, FMath::Lerp(0.25f, 1.0f, BinocularRate), *GetNameSafe(Target));
 			}
 		}
 
-		Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
+		/// Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
+
+
+		// 양안각 안에서는 1.0배, 양안각 밖에서는 0.25배로 인지 게이지 증가 속도를 조절한다.
+		// BinocularRate: 양안각 내 위치 비율 (0.0 ~ 1.0)
+		const float BinocularMultiplier = FMath::Lerp(0.25f, 1.0f, BinocularRate);
+
+		// 기본 증가 속도에 거리 보정과 양안각 보정값을 적용해 최종 게이지 증가량을 계산한다.
+		Delta = GaugeIncreaseRate * DistanceRate * BinocularMultiplier * DeltaSeconds;
+
+
 		// -------------------------------------------------------------------------
 
 		// 거리 계수는 상승량에만 곱한다. 코앞이든 시야 끝이든 같은 속도로 발각되면
@@ -100,10 +113,9 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	const bool bJustCrossedFull = (CurrentGauge < 100.f) && (NewGauge >= 100.f);
 	if ((CurrentGauge < 100.f) != (NewGauge < 100.f))
 	{
-		UE_LOG(LogGuardAI, Log, TEXT("[%s] 인지 게이지 %s (%.1f -> %.1f, 시야=%s)"),
-			*GetNameSafe(AIController->GetPawn()),
-			NewGauge >= 100.f ? TEXT("가득 참") : TEXT("임계값 아래로"),
-			CurrentGauge, NewGauge, bCanSeeTarget ? TEXT("있음") : TEXT("없음"));
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] DetectionGauge 임계값 변화: %.1f -> %.1f Sight=%s Target=%s"),
+			*GetNameSafe(AIController->GetPawn()), CurrentGauge, NewGauge, bCanSeeTarget ? TEXT("TRUE") : TEXT("FALSE"),
+			*GetNameSafe(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)));
 	}
 
 	// 시야를 든 채로(=실제 추격) 게이지가 막 가득 찬 순간만 "추격 시작"으로 센다.

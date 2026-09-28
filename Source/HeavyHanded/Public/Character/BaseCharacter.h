@@ -150,6 +150,29 @@ protected:
 
 	void TryJump();
 
+	// --- 브루트 "동료 투척(AllyThrow)" 상태 뼈대 ---
+	// 내가 들어올린 동료 — 들고 있는 쪽(시전자)에서 채워진다. 없으면 nullptr.
+	UPROPERTY(ReplicatedUsing = OnRep_CarriedAlly, BlueprintReadOnly, Category = "Carry|Ally")
+	TObjectPtr<ABaseCharacter> CarriedAlly = nullptr;
+
+	// 나를 들어올린 동료 — 들리는 쪽(대상)에서 채워진다. 없으면 nullptr.
+	UPROPERTY(ReplicatedUsing = OnRep_CarrierAlly, BlueprintReadOnly, Category = "Carry|Ally")
+	TObjectPtr<ABaseCharacter> CarrierAlly = nullptr;
+
+	// 동료 투척 상태에 붙는 GE — 각각 태그만 부여한다(모디파이어 없음).
+	UPROPERTY(EditDefaultsOnly, Category = "Carry|Ally")
+	TSubclassOf<UGameplayEffect> CarryingAllyEffectClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Carry|Ally")
+	TSubclassOf<UGameplayEffect> CarriedEffectClass;
+
+	UFUNCTION()
+	void OnRep_CarriedAlly();
+
+	UFUNCTION()
+	void OnRep_CarrierAlly();
+
+
 public:
 
 
@@ -179,6 +202,23 @@ public:
 	void Turn(const FInputActionValue& Value);
 	void LookUp(const FInputActionValue& Value);
 
+public:
+
+	UFUNCTION(BlueprintPure, Category = "Carry|Ally")
+	ABaseCharacter* GetCarriedAlly() const { return CarriedAlly; }
+
+	UFUNCTION(BlueprintPure, Category = "Carry|Ally")
+	ABaseCharacter* GetCarrierAlly() const { return CarrierAlly; }
+
+	// 들리는 쪽(대상) 본인에게 호출한다. 서버 권한 확인은 호출부 책임 —
+	// 지금은 Debug_SetCarriedAlly 가, 3단계부터는 GA_Brute_AllyThrow 가 이 자리를 대신한다.
+	void SetCarrierAlly(ABaseCharacter* NewCarrier) { CarrierAlly = NewCarrier; }
+
+	// 1단계 테스트 전용 함수. 서버 권한에서 양쪽 상태를 한 번에 맞춰 세팅한다.
+	// 실제 타겟팅/검증(사거리, 아군 여부 등)은 3단계 GA_Brute_AllyThrow 가 담당한다 —
+	// 그때 이 함수를 지우거나, 이 함수의 내부 로직을 그 어빌리티가 대신 호출하는 형태로 바뀐다.
+	UFUNCTION(BlueprintCallable, Category = "Carry|Ally")
+	void Debug_SetCarriedAlly(ABaseCharacter* NewAlly);
 
 protected:
 	// 클라이언트가 입력했을 때 서버로 요청을 보내는 함수

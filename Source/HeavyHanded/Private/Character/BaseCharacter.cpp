@@ -654,6 +654,9 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	// 08.18 end
 	DOREPLIFETIME(ABaseCharacter, ReviveProgress);
 	DOREPLIFETIME(ABaseCharacter, bReviveChannelActive);
+
+	DOREPLIFETIME(ABaseCharacter, CarriedAlly);
+	DOREPLIFETIME(ABaseCharacter, CarrierAlly);
 }
 
 bool ABaseCharacter::CanCarryActor(const AActor* Target) const
@@ -966,6 +969,47 @@ void ABaseCharacter::OnRep_HeavyCarryAssistant()
 void ABaseCharacter::OnRep_AssistingPrimaryCarrier()
 {
 	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_AssistingPrimaryCarrier: %s"), *GetNameSafe(AssistingPrimaryCarrier));
+}
+
+void ABaseCharacter::Debug_SetCarriedAlly(ABaseCharacter* NewAlly)
+{
+	// 상태 변경은 서버 권한에서만 — 클라가 직접 바꾸면 다음 복제 때 그대로 덮어써진다.
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// 기존에 들고 있던 동료가 있으면 양쪽 상태와 GE를 먼저 정리한다.
+	if (IsValid(CarriedAlly))
+	{
+		CarriedAlly->SetCarrierAlly(nullptr);
+		CarriedAlly->RemoveGameplayEffectFromSelf(CarriedEffectClass);
+		RemoveGameplayEffectFromSelf(CarryingAllyEffectClass);
+	}
+
+	CarriedAlly = NewAlly;
+
+	if (IsValid(NewAlly))
+	{
+		NewAlly->SetCarrierAlly(this);
+		NewAlly->ApplyGameplayEffectToSelf(CarriedEffectClass);
+		ApplyGameplayEffectToSelf(CarryingAllyEffectClass);
+	}
+
+	UE_LOG(LogCarry, Log, TEXT("[서버] Debug_SetCarriedAlly: %s 가 %s 를(을) 들었다."),
+		*GetName(), *GetNameSafe(NewAlly));
+}
+
+void ABaseCharacter::OnRep_CarriedAlly()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_CarriedAlly: %s 가 지금 들고 있는 대상 = %s"),
+		*GetName(), *GetNameSafe(CarriedAlly));
+}
+
+void ABaseCharacter::OnRep_CarrierAlly()
+{
+	UE_LOG(LogCarry, Log, TEXT("[클라] OnRep_CarrierAlly: %s 를 지금 들고 있는 쪽 = %s"),
+		*GetName(), *GetNameSafe(CarrierAlly));
 }
 
 void ABaseCharacter::TryJump()
