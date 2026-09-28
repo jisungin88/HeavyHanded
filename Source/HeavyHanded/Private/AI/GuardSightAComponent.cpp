@@ -276,6 +276,12 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		{
 			SightLostAtTime = NowSeconds;
 
+			// 추격 속도 설정
+			if (GuardAIController)
+			{
+				GuardAIController->SetChasing(false);
+			}
+
 			//UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 상실: %s"),
 			//	*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
 		}
@@ -314,6 +320,8 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 					// 필요한지 확인 한번 더하고 주석 풀 것
 					/// OnPlayerSpotted.Broadcast(Actor);
 				}
+
+
 
 				BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 				BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);

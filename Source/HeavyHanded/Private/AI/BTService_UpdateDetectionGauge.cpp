@@ -6,6 +6,7 @@
 #include "AI/GuardBlackboardKeys.h"
 #include "AI/GuardTypes.h"
 #include "AI/GuardSightAComponent.h"
+#include "AI/GuardAIController.h"
 
 #include "Alert/AlertComponent.h"
 
@@ -20,7 +21,8 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
 
 	// 인지 판정 자체는 서버에서만 의미 있는 상태 전환을 유발해야 한다.
-	const AAIController* AIController = OwnerComp.GetAIOwner();
+	//const AAIController* AIController = OwnerComp.GetAIOwner();
+	AAIController* AIController = OwnerComp.GetAIOwner();
 	if (!IsValid(AIController) || !AIController->HasAuthority())
 	{
 		return;
@@ -118,10 +120,20 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 			*GetNameSafe(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)));
 	}
 
+
+
 	// 시야를 든 채로(=실제 추격) 게이지가 막 가득 찬 순간만 "추격 시작"으로 센다.
 	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
 	if (bJustCrossedFull && bCanSeeTarget)
 	{
+
+		// 속도 조정 0928
+		if (AGuardAIController* GuardAIController = Cast<AGuardAIController>(AIController))
+		{
+			// 인지 게이지가 100에 도달했으므로 추격 속도를 적용한다.
+			GuardAIController->SetChasing(true);
+		}
+
 		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
 		{
 			Alert->ReportPursuitStarted();
