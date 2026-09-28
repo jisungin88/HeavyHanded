@@ -1,4 +1,4 @@
-#include "Core/HeistOutcome.h"
+﻿#include "Core/HeistOutcome.h"
 
 namespace HeistOutcome
 {

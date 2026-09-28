@@ -1,4 +1,4 @@
-#include "Hazards/SecurityCamera.h"
+﻿#include "Hazards/SecurityCamera.h"
 
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
