@@ -65,9 +65,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	FText GetPhaseLabel() const;
 
-	/** 지금까지 밴에 실은 금액($) */
+	/** 지금까지 밴에 실은 금액($). 화면에서 굴러가는 중간값이 아니라 서버가 알려준 실제 값이다 */
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	int32 GetLoadedValue() const;
+
+	/**
+	 * 지금 화면에 찍혀 있는 금액($). 롤업 중이면 GetLoadedValue() 보다 작다.
+	 *
+	 * 연출 전용이다 — 목표 달성 여부 같은 판단에 쓰지 말 것.
+	 */
+	UFUNCTION(BlueprintPure, Category = "UI|Heist")
+	int32 GetDisplayedLoadedValue() const { return FMath::RoundToInt(DisplayedLoaded); }
+
+	/** 지금 금액이 굴러가는 중인가. WBP 가 틱 사운드를 깔 때 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "UI|Heist")
+	bool IsMoneyRolling() const { return MoneyInterpHandle.IsValid(); }
 
 	/** 이 장소의 목표 금액($) */
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
@@ -150,6 +162,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD", meta = (ClampMin = "0.0", Units = "s"))
 	float UrgentSeconds = 30.f;
 
+	/**
+	 * 표시 금액이 실제 금액을 따라가는 속도(1/초). 0 이면 롤업 없이 즉시 반영한다.
+	 *
+	 * 남은 차액에 비례해 좁히는 방식이라(FInterpTo) 처음이 빠르고 끝이 느리다.
+	 * 6 이면 큰 금액이든 작은 금액이든 0.5~1초 안에 도착한다 — 액수에 따라 시간이
+	 * 크게 달라지지 않는 것이 이 방식을 고른 이유다. 밴 적재는 연달아 일어난다.
+	 *
+	 * UAlertGaugeWidget::BarInterpSpeed 와 같은 뜻이고 기본값도 같게 맞췄다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD", meta = (ClampMin = "0.0"))
+	float MoneyInterpSpeed = 6.f;
+
 	// ── BP 연출 훅 ──
 	//
 	// 필수 표시는 C++ 이 이미 끝냈다. 여기는 화면 흔들림 · 사운드처럼
@@ -159,7 +183,13 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Heist")
 	void OnPhaseUpdated(FGameplayTag NewPhase, FGameplayTag OldPhase);
 
-	/** 적재 금액이 바뀌었다 */
+	/**
+	 * 적재 금액이 바뀌었다. 인자는 롤업 전 실제 값이다.
+	 *
+	 * [롤업 프레임마다 불리지 않는다] 숫자가 굴러가는 동안에는 C++ 이 글자만 갈아끼우고
+	 *   이 훅은 부르지 않는다. 실제로 뭔가 실렸을 때 한 번만 오므로 여기에
+	 *   펀치 애니메이션 · 코인 사운드를 걸면 된다
+	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Heist")
 	void OnObjectiveUpdated(int32 LoadedValue, int32 TargetValue);
 
@@ -188,7 +218,23 @@ private:
 	/** 주기 콜백. 남은 시간을 다시 계산해 글자에 반영한다 */
 	void RefreshTimer();
 
-	void ApplyObjective(int32 LoadedValue, int32 TargetValue);
+	/**
+	 * 목표 금액 표시를 갱신한다.
+	 *
+	 * @param bImmediate  true 면 롤업 없이 바로 그 숫자를 찍는다.
+	 *                    최초 바인딩에 쓴다 — 중간 참가 · 리스폰인데 0 부터 굴러가면
+	 *                    방금 자기가 실은 것처럼 보인다
+	 */
+	void ApplyObjective(int32 LoadedValue, int32 TargetValue, bool bImmediate);
+
+	/** 지금 DisplayedLoaded 값으로 글자와 색을 그린다. 숫자가 그대로면 SetText 를 건너뛴다 */
+	void DrawObjective();
+
+	/** 롤업 1스텝. 목표에 닿으면 스스로 타이머를 끈다 */
+	void StepMoneyInterp();
+
+	void StartMoneyInterp();
+	void StopMoneyInterp();
 	/**
 	 * 경고 상태를 켜고 끈다.
 	 *
@@ -226,6 +272,9 @@ private:
 
 	FTimerHandle BindRetryHandle;
 	FTimerHandle TimerTickHandle;
+
+	/** 금액 롤업 타이머. 목표에 닿으면 꺼진다 — 평소 비용이 0 인 것이 이 방식의 요점이다 */
+	FTimerHandle MoneyInterpHandle;
 
 	FTimerHandle HeldTickHandle;
 
@@ -270,6 +319,39 @@ private:
 
 	/** 마지막으로 Txt_Timer 에 쓴 정수 초. 같은 값이면 SetText 를 건너뛴다 */
 	int32 LastShownSeconds = INDEX_NONE;
+
+	// ── 금액 롤업 ──
+	//
+	// UAlertGaugeWidget 의 막대와 같은 구조다 — 실제 값과 화면 값을 따로 들고,
+	// 화면 값만 타이머로 좁힌다.
+
+	/** 서버가 알려준 실제 적재 금액 */
+	int32 TargetLoaded = 0;
+
+	/** 이 장소의 목표 금액. 색 전환 기준이라 같이 들고 있는다 */
+	int32 TargetGoal = 0;
+
+	/** 화면에 굴러가는 값. 롤업 중이면 TargetLoaded 와 다르다 */
+	float DisplayedLoaded = 0.f;
+
+	/**
+	 * 마지막으로 Txt_Objective 에 쓴 금액 · 목표.
+	 * 롤업 중에는 초당 60번 도는데 표시는 정수라 대부분 같은 문자열이다.
+	 * 둘 다 그대로면 FText 를 새로 만들지 않는다
+	 */
+	int32 LastShownLoaded = INDEX_NONE;
+	int32 LastShownGoal   = INDEX_NONE;
+
+	/** 롤업 갱신 주기(초). NativeTick 이 아닌 이유는 UAlertGaugeWidget::InterpInterval 주석에 있다 */
+	static constexpr float MoneyInterpInterval = 1.f / 60.f;
+
+	/**
+	 * 이 차이 아래로 좁혀지면 목표값에 스냅한다.
+	 *
+	 * 화면에는 반올림한 정수만 나오므로 0.5 아래면 이미 같은 숫자다.
+	 * 비례 방식이라 스냅하지 않으면 타이머가 영원히 돈다
+	 */
+	static constexpr float MoneySnapTolerance = 0.5f;
 
 	/** 바인딩 재시도에 쓴 누적 시간 */
 	float BindElapsed = 0.f;

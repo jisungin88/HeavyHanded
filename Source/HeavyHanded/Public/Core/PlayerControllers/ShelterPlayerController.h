@@ -9,6 +9,7 @@
 #include "Core/PlayerStates/ShelterPlayerState.h"
 
 #include "GameplayTagContainer.h"
+#include "HeavyHandedPlayerController.h"
 #include "Core/GameStates/ShelterGameState.h"
 
 #include "ShelterPlayerController.generated.h"
@@ -29,10 +30,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 );
 
 
-
-
 UCLASS()
-class HEAVYHANDED_API AShelterPlayerController : public APlayerController
+class HEAVYHANDED_API AShelterPlayerController : public AHeavyHandedPlayerController
 {
 	GENERATED_BODY()
 
@@ -40,7 +39,17 @@ class HEAVYHANDED_API AShelterPlayerController : public APlayerController
 protected:
 
     virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+private:
+	FDelegateHandle GameStateSetHandle;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AShelterGameState> BoundGameState;
+
+
+	void BindToGameState(AGameStateBase* GameState);
+	void UnbindFromGameState();
 
 public:
 	UFUNCTION(BlueprintPure)
@@ -161,15 +170,29 @@ protected:
 
 public:
 	// --- tag 설정 ---
-	// 클라이언트에서 Entry 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetEntryTag(EEntryTag NewTag);
+	/** 진입점을 선택할 때 서버에 요청 */
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "Shelter|Travel")
+	void ServerSetEntryTag(FGameplayTag NewEntry);
 
-	// 클라이언트에서 Site 변경 요청
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetSiteTag(ESiteTag NewTag);
+	/** 출발 시작 알림 */
+	UFUNCTION(Client, Reliable)
+	void Client_BeginTravel(FGameplayTag SiteTag);
 
+	/** 출발 거부 알림 */
+	UFUNCTION(Client, Reliable, BlueprintCallable, Category = "Shelter|Travel")
+	void Client_NotifyDepartBlocked();
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
+	void BP_OnDepartBlocked();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
+	void BP_OnDepartBegin();
+
+protected:
+	UFUNCTION()
+	void HandleDepartingChanged(bool bNewDeparting);
+
+public:
 	// --- 로딩 UI ---
 	UFUNCTION(Client, Reliable)
 	void ClientShowStartGameWindow();

@@ -33,6 +33,7 @@ UBaseGameplayAbility::UBaseGameplayAbility()
 
 void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
+	UE_LOG(LogSkill, Warning, TEXT("[TEMP] ActivateAbility 호출됨: %s"), *GetName());
     bSkillMontageStarted = false;
 
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
@@ -74,6 +75,7 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
 
         // ReadyForActivation() 이 동기적으로 취소를 낼 수 있으므로 플래그를 먼저 세운다.
         bSkillMontageStarted = true;
+		UE_LOG(LogSkill, Warning, TEXT("[TEMP] 몽타주 재생 시작: %s, Slot 지정값 확인 필요"), *GetNameSafe(SkillMontage));
 
         // 이 구간에서 오는 취소는 "재생 자체가 시작되지 못했다"는 뜻이다.
         // OnMontageCancelled 가 이 플래그를 보고 어빌리티를 끝낼지 말지 가른다.
@@ -81,6 +83,7 @@ void UBaseGameplayAbility::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         MontageTask->ReadyForActivation();
         bMontageActivationInProgress = false;
     }
+	OnSkillActivated();   // ← 몽타주 태스크 시작 직후, BP 훅 호출
 }
 
 // 몽타주가 끝났을 때 어빌리티 종료

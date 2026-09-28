@@ -6,6 +6,7 @@
 #include "EngineUtils.h"        // TActorIterator — 디버그 치트(hh.Hazard.BreakWall)에서만 쓴다
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -40,6 +41,7 @@ void ABreakableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABreakableWall, bIsBroken);
+	DOREPLIFETIME(ABreakableWall, HitCount);
 }
 
 void ABreakableWall::BeginPlay()
@@ -98,15 +100,25 @@ bool ABreakableWall::TryBreak(const AActor* Breacher, const FVector& ImpactLocat
 		}
 	}
 
-	bIsBroken = true;
+	++HitCount;
 
-	// 서버에서 직접 대입하면 RepNotify 가 안 불린다. 손으로 불러야 호스트 화면에서도 부서진다
-	// (AVaultDoor::TryBreach 와 동일 사유)
-	OnRep_bIsBroken();
+	UE_LOG(LogHazard, Log, TEXT("[BreakableWall:%s] 타격 %d / %d — 원인 %s"),
+		*GetName(), HitCount, HitPoints, Breacher ? *Breacher->GetName() : TEXT("Unknown"));
 
-	UE_LOG(LogHazard, Log, TEXT("[BreakableWall:%s] 파괴 — 원인 %s"),
-		*GetName(), Breacher ? *Breacher->GetName() : TEXT("Unknown"));
-	return true;
+	if (HitCount >= HitPoints)
+	{
+		bIsBroken = true;
+
+		// 서버에서 직접 대입하면 RepNotify 가 안 불린다. 손으로 불러야 호스트 화면에서도 부서진다
+		// (AVaultDoor::TryBreach 와 동일 사유)
+		OnRep_bIsBroken();
+		return true;
+	}
+
+	// 아직 안 부서졌다 — 균열만 진행한다. 서버 자신도 RepNotify 를 안 받으므로 손으로 부른다
+	// (ULootDurabilityComponent::HandleLootImpact 와 동일 사유)
+	OnRep_HitCount();
+	return false;
 }
 
 void ABreakableWall::OnRep_bIsBroken()
@@ -114,6 +126,83 @@ void ABreakableWall::OnRep_bIsBroken()
 	if (bIsBroken)
 	{
 		ApplyBreak();
+	}
+}
+
+void ABreakableWall::OnRep_HitCount()
+{
+	// 이미 부서진 뒤라면 메시가 이미 숨겨졌다 — 균열 연출을 다시 씌울 이유가 없다.
+	// (초기 복제 순서에 따라 OnRep_HitCount 가 OnRep_bIsBroken 보다 늦게 와도 안전하다)
+	if (bIsBroken)
+	{
+		return;
+	}
+
+	ApplyCrackVisual();
+	OnDamageAccumulated(HitCount, HitPoints);
+}
+
+float ABreakableWall::GetDamageRatio01() const
+{
+	// 한 방에 부서지는 벽은 '균열 단계' 자체가 없다 (ULootDurabilityComponent::GetDamageRatio01 과 동일 사유)
+	if (HitPoints <= 1)
+	{
+		return 0.f;
+	}
+
+	// 분모가 HitPoints 보다 하나 적은 이유는 헤더의 GetDamageRatio01 주석 참고 —
+	// 마지막 타격은 같은 프레임에 메시가 숨겨져 1.0 이 화면에 안 나오기 때문이다.
+	const float Ratio = static_cast<float>(HitCount) / static_cast<float>(HitPoints - 1);
+	return FMath::Clamp(Ratio, 0.f, 1.f);
+}
+
+void ABreakableWall::ApplyCrackVisual()
+{
+	if (CrackParameterName.IsNone() || !IsValid(WallMesh))
+	{
+		return;
+	}
+
+	const int32 SlotCount = WallMesh->GetNumMaterials();
+
+	// 첫 타격에서만 만든다. 안 맞은 벽은 MID 를 하나도 들지 않는다
+	// (ULootDurabilityComponent::ApplyCrackVisual 과 동일 사유)
+	if (CrackMaterials.Num() != SlotCount)
+	{
+		CrackMaterials.Reset(SlotCount);
+
+		bool bAnySlotHasParameter = false;
+		for (int32 Slot = 0; Slot < SlotCount; ++Slot)
+		{
+			UMaterialInstanceDynamic* MID = WallMesh->CreateDynamicMaterialInstance(Slot);
+			CrackMaterials.Add(MID);
+
+			float Unused = 0.f;
+			if (IsValid(MID) && MID->GetScalarParameterValue(FMaterialParameterInfo(CrackParameterName), Unused))
+			{
+				bAnySlotHasParameter = true;
+			}
+		}
+
+		// 파라미터가 없으면 SetScalarParameterValue 는 조용히 아무 일도 안 한다.
+		// 경고가 없으면 "머티리얼을 만들었는데 왜 안 갈라지지" 로 한참 헤맨다
+		if (!bAnySlotHasParameter && !bWarnedMissingCrackParameter)
+		{
+			bWarnedMissingCrackParameter = true;
+			UE_LOG(LogHazard, Warning,
+				TEXT("[BreakableWall:%s] 머티리얼에 스칼라 파라미터 '%s' 가 없다. 균열 연출이 나오지 않는다 ")
+				TEXT("(머티리얼에 파라미터를 추가하거나 CrackParameterName 을 None 으로 둘 것)"),
+				*GetName(), *CrackParameterName.ToString());
+		}
+	}
+
+	const float Ratio = GetDamageRatio01();
+	for (UMaterialInstanceDynamic* MID : CrackMaterials)
+	{
+		if (IsValid(MID))
+		{
+			MID->SetScalarParameterValue(CrackParameterName, Ratio);
+		}
 	}
 }
 
@@ -196,7 +285,7 @@ void ABreakableWall::HideWall()
 // ──────────────────────────────────────────────────────────────
 #if !UE_BUILD_SHIPPING
 
-static void HazardBreakWallCommand(UWorld* World)
+static void HazardBreakWallCommand(const TArray<FString>& Args, UWorld* World)
 {
 	if (!World)
 	{
@@ -209,24 +298,36 @@ static void HazardBreakWallCommand(UWorld* World)
 		return;
 	}
 
+	// 인자 없이 치면 예전처럼 완전히 부서질 때까지 반복한다(강제 파괴용).
+	// 숫자를 주면 그만큼만 때린다 — 1이면 중간 균열 단계 하나만 확인하고 싶을 때 쓴다.
+	// Safety 캡(10)은 HitPoints 를 비정상적으로 크게 잡아도 무한 루프에 안 빠지게 한다.
+	const int32 RequestedHits = Args.IsValidIndex(0) ? FCString::Atoi(*Args[0]) : 10;
+	const int32 HitsToApply = FMath::Clamp(RequestedHits, 1, 10);
+
 	int32 BrokenCount = 0;
 
 	for (TActorIterator<ABreakableWall> It(World); It; ++It)
 	{
-		// ImpactRadius 0 — 브루트 돌진과 같은 "직접 타격" 취급으로 거리 판정 없이 부순다
-		if (It->TryBreak(nullptr, It->GetActorLocation(), 0.f))
+		for (int32 i = 0; i < HitsToApply && !It->IsBroken(); ++i)
+		{
+			// ImpactRadius 0 — 브루트 돌진과 같은 "직접 타격" 취급으로 거리 판정 없이 때린다
+			It->TryBreak(nullptr, It->GetActorLocation(), 0.f);
+		}
+
+		if (It->IsBroken())
 		{
 			++BrokenCount;
 		}
 	}
 
-	UE_LOG(LogHazard, Log, TEXT("hh.Hazard.BreakWall — %d개 부쉈습니다."), BrokenCount);
+	UE_LOG(LogHazard, Log, TEXT("hh.Hazard.BreakWall %d — %d개 타격, %d개 부쉈습니다."),
+		HitsToApply, HitsToApply, BrokenCount);
 }
 
-static FAutoConsoleCommandWithWorld GHazardBreakWallCommand(
+static FAutoConsoleCommandWithWorldAndArgs GHazardBreakWallCommand(
 	  TEXT("hh.Hazard.BreakWall"),
-	  TEXT("맵의 모든 BreakableWall 을 강제로 부순다 (점착 폭탄/브루트 연결 전 테스트용)"),
-	  FConsoleCommandWithWorldDelegate::CreateStatic(&HazardBreakWallCommand),
+	  TEXT("hh.Hazard.BreakWall [횟수] — 맵의 모든 BreakableWall 을 때린다. 인자 없으면 완전히 부술 때까지, 숫자를 주면 그만큼만(1=균열만 확인)"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&HazardBreakWallCommand),
 	  ECVF_Cheat);
 
 #endif   // !UE_BUILD_SHIPPING

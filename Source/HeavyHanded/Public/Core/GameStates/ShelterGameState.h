@@ -6,31 +6,12 @@
 #include "GameFramework/GameState.h"
 #include "Core/PlayerStates/ShelterPlayerState.h"
 #include "GameplayTagContainer.h" // Tag 사용 위함
+#include "Core/RunProgressView.h"
+#include "Core/HeistSettings.h"
+#include "Core/HeistSiteView.h"    // FHeistSiteView 를 값으로 돌려준다 — 전방 선언 불가
 
 #include "ShelterGameState.generated.h"
 
-/**
- *
- */
-
-
-UENUM(BlueprintType)
-enum class EEntryTag : uint8
-{
-	None,
-	Front,
-	Garage,
-	Alley
-};
-
-UENUM(BlueprintType)
-enum class ESiteTag : uint8
-{
-	None,
-	Mansion,
-	Museum,
-	Bank
-};
 
 // .h
 
@@ -43,14 +24,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCanStartChanged, bool, bCanStart)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJobStateChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTravelTagChanged);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRunProgressChanged, FRunProgressView, Progress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDepartingChanged, bool, bDeparting);
+
 
 UCLASS()
 class HEAVYHANDED_API AShelterGameState : public AGameState
 {
 	GENERATED_BODY()
-
-
-
 
 public:
 
@@ -62,12 +43,25 @@ public:
 
     void UpdateLobbyPlayerCount();
 
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Run")
+	FOnRunProgressChanged OnRunProgressChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Shelter|Run")
+	const FRunProgressView& GetRunProgress() const { return RunProgress; }
+
+	UFUNCTION(BlueprintCallable, Category = "Shelter|Run")
+	void PublishRunProgress();
+
 protected:
 
     virtual void AddPlayerState(APlayerState* PlayerState) override;
     virtual void RemovePlayerState(APlayerState* PlayerState) override;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RunProgress, BlueprintReadOnly, Category = "Shelter|Run")
+	FRunProgressView RunProgress;
 
+	UFUNCTION()
+	void OnRep_RunProgress();
 // --------------------------------------------------------------
 
 public:
@@ -124,38 +118,58 @@ public:
 	UFUNCTION()
 	void OnPlayerJobChanged(AShelterPlayerState* PlayerState);
 
+	UFUNCTION(BlueprintPure, Category = "Shelter|Roster")
+	TArray<FString> GetUnconfirmedPlayerNames() const;
+
 	// ----------------------------------------------------------------
 
 	// 현재 선택된 장소(Site)가 변경되었을 때 UI에 알림
 	UPROPERTY(BlueprintAssignable)
 	FOnTravelTagChanged OnTravelTagChanged;
 
-	// 현재 선택된 Entry
-	UPROPERTY(ReplicatedUsing = OnRep_EntryTag, BlueprintReadOnly)
-	EEntryTag EntryTag = EEntryTag::Front; //초기값
+	/** 선택한 진입점 */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedEntry, BlueprintReadOnly, Category = "Shelter|Travel")
+	FGameplayTag SelectedEntry;
 
-	// 현재 선택된 Site
-	UPROPERTY(ReplicatedUsing = OnRep_SiteTag, BlueprintReadOnly)
-	ESiteTag SiteTag = ESiteTag::Mansion;
+	void SetSelectedEntry(FGameplayTag NewEntry);
 
-	// 서버에서 Entry를 변경
-	// PlayerController의 Server RPC에서 호출
-	UFUNCTION(BlueprintCallable)
-	void SetEntryTag(EEntryTag NewTag);
+	/** 진입점 리스트 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	TArray<FHeistEntryOption> GetEntryOptions() const;
 
-	// 서버에서 Site를 변경
-	// PlayerController의 Server RPC에서 호출
-	UFUNCTION(BlueprintCallable)
-	void SetSiteTag(ESiteTag NewTag);
+	void EnsureEntrySelected();
 
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FGameplayTag GetNextEntryOption() const;
 
-	// EntryTag가 클라이언트에 복제되었을 때 호출
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	bool FindEntryOption(FGameplayTag EntryTag, FHeistEntryOption& OutOption) const;
+
+	/**
+	 * 이 장소를 화면에 그리는 데 필요한 것 전부. 등록되지 않은 장소면 이름만 채운 빈 뷰다.
+	 * 표(DT_SiteCatalog)와 진행 상황을 여기서 합쳐 주므로 위젯은 어디서 왔는지 몰라도 된다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FHeistSiteView GetSiteView(FGameplayTag SiteTag) const;
+
+	/** 지금 갈 장소의 표시 정보. 출발 문 위젯이 이것 하나만 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "Shelter|Travel")
+	FHeistSiteView GetNextSiteView() const;
+
+	// ---- 출발
+	UPROPERTY(ReplicatedUsing = OnRep_bDeparting, BlueprintReadOnly, Category = "Shelter|Travel")
+	bool bDeparting = false;
+
+	UPROPERTY(BlueprintAssignable, Category = "Shelter|Travel")
+	FOnDepartingChanged OnDepartingChanged;
+
+	void SetDeparting(bool bNewDeparting);
+
 	UFUNCTION()
-	void OnRep_EntryTag();
+	void OnRep_bDeparting();
 
-	// SiteTag가 클라이언트에 복제되었을 때 호출
 	UFUNCTION()
-	void OnRep_SiteTag();
+	void OnRep_SelectedEntry();
 
 	// 모든 태그 디버그
 	UFUNCTION(BlueprintCallable)

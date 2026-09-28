@@ -4,6 +4,7 @@
 #include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl — 값으로 보유
 #include "GameplayTagContainer.h"              // FGameplayTag — 값으로 보유
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Core/RunProgressView.h"
 #include "RunProgressSubsystem.generated.h"
 
 /**
@@ -192,15 +193,29 @@ public:
 	/** 통과한 장소들. 통과한 순서대로 쌓인다 */
 	const TArray<FGameplayTag>& GetClearedSites() const { return ClearedSites; }
 
+	// ------- 캠페인 진행
+	/** 다음 장소 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	FGameplayTag GetNextSite() const;
+
+	/** 장소 통과 여부 */
+	UFUNCTION(BlueprintPure, Category = "Run|Progress")
+	bool IsCampaignComplete() const;
+
+	/** 화면에 그릴 구조체 */
+	FRunProgressView MakeProgressView() const;
 	// ── 출발 ──
 
 	/**
-	 * 이 장소로 출발한다. 전원을 데리고 ServerTravel 한다. SiteLevels 에 없으면 false. (서버 전용)
+	 * 이 장소로 출발한다. 전원을 데리고 ServerTravel 한다. DT_SiteCatalog 에 없으면 false. (서버 전용)
 	 * 진입점을 안 골랐어도 떠나고, BeginNewRun 도 부르지 않는다 — 재도전 때 산 장비가 사라진다.
 	 * **이 호출 뒤의 코드는 같은 월드에서 이어지지 않는다** (비-심리스 ServerTravel).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
 	bool TryDepartToSite(const FGameplayTag& SiteTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Run|Travel")
+	bool TryDepartToNextSite();
 
 	// ── 수명 경계 ──
 

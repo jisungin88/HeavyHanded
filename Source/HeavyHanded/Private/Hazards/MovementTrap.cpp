@@ -3,10 +3,10 @@
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Core/HeavyHandedGameplayTags.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — 임시 문자열 조회용
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
@@ -63,9 +63,10 @@ void AMovementTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, A
 		return;
 	}
 
-	// AGuardCharacter 는 별도 클래스라 여기 안 걸린다 — 경비가 자기 구역 덫에 스스로 안 걸리는 이유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// AGuardCharacter 는 별도 클래스라 여기 안 걸린다 — 경비가 자기 구역 덫에 스스로 안 걸리는
+	// 이유다. 그림자 이동 중에도 무시한다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target))
 	{
 		return;
 	}
@@ -98,10 +99,17 @@ void AMovementTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, A
 	}
 
 	// 소음은 이 사건 자체가 발생원이다. Noise.Hazard.Trap 은 Noise.ini(지성인)에 이미
-	// 등록된 태그를 참조만 한 것 — 새로 만들지 않았다
+	// 등록된 태그를 참조만 한 것 — 새로 만들지 않았다.
+	//
+	// [임시: 네이티브 선언 대신 문자열 조회]
+	//   HeavyHandedGameplayTags.h/.cpp 를 환경 방해 요소 작업 이전 상태로 되돌려 달라는
+	//   요청(공용 파일 충돌 우려)에 따라 HHTags::Noise_Hazard_Trap 선언을 걷어냈다.
+	//   기능은 그대로 유지하려고 문자열 조회로 임시 대체한 것 — 복구 요청이 오면
+	//   HeavyHandedGameplayTags.h 에 다시 선언하고 이 줄을 HHTags::Noise_Hazard_Trap 으로 되돌릴 것.
 	if (UNoiseSubsystem* Noise = UNoiseSubsystem::Get(this))
 	{
-		Noise->ReportNoise(HHTags::Noise_Hazard_Trap, GetActorLocation(), 1.f, Target);
+		static const FGameplayTag TrapNoiseTag = FGameplayTag::RequestGameplayTag(TEXT("Noise.Hazard.Trap"));
+		Noise->ReportNoise(TrapNoiseTag, GetActorLocation(), 1.f, Target);
 	}
 
 	Multicast_PlayTriggerEffect();
@@ -123,6 +131,8 @@ void AMovementTrap::ReleaseTarget(TWeakObjectPtr<ABaseCharacter> TargetPtr)
 	{
 		Movement->SetMovementMode(MOVE_Walking);
 	}
+
+	Multicast_PlayReleaseEffect();
 }
 
 void AMovementTrap::Rearm()
@@ -157,4 +167,26 @@ void AMovementTrap::Multicast_PlayTriggerEffect_Implementation()
 	{
 		UGameplayStatics::PlaySoundAtLocation(World, TriggerSound, GetActorLocation());
 	}
+
+	// 판정은 끝났다. 턱이 맞물리는 등 메시 자체가 움직이는 연출은 BP 몫이다 (헤더 주석 참고)
+	OnTrapVisualTrigger();
+}
+
+void AMovementTrap::Multicast_PlayReleaseEffect_Implementation()
+{
+	const UWorld* World = GetWorld();
+
+	// 데디케이티드 서버는 화면도 스피커도 없다 (Multicast_PlayTriggerEffect 와 동일 사유)
+	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (IsValid(ReleaseSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(World, ReleaseSound, GetActorLocation());
+	}
+
+	// 판정은 끝났다. 턱이 다시 벌어지는 등 OnTrapVisualTrigger 를 되돌리는 연출은 BP 몫이다
+	OnTrapVisualReset();
 }

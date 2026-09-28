@@ -233,6 +233,15 @@ public:
 	EHeistOutcome GetOutcome() const { return Outcome; }
 
 	/**
+	   * 이 판이 끝난 뒤의 다음 목표(Site.*). 무효면 더 갈 곳이 없다 (전 장소 통과).
+	   *
+	   * **이 판의 통과 기록이 반영된 뒤의 값이다** — 성공했으면 다음 칸, 실패했으면 같은 칸이다.
+	   * 클라이언트가 URunProgressSubsystem 을 볼 수 없어(비복제) 여기로 실어 보낸다.
+	   */
+	UFUNCTION(BlueprintPure, Category = "Heist|Result")
+	FGameplayTag GetNextSite() const { return NextSite; }
+
+	/**
 	 * 미션 소요 시간(초). 본 작업 진입부터 결과 확정까지 (준비 시간은 빠진다).
 	 * Result 진입 순간에 서버가 한 번 고정한다 — 매번 계산하면 결과 화면에서 숫자가 계속 늘어난다.
 	 */
@@ -415,10 +424,14 @@ protected:
 	UFUNCTION()
 	void OnRep_BoardedPlayers();
 
+	/** 다음 목표. 결과 진입 시 AHeistGameMode 가 한 번 채운다 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Heist|Result")
+	FGameplayTag NextSite;
 private:
 	/** State.InVan / State.Arrested 미러를 갱신한다. (서버 전용) */
 	static void SetMirrorTag(APlayerState* Player, const FGameplayTag& Tag, bool bApply);
 
 	/** 명단이 바뀔 때마다 서버 · 클라 양쪽에서 부른다 */
 	void BroadcastBoardedChanged();
+
 };

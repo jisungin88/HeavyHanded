@@ -125,14 +125,6 @@ protected:
 	void PlaceVan(AVanZone* Van, const FTransform& EntryTransform);
 	virtual void PlaceVan_Implementation(AVanZone* Van, const FTransform& EntryTransform);
 
-	/** 이 장소의 목표 금액($). 장소마다 다르므로 UHeistSettings 가 아니라 여기 있다 */
-	UPROPERTY(EditDefaultsOnly, Category = "Heist", meta = (ClampMin = "0"))
-	int32 TargetValue = 50000;
-
-	/** 본 작업(Phase.Heist) 제한 시간. 준비 시간은 포함되지 않는다 */
-	UPROPERTY(EditDefaultsOnly, Category = "Heist", meta = (ClampMin = "1.0", Units = "s"))
-	float HeistSeconds = 420.f;
-
 	/**
 	 * 이 작업 레벨이 어느 장소인가 (Site.*). 캠페인 진행을 기록하는 키다.
 	 * 기본값을 주지 않는다 — 저택 값을 박아 두면 박물관 BP 가 지정을 잊었을 때
@@ -142,6 +134,10 @@ protected:
 	FGameplayTag SiteTag;
 
 private:
+	int32 GetTargetValue() const;
+	float GetHeistSeconds() const;
+	float GetEscapeSeconds() const;
+
 	/** 이 판에 몇 명이 올 예정인지 알아낸다. 모르면 0. 우선순위는 구현부 참고 */
 	int32 ResolveExpectedPlayers(const FString& Options) const;
 
@@ -289,4 +285,10 @@ private:
 
 	/** 탈출 판정이 다음 틱에 예약돼 있는가. 한 틱에 계기가 둘이어도 판정은 한 번이면 된다 */
 	bool bEscapeCheckQueued = false;
+
+	/**
+	  * 다음 목표를 GameState 로 실어 보낸다. **RecordSiteProgress 뒤에 부를 것** —
+	  * 앞에 부르면 이번 판의 통과가 반영되기 전 값이 나간다.
+	  */
+	void PublishNextSite();
 };

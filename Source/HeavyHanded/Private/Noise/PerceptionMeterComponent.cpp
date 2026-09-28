@@ -8,6 +8,9 @@
 #include "Shared/NetAuthority.h"
 #include "Noise/NoiseSubsystem.h"
 
+#include "AI/GuardHearingAComponent.h"
+#include "AI/GuardAIController.h"
+
 UPerceptionMeterComponent::UPerceptionMeterComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -86,12 +89,40 @@ FVector UPerceptionMeterComponent::GetListenerLocation_Implementation() const
 	return Owner->GetActorLocation() + FVector(0.f, 0.f, EarHeight);
 }
 
+float UPerceptionMeterComponent::GetListenerHearingRange_Implementation() const
+{
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!IsValid(OwnerPawn))
+	{
+		return 0.0f;
+	}
+
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(OwnerPawn->GetController());
+	if (!IsValid(GuardController))
+	{
+		return 0.0f;
+	}
+
+	const UGuardHearingAComponent* HearingComp = GuardController->FindComponentByClass<UGuardHearingAComponent>();
+	if (!IsValid(HearingComp))
+	{
+		return 0.0f;
+	}
+
+	return HearingComp->GetHearingRange();
+}
+
 void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus& Stimulus)
 {
 	if (!HasServerAuthority(this) || bLatched)
 	{
 		return;
 	}
+
+	//+ 0910 디버그용 
+	//UE_LOG(LogTemp, Warning, TEXT("[Perception] Noise Heard | Strength=%.2f | Before=%.2f | Gain=%.2f | Add=%.2f"),
+	//	Stimulus.Strength, Perception01, GainPerStimulus, Stimulus.Strength * GainPerStimulus);
+
 
 	LastNoiseLocation     = Stimulus.Location;
 	TimeSinceLastStimulus = 0.f;
@@ -100,6 +131,8 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 	// 래치되는 경우에 SetPerception 이 도로 꺼줄 수 있다
 	SetComponentTickEnabled(true);
 
+	// Stimulus.Strength : 실제 발생한 소리 세기 
+	// GainPerStimulus : 소리 세기를 인지 게이지에 얼마나 반영할지
 	SetPerception(Perception01 + Stimulus.Strength * GainPerStimulus);
 }
 
@@ -114,6 +147,12 @@ void UPerceptionMeterComponent::SetPerception(float NewValue)
 	// 기본 감소율 0.2/초로는 ~2000fps 까지 안전하지만, 감소율은 디자이너가 만지는 값이다.
 	// 0.01 로 낮추는 순간 100fps 에서 바로 재현된다 — UAlertComponent 와 같은 함정이다
 	const float Clamped = FMath::Clamp(NewValue, 0.f, 1.f);
+
+	//+ 0910 디버그용
+	//UE_LOG(LogTemp, Warning, TEXT("[Perception] SetPerception | New=%.2f | Clamped=%.2f | Current=%.2f | Threshold=%.2f"),
+		//NewValue, Clamped, Perception01, PerceptionFullThreshold);
+
+
 	if (Clamped == Perception01)
 	{
 		return;
@@ -131,12 +170,25 @@ void UPerceptionMeterComponent::SetPerception(float NewValue)
 		OnRep_ReplicatedPerception();
 	}
 
+	// 0910 수정중(청각 감지 최소값)
+	//if (Perception01 >= 0.5 && !bLatched)
+	if (Perception01 >= PerceptionFullThreshold && !bLatched)
+	{
+		Perception01 = PerceptionFullThreshold;
+		bLatched = true;
+		SetComponentTickEnabled(false);
+		OnPerceptionFull.Broadcast(LastNoiseLocation);
+	}
+
+	/*
 	if (Perception01 >= 1.f && !bLatched)
 	{
 		bLatched = true;
 		SetComponentTickEnabled(false);   // 래치 중엔 오르지도 내리지도 않는다
 		OnPerceptionFull.Broadcast(LastNoiseLocation);
 	}
+	*/
+
 	else if (Perception01 <= 0.f)
 	{
 		SetComponentTickEnabled(false);   // 더 내려갈 것이 없다

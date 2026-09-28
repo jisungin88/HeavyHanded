@@ -20,4 +20,6 @@ public:
 	bool TryApplyNickname(APlayerController* Player, const FString& Raw, ENicknameError& OutError);
 
 	virtual void ChangeName(AController* Controller, const FString& NewName, bool bNameChange) override;
+
+	virtual void HandleMatchHasStarted() override;
 };

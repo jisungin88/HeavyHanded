@@ -63,6 +63,24 @@ void AHeistGameMode::InitGame(const FString& MapName, const FString& Options, FS
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
 
+	if (!SiteTag.IsValid())
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("Site가 비어 있습니다. 이 레벨의 GameMode BP에 지정하세요."))
+	}
+	else if (!UHeistSettings::Get()->FindSite(SiteTag))
+	{
+		UE_LOG(LogHeist, Error,
+			TEXT("%s 행이 DT_SiteCatalog에 없습니다. 행 이름이 태그와 같아야 합니다."), *SiteTag.ToString())
+	}
+	else
+	{
+		UE_CLOG(GetTargetValue() <= 0, LogHeist, Error,
+		        TEXT("%s 의 목표 금액이 0 입니다. 이 판은 성공 판정이 나지 않습니다."), *SiteTag.ToString());
+		UE_CLOG(GetEscapeSeconds() <= 0.f, LogHeist, Error,
+		        TEXT("%s 의 도주 시간이 0 입니다."), *SiteTag.ToString());
+	}
+
 	ExpectedPlayers = ResolveExpectedPlayers(Options);
 
 	if (ExpectedPlayers <= 0)
@@ -261,6 +279,21 @@ void AHeistGameMode::PlaceVan_Implementation(AVanZone* Van, const FTransform& En
 		*EntryTransform.GetLocation().ToCompactString());
 }
 
+int32 AHeistGameMode::GetTargetValue() const
+{
+	return UHeistSettings::Get()->GetSiteTargetValue(SiteTag);
+}
+
+float AHeistGameMode::GetHeistSeconds() const
+{
+	return UHeistSettings::Get()->GetSiteHeistSeconds(SiteTag);
+}
+
+float AHeistGameMode::GetEscapeSeconds() const
+{
+	return UHeistSettings::Get()->GetSiteEscapeSeconds(SiteTag);
+}
+
 void AHeistGameMode::WarnIfVanBlocksEntry() const
 {
 	const AVanZone* Van = AVanZone::Get(this);
@@ -434,7 +467,7 @@ void AHeistGameMode::HandleMatchHasStarted()
 		return;
 	}
 
-	GS->SetTargetValue(TargetValue);
+	GS->SetTargetValue(GetTargetValue());
 
 	// 진입점 판정이 첫 스폰에서 먼저 끝났다면 그때는 GameState 가 없었을 수 있다.
 	// 여기서 한 번 더 넣는다 — 이미 같은 값이면 복제가 dirty 되지 않는다
@@ -468,7 +501,7 @@ void AHeistGameMode::HandleMatchHasStarted()
 	bStartWindowOpen = true;
 
 	UE_LOG(LogHeist, Log, TEXT("접속 대기 시작 — 목표 $%d / 제한 %.0f초, 상한 %.0f초"),
-		TargetValue, HeistSeconds, UHeistSettings::Get()->PlayerJoinTimeoutSeconds);
+		GetTargetValue(), GetHeistSeconds(), UHeistSettings::Get()->PlayerJoinTimeoutSeconds);
 
 	GetWorldTimerManager().SetTimer(StartWaitHandle, this, &AHeistGameMode::TickStartWait,
 		StartWaitPollSeconds, true);
@@ -685,12 +718,27 @@ float AHeistGameMode::GetPhaseDuration(const FGameplayTag& Phase) const
 
 	if (Phase == HHTags::Phase_Heist)
 	{
-		return HeistSeconds;   // 장소마다 달라서 Settings 가 아니라 이 클래스의 값이다
+		return GetHeistSeconds();   // 장소마다 다르다 — SiteTag 로 DT_SiteCatalog 에서 읽는다
 	}
 
 	if (Phase == HHTags::Phase_Escape)
 	{
-		return Settings->EscapeSeconds;
+		const float Seconds = GetEscapeSeconds();
+
+		// [여기만 폴백이 있는 이유] 레벨 경로는 "모르면 안 떠난다" 가 맞지만, 도주 시간 0 은
+		// AHeistGameState::SetPhase 가 '카운트다운 없음' 으로 읽어 판이 영영 안 끝난다.
+		// 데이터 실수의 벌로는 너무 크다 — 시끄럽게 알리고 기획서 값(2장, 90초)으로 굴린다
+		if (Seconds <= 0.f)
+		{
+			UE_LOG(LogHeist, Error,
+				TEXT("%s 의 도주 시간이 0 입니다. DT_SiteCatalog 의 Escape Seconds 를 확인하세요. "
+					 "기획서 기본값 90초로 진행합니다."),
+				SiteTag.IsValid() ? *SiteTag.ToString() : TEXT("SiteTag 없음"));
+
+			return 90.f;
+		}
+
+		return Seconds;
 	}
 
 	if (Phase == HHTags::Phase_Result)
@@ -711,6 +759,12 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 		return;
 	}
 
+	// **SetPhase() 보다 먼저 부른다.** SetPhase() 는 맨 끝에서 OnRep_CurrentPhase() 를 직접
+	// 불러 결과 화면을 그 자리에서 동기로 띄우는데, 그 화면이 GetOutcome() 을 바로 읽는다.
+	// 뒤에 두면 호스트만 FinalizeOutcome() 전의 기본값(Failure)을 읽어 무조건 실패로 나온다
+	// (클라이언트는 복제로 늦게 받아 정상이라, 호스트와 클라 결과가 어긋난다).
+	OnPhaseEntered(Phase, Reason);
+
 	const float Duration = GetPhaseDuration(Phase);
 	GS->SetPhase(Phase, Duration, Reason);
 
@@ -721,8 +775,6 @@ void AHeistGameMode::EnterPhase(const FGameplayTag& Phase, EHeistPhaseReason Rea
 	{
 		Timers.SetTimer(PhaseTimerHandle, this, &AHeistGameMode::HandlePhaseElapsed, Duration, false);
 	}
-
-	OnPhaseEntered(Phase, Reason);
 }
 
 void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason Reason)
@@ -760,6 +812,8 @@ void AHeistGameMode::OnPhaseEntered(const FGameplayTag& Phase, EHeistPhaseReason
 		CarryOverArrests();
 		ReleaseServedSpectators();
 		RecordSiteProgress();
+
+		PublishNextSite();
 	}
 }
 
@@ -962,6 +1016,24 @@ void AHeistGameMode::RecordSiteProgress()
 	// 무효 태그 경고는 서브시스템이 남긴다 — 목록을 오염시키지 않는 것이 그쪽 책임이라
 	// 판정을 여기서 한 번 더 적지 않는다
 	Run->RecordSiteCleared(SiteTag);
+}
+
+void AHeistGameMode::PublishNextSite()
+{
+	AHeistGameState* GS = GetGameState<AHeistGameState>();
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+
+	if (!GS || !Run)
+	{
+		return;
+	}
+
+	// 무효 태그면 전 장소를 통과했다는 뜻이다. 결과 화면이 "다음 목표" 대신
+	// 최종 성공을 띄우는 근거가 된다 — 여기서 폴백으로 첫 장소를 채우지 말 것
+	GS->NextSite = Run->GetNextSite();
+
+	UE_LOG(LogHeist, Log, TEXT("다음 목표 게시 — %s"),
+			GS->NextSite.IsValid() ? *GS->NextSite.ToString() : TEXT("(없음 — 최종 성공)"));
 }
 
 void AHeistGameMode::CarryOverArrests()
@@ -1197,6 +1269,41 @@ static FAutoConsoleCommandWithWorld GPhaseShowCommand(
 	  TEXT("hh.Phase.Show"),
 	  TEXT("현재 페이즈 · 남은 시간 · 적재 금액을 찍는다. 클라이언트 창에서도 동작한다"),
 	  FConsoleCommandWithWorldDelegate::CreateStatic(&PhaseShowCommand),
+	  ECVF_Cheat);
+
+// 목표 금액을 채우려고 매번 실제로 노획물을 날라 밴에 싣는 것은 탈출/결과 페이즈
+// 쪽 코드를 고칠 때마다 7~9분씩 든다. 인자가 없으면 목표 금액까지 정확히 채우고,
+// 인자를 주면 그 액수만큼만 더한다(음수면 깎인다) — AddLoadedValue 를 그대로 태워서
+// LoadedEntries 를 건드리지 않는다는 점은 알아둘 것(결과 화면 적재 목록은 안 늘어난다)
+static void HeistFillValueCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!HasServerAuthority(World))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("hh.Heist.FillValue 는 서버(호스트) 창에서만 동작합니다."));
+		return;
+	}
+
+	AHeistGameState* GS = AHeistGameState::Get(World);
+	if (!GS)
+	{
+		UE_LOG(LogHeist, Warning, TEXT("작업 레벨이 아닙니다 — AHeistGameState 가 없습니다."));
+		return;
+	}
+
+	const int32 Delta = Args.IsValidIndex(0)
+		? FCString::Atoi(*Args[0])
+		: GS->GetTargetValue() - GS->GetLoadedValue();
+
+	GS->AddLoadedValue(Delta);
+
+	UE_LOG(LogHeist, Log, TEXT("hh.Heist.FillValue — 적재 $%d of $%d"),
+		GS->GetLoadedValue(), GS->GetTargetValue());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GHeistFillValueCommand(
+	  TEXT("hh.Heist.FillValue"),
+	  TEXT("hh.Heist.FillValue [금액] — 적재 금액을 채운다. 인자가 없으면 목표 금액까지 바로 채운다"),
+	  FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&HeistFillValueCommand),
 	  ECVF_Cheat);
 
 // 결과 화면(오유석)이 붙기 전까지 Result 데이터를 눈으로 확인할 유일한 수단이다.

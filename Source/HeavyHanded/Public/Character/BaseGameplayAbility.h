@@ -53,7 +53,12 @@ protected:
 	// 클라이언트에서 서버 ASC로 Gameplay Event 태그를 전송하는 공통 함수
 	UFUNCTION(BlueprintCallable, Category = "GAS|Ability")
 	void SendGameplayEventToASCOnServer(FGameplayTag EventTag, const FGameplayEventData& Payload);
-
+protected:
+	// 파생 BP가 몽타주 시작 직후 자기 로직(이동, 이펙트 등)을 걸 수 있는 훅.
+	// UBaseGameplayAbility::ActivateAbility가 Super::ActivateAbility()를 호출하지 않아
+	// 엔진 표준 K2_ActivateAbility가 발동되지 않으므로, 이 이벤트로 대체한다.
+	UFUNCTION(BlueprintImplementableEvent, Category = "GAS|Ability")
+	void OnSkillActivated();
 public:
 	UBaseGameplayAbility();
 

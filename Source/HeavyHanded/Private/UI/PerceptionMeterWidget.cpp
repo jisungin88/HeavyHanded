@@ -1,11 +1,13 @@
 ﻿#include "UI/PerceptionMeterWidget.h"
 
-#include "Engine/World.h"
+//#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "TimerManager.h"
+//#include "TimerManager.h"
 
 #include "Noise/PerceptionMeterComponent.h"
 #include "UI/HeavyUILog.h"
+#include "Components/ProgressBar.h"
+#include "AIController.h"
 
 // UI 카테고리의 유일한 정의. 선언은 UI/HeavyUILog.h 에 있다 —
 // STATIC 으로 두면 위젯 .cpp 가 둘 이상일 때 unity build 에서 재정의로 깨진다
@@ -15,19 +17,15 @@ void UPerceptionMeterWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (UWorld* World = GetWorld())
+	if (GaugeBar)
 	{
-		World->GetTimerManager().SetTimer(
-				UnboundWarnHandle, this, &UPerceptionMeterWidget::WarnIfUnbound, UnboundWarnDelay, false);
+		GaugeBar->SetPercent(0.f);
 	}
+
 }
 
 void UPerceptionMeterWidget::NativeDestruct()
 {
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(UnboundWarnHandle);
-	}
 
 	Unbind();
 
@@ -36,6 +34,7 @@ void UPerceptionMeterWidget::NativeDestruct()
 
 void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 {
+	
 	Unbind();
 
 	if (!IsValid(Guard))
@@ -43,7 +42,17 @@ void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 		return;
 	}
 
+
+	APawn* GuardPawn = Cast<APawn>(Guard);
+	if (!GuardPawn)
+	{
+		UE_LOG(LogHeavyUI, Warning, TEXT("%s 가 Pawn이 아닙니다."), *Guard->GetName());
+		return;
+	}
+
+
 	UPerceptionMeterComponent* Meter = Guard->FindComponentByClass<UPerceptionMeterComponent>();
+
 	if (!Meter)
 	{
 		UE_LOG(LogHeavyUI, Warning,
@@ -54,6 +63,7 @@ void UPerceptionMeterWidget::BindToGuard(AActor* Guard)
 
 	BoundMeter = Meter;
 	Meter->OnPerceptionChanged.AddDynamic(this, &UPerceptionMeterWidget::HandlePerceptionChanged);
+
 
 	if (UWorld* World = GetWorld())
 	{
@@ -72,14 +82,39 @@ void UPerceptionMeterWidget::Unbind()
 		Meter->OnPerceptionChanged.RemoveDynamic(this, &UPerceptionMeterWidget::HandlePerceptionChanged);
 	}
 	BoundMeter = nullptr;
+	bShown = false; //추가
 }
+
 
 void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 {
-	OnPerceptionUpdated(NewPerception01);
+
+
+
+	// 0910 수정중(청각 감지 최소값)
+	UPerceptionMeterComponent* Meter = BoundMeter.Get();
+	if (!Meter)
+	{
+		return;
+	}
+
+	const float Perception01 = FMath::Clamp(NewPerception01, 0.f, 1.f);  // 0~1 clamp 방어
+	const float FullThreshold = Meter->GetPerceptionFullThreshold();
+	const float GaugePercent = FullThreshold > 0.f ? Perception01 / FullThreshold : 0.f;
+
+	//+ 0910 디버그용
+	//UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] Value=%.2f | Threshold=%.2f | Gauge=%.0f%% | GaugeBar=%s"),
+	//	Perception01, FullThreshold, GaugePercent * 100.f, GaugeBar ? TEXT("VALID") : TEXT("NULL"));
+
+
+	if (GaugeBar)
+	{
+		GaugeBar->SetPercent(FMath::Clamp(GaugePercent, 0.f, 1.f));
+	}
+
 
 	// 게이지가 차오르는 동안이 플레이어의 유예 시간이다. 0 일 때는 띄우지 않는다
-	const bool bShouldShow = NewPerception01 > KINDA_SMALL_NUMBER;
+	const bool bShouldShow = Perception01 > KINDA_SMALL_NUMBER;
 	if (bShouldShow != bShown)
 	{
 		bShown = bShouldShow;
@@ -89,6 +124,10 @@ void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 
 void UPerceptionMeterWidget::WarnIfUnbound()
 {
+
+	//+ bind 디버그용. 정상작동시 삭제할 것
+	//UE_LOG(LogHeavyUI, Warning, TEXT("[PerceptionWidget] WarnIfUnbound This=%p Name=%s BoundMeter=%s Outer=%s"), this, *GetNameSafe(this), *GetNameSafe(BoundMeter.Get()), *GetNameSafe(GetOuter()));
+
 	if (BoundMeter.Get())
 	{
 		return;

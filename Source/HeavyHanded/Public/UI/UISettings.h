@@ -110,10 +110,19 @@ public:
 	TSoftObjectPtr<UTexture2D> GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const;
 
 	/**
-	 * 장소 표시 이름. 표에 없으면 LoadingUnknownSiteText 를 돌려준다.
+	 * 스킬 칸에 쓸 아이콘. 쿨다운 태그 여러 개 중 표에 있는 첫 번째를 돌려준다.
 	 *
-	 * SiteDisplayNames 를 직접 읽지 말 것 — 행이 지워지면 제목이 빈 채로 나가서
-	 * "진입 중…" 만 덩그러니 남는다. 그 방어가 여기 있다
+	 * 표에 없으면 SkillFallbackIcon 을, 그것도 비었으면 null 이다.
+	 * SkillIcons 를 직접 읽지 말 것 — GetHeldSlotIcon 과 같은 이유다.
+	 * BP 에 열지 않는다. 읽는 곳은 USkillSlotWidget 하나뿐이다
+	 */
+	TSoftObjectPtr<UTexture2D> GetSkillIcon(const FGameplayTagContainer& CooldownTags) const;
+
+	/**
+	 * 장소 표시 이름. 이름의 진리원은 **DT_SiteCatalog** 이고 여기서는 받아 넘기기만 한다.
+	 *
+	 * 행이 없거나 이름이 비어 있으면 LoadingUnknownSiteText 를 돌려준다 — 제목이 통째로
+	 * 비면 "진입 중…" 만 덩그러니 남기 때문이다. 그 폴백 문구가 UI 소관이라 이 함수가 여기 있다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "UI|Loading")
 	FText GetSiteDisplayName(FGameplayTag SiteTag) const;
@@ -255,6 +264,25 @@ public:
 	TSoftObjectPtr<UTexture2D> HeldSlotFallbackIcon;
 
 	/**
+	 * 스킬 칸 아이콘. 쿨다운 태그(Cooldown.Ability.*) → 그림.
+	 *
+	 * [왜 어빌리티 태그가 아니라 쿨다운 태그인가] 스킬 칸은 쿨다운 태그로 스킬을 찾는다
+	 *   (USkillSlotWidget 헤더 주석). 어빌리티 태그는 안 붙은 스킬이 있지만
+	 *   쿨다운 태그는 스킬 칸에 뜨는 스킬이라면 반드시 있다.
+	 *
+	 * [왜 어빌리티(GA)가 아니라 여기인가] GA 는 플레이어 · GAS 파트 소유라 UI 사정으로
+	 *   아이콘 칸을 늘리지 않는다. HeldSlotIcons 와 같은 판단이다.
+	 *
+	 * 조회는 GetSkillIcon() 으로 한다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Skill Slot")
+	TMap<FGameplayTag, TSoftObjectPtr<UTexture2D>> SkillIcons;
+
+	/** 쿨다운 태그가 표에 없을 때 쓰는 그림. 비워 두면 아이콘 자리가 숨는다 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Skill Slot")
+	TSoftObjectPtr<UTexture2D> SkillFallbackIcon;
+
+	/**
 	 * 무게 바가 가득 차는 질량(kg).
 	 *
 	 * [기획서 근거가 없는 값이다] 기획서에 무게 상한이라는 개념 자체가 없다 —
@@ -298,14 +326,12 @@ public:
 					  RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LoadingTipRow"))
 	TSoftObjectPtr<UDataTable> LoadingTipsTable;
 
-	/**
-	 * 장소 태그 → 화면에 뜰 이름 (Site.Museum → "박물관").
-	 *
-	 * 조회는 GetSiteDisplayName() 으로 한다.
-	 * 목표 금액 · 제한시간은 여기 두지 않는다 — 그건 코어 루프의 값이고 여기는 표시 이름뿐이다
-	 */
-	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading", meta = (Categories = "Site"))
-	TMap<FGameplayTag, FText> SiteDisplayNames;
+	// 장소 표시 이름은 여기 없다 — DT_SiteCatalog 의 DisplayName 이 진리원이다.
+	//
+	// 예전에는 SiteDisplayNames 맵이 여기 있었다. 그런데 장소 하나를 추가하려면 이 맵과
+	// 코어 루프의 장소 표 양쪽을 고쳐야 했고, 한쪽만 채우면 "이름은 나오는데 목표가 0" 처럼
+	// 조용히 어긋났다. 편집 단위가 '장소 하나' 라서 한 행에 모아 둔다.
+	// 조회는 GetSiteDisplayName() 으로 하고, 폴백 문구(LoadingUnknownSiteText)만 여기 남는다.
 
 	/** 제목 위 작은 글씨 — "다음 작업" */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading")

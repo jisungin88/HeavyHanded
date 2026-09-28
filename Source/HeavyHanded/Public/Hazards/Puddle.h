@@ -1,12 +1,13 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "Puddle.generated.h"
 
 class UStaticMeshComponent;
 class UBoxComponent;
 class UGameplayEffect;
+class USoundBase;
 class ABaseCharacter;
 
 /**
@@ -39,7 +40,7 @@ class ABaseCharacter;
  *   (SlowZone)이 전담한다 — AMovementTrap 과 같은 구조다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API APuddle : public AActor
+class HEAVYHANDED_API APuddle : public AHazardBase
 {
 	GENERATED_BODY()
 
@@ -72,4 +73,14 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Puddle")
 	TSubclassOf<UGameplayEffect> SlowEffectClass;
+
+	/** 밟고 들어오는 순간 재생되는 소리. AMovementTrap::TriggerSound 와 같은 역할 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
+	TObjectPtr<USoundBase> EnterSound;
+
+private:
+	/** 진입 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_PlayEnterSound();
+	void Multicast_PlayEnterSound_Implementation();
 };

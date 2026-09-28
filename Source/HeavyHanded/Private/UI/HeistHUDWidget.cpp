@@ -213,6 +213,7 @@ void UHeistHUDWidget::NativeDestruct()
 		World->GetTimerManager().ClearTimer(BindRetryHandle);
 		World->GetTimerManager().ClearTimer(TimerTickHandle);
 		World->GetTimerManager().ClearTimer(HeldTickHandle);
+		World->GetTimerManager().ClearTimer(MoneyInterpHandle);
 	}
 
 	// 구독을 안 풀면 위젯이 사라진 뒤에도 델리게이트에 남는다
@@ -272,9 +273,12 @@ void UHeistHUDWidget::TryBind()
 
 	SetHeistWidgetsVisible(true);
 
-	// 구독 시점의 값으로 한 번 그린다. 안 하면 다음 전환까지 빈 화면이 보인다
+	// 구독 시점의 값으로 한 번 그린다. 안 하면 다음 전환까지 빈 화면이 보인다.
+	//
+	// 여기만 롤업 없이 즉시 찍는다 — 이미 $18,400 이 실려 있는 판에 늦게 들어왔는데
+	// 0 부터 굴러가면 방금 자기가 실은 것처럼 보인다
 	HandlePhaseChanged(GS->GetCurrentPhase(), FGameplayTag(), GS->GetPhaseReason());
-	ApplyObjective(GS->GetLoadedValue(), GS->GetTargetValue());
+	ApplyObjective(GS->GetLoadedValue(), GS->GetTargetValue(), /*bImmediate=*/true);
 
 	// 남은 시간은 복제되지 않는다 — 끝나는 시각만 오고 남은 초는 각자 계산한다.
 	// 그래서 구독이 아니라 주기 갱신이다
@@ -316,8 +320,10 @@ void UHeistHUDWidget::HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag Old
 
 void UHeistHUDWidget::HandleLoadedValueChanged(int32 LoadedValue, int32 TargetValue)
 {
-	ApplyObjective(LoadedValue, TargetValue);
+	ApplyObjective(LoadedValue, TargetValue, /*bImmediate=*/false);
 
+	// 훅은 실제 값이 바뀐 이 순간에만 간다. 롤업 프레임마다 부르면 WBP 의
+	// 펀치 애니메이션이 초당 60번 처음부터 다시 재생돼 멈춘 것처럼 보인다
 	OnObjectiveUpdated(LoadedValue, TargetValue);
 }
 
@@ -386,22 +392,107 @@ void UHeistHUDWidget::RefreshTimer()
 			  bEscapePhase ? TEXT("도주 페이즈") : (bLowTime ? TEXT("남은 시간 부족") : TEXT("해제")));
 }
 
-void UHeistHUDWidget::ApplyObjective(int32 LoadedValue, int32 TargetValue)
+void UHeistHUDWidget::ApplyObjective(int32 LoadedValue, int32 TargetValue, bool bImmediate)
 {
-	if (Txt_Objective)
-	{
-		Txt_Objective->SetText(FText::Format(
-				LOCTEXT("ObjectiveFormat", "${0} / ${1}"),
-				FText::AsNumber(LoadedValue),
-				FText::AsNumber(TargetValue)));
+	TargetLoaded = LoadedValue;
+	TargetGoal   = TargetValue;
 
-		// 목표를 채우면 금색으로 바꾼다. 진행도 바가 없으므로 색이 유일한 신호다 —
-		// 초과 적재는 숫자로만 드러나서 눈에 잘 띄지 않는다
-		const EUIColorToken Token = (TargetValue > 0 && LoadedValue >= TargetValue)
-			? EUIColorToken::Gold
-			: EUIColorToken::Money;
-		Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(Token)));
+	if (bImmediate || MoneyInterpSpeed <= 0.f)
+	{
+		StopMoneyInterp();
+		DisplayedLoaded = static_cast<float>(LoadedValue);
+		DrawObjective();
+		return;
 	}
+
+	// 롤업 중에 또 실려도 표시값은 건드리지 않는다 — 목표만 갈아끼우면
+	// 지금 찍혀 있는 숫자에서 이어서 굴러간다. 되감기면 적재가 취소된 것처럼 보인다
+	StartMoneyInterp();
+}
+
+void UHeistHUDWidget::DrawObjective()
+{
+	if (!Txt_Objective)
+	{
+		return;
+	}
+
+	const int32 Shown = FMath::RoundToInt(DisplayedLoaded);
+	if (Shown == LastShownLoaded && TargetGoal == LastShownGoal)
+	{
+		return;
+	}
+	LastShownLoaded = Shown;
+	LastShownGoal   = TargetGoal;
+
+	Txt_Objective->SetText(FText::Format(
+			LOCTEXT("ObjectiveFormat", "${0} / ${1}"),
+			FText::AsNumber(Shown),
+			FText::AsNumber(TargetGoal)));
+
+	// 목표를 채우면 금색으로 바꾼다. 진행도 바가 없으므로 색이 유일한 신호다 —
+	// 초과 적재는 숫자로만 드러나서 눈에 잘 띄지 않는다.
+	//
+	// 기준을 실제 값이 아니라 표시값으로 잡은 것은 의도다. 숫자가 목표에 닿는
+	// 그 순간에 색이 같이 바뀌어야 한다 — 실제 값 기준으로 하면 아직 $30,000 이
+	// 찍혀 있는데 글자만 금색이 된다
+	const EUIColorToken Token = (TargetGoal > 0 && Shown >= TargetGoal)
+		? EUIColorToken::Gold
+		: EUIColorToken::Money;
+	Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(Token)));
+}
+
+void UHeistHUDWidget::StartMoneyInterp()
+{
+	// 이미 도착해 있으면 타이머를 켤 이유가 없다 (같은 값이 또 오는 경우)
+	if (FMath::Abs(DisplayedLoaded - static_cast<float>(TargetLoaded)) <= MoneySnapTolerance)
+	{
+		DisplayedLoaded = static_cast<float>(TargetLoaded);
+		DrawObjective();
+		return;
+	}
+
+	if (MoneyInterpHandle.IsValid())
+	{
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+				MoneyInterpHandle, this, &UHeistHUDWidget::StepMoneyInterp, MoneyInterpInterval, true);
+	}
+	else
+	{
+		// 월드가 없으면 굴릴 방법이 없다. 조용히 안 굴러가는 대신 숫자만이라도 맞춘다
+		DisplayedLoaded = static_cast<float>(TargetLoaded);
+		DrawObjective();
+	}
+}
+
+void UHeistHUDWidget::StepMoneyInterp()
+{
+	DisplayedLoaded = FMath::FInterpTo(
+			DisplayedLoaded, static_cast<float>(TargetLoaded), MoneyInterpInterval, MoneyInterpSpeed);
+
+	// 남은 차액에 비례해 좁히는 방식이라 목표에 정확히 닿지 않는다.
+	// 스냅하고 꺼 주지 않으면 타이머가 영원히 돈다
+	if (FMath::Abs(DisplayedLoaded - static_cast<float>(TargetLoaded)) <= MoneySnapTolerance)
+	{
+		DisplayedLoaded = static_cast<float>(TargetLoaded);
+		StopMoneyInterp();
+	}
+
+	DrawObjective();
+}
+
+void UHeistHUDWidget::StopMoneyInterp()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MoneyInterpHandle);
+	}
+	MoneyInterpHandle.Invalidate();
 }
 
 void UHeistHUDWidget::SetUrgent(bool bNewUrgent, const TCHAR* Cause)

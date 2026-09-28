@@ -12,6 +12,9 @@
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
+class AGuardCharacter;
+class AGuardAIController;
+class UCapsuleComponent;
 
 UCLASS( ClassGroup=(AI), meta=(BlueprintSpawnableComponent) )
 class HEAVYHANDED_API UGuardHearingAComponent : public UActorComponent
@@ -23,6 +26,10 @@ public:
 	UGuardHearingAComponent();
 
 
+public:
+	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
+
+
 	UFUNCTION()
 	void OnTargetPerceptionUpdatedHearing
 	(AActor* Actor, struct FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp);
@@ -30,6 +37,17 @@ public:
 	void SetHearingRange(float InHearingRange);
 
 	void SetHearingEnabled(bool isEnable);
+
+public:
+	UFUNCTION() // 타이머 만료 함수
+		void HandleWorldAlertSilenceTimeout();
+
+	UFUNCTION() // 디버그용
+		void LogWorldAlertSilenceRemaining();
+
+	void StartWorldAlertSilenceTimer();
+	void ClearWorldAlertSilenceTimer();
+
 
 protected:
 	// Called when the game starts
@@ -40,23 +58,51 @@ protected:
 	TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
 
 
-	// 각각 디버그용 // lee
-	// 청각 감지 사용 여부.
-	// BP에서 Guard 종류별로 청각을 켜고 끌 수 있다.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GuardHearing")
-	bool bEnableHearing = true;
+
+	
+public:
+
+	UFUNCTION(BlueprintPure, Category = "GuardHearing")
+	float GetHearingRange() const;
 
 
-
-public:	
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	
 
+
+private:
+	// 경계도 속도 증가 상태를 해제하기 위한 무소음 타이머.
+	FTimerHandle WorldAlertSilenceTimerHandle;
+
+	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
+	FTimerHandle WorldAlertSilenceDebugTimerHandle;
+
+	bool bDrawHearingDebug = true;
+
+
+	UPROPERTY()
+	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
+
+	// 디버그
+	void DrawHearingDebug() const;
+
+	FVector LastHearingLocation = FVector::ZeroVector;
+	bool bHasHearingLocation = false;
+
+public:
+	void ClearHearingDebug();
 
 
 private:
 
-	UPROPERTY()
-	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
-		
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardAIController> GuardAIController;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AGuardCharacter> GuardCharacter;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCapsuleComponent> GuardCapsule;
+
 };

@@ -4,6 +4,10 @@
 #include "Core/GameInstances/NetGameInstanceSubsystem.h"
 #include "Core/HeistLog.h"   // 직업 확정 → 역할 기록 → 폰 스폰을 한 카테고리로 따라간다
 #include "Core/RunProgressSubsystem.h"
+#include "Core/HeavyHandedGameplayTags.h"
+#include "Core/HeistSettings.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/GameStateBase.h"
 
 #include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h"
@@ -20,6 +24,8 @@
 #include "UI/Shelter/ShelterHUD.h"
 
 #include "Core/GameModes/ShelterGameMode.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "UI/LoadingScreenSubsystem.h"
 
 void AShelterPlayerController::BeginPlay()
 {
@@ -49,8 +55,56 @@ void AShelterPlayerController::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("=== AFTER BEGIN PLAY ==="));
 	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("=== AFTER BEGIN PLAY ==="));
 
+	if (UWorld* World = GetWorld())
+	{
+		BindToGameState(World->GetGameState());
+		GameStateSetHandle = World->GameStateSetEvent.AddUObject(this, &AShelterPlayerController::BindToGameState);
+	}
+}
 
+void AShelterPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	UnbindFromGameState();
+	if (UWorld* World = GetWorld())
+	{
+		if (GameStateSetHandle.IsValid())
+		{
+			World->GameStateSetEvent.Remove(GameStateSetHandle);
+			GameStateSetHandle.Reset();
+		}
+	}
 
+	Super::EndPlay(EndPlayReason);
+}
+
+void AShelterPlayerController::BindToGameState(AGameStateBase* GameState)
+{
+	AShelterGameState* ShelterGS = Cast<AShelterGameState>(GameState);
+	if (!ShelterGS || ShelterGS == BoundGameState)
+	{
+		return;
+	}
+
+	UnbindFromGameState();
+
+	BoundGameState = ShelterGS;
+	ShelterGS->OnDepartingChanged.AddDynamic(this, &AShelterPlayerController::HandleDepartingChanged);
+
+	if (ShelterGS->bDeparting)
+	{
+		HandleDepartingChanged(true);
+	}
+}
+
+void AShelterPlayerController::UnbindFromGameState()
+{
+	if (!BoundGameState)
+	{
+		return;
+	}
+
+	BoundGameState->OnDepartingChanged.RemoveDynamic(this, &AShelterPlayerController::HandleDepartingChanged);
+	BoundGameState = nullptr;
 }
 
 void AShelterPlayerController::SetupInputComponent()
@@ -568,6 +622,40 @@ void AShelterPlayerController::SpawnJobPawn(FGameplayTag JobTag)
 
 }
 
+void AShelterPlayerController::Client_BeginTravel_Implementation(FGameplayTag SiteTag)
+{
+	if (ULoadingScreenSubsystem* Loading = GetGameInstance()->GetSubsystem<ULoadingScreenSubsystem>())
+	{
+		Loading->SetNextDestination(SiteTag);
+	}
+}
+
+void AShelterPlayerController::Client_NotifyDepartBlocked_Implementation()
+{
+	BP_OnDepartBlocked();
+}
+
+void AShelterPlayerController::HandleDepartingChanged(bool bNewDeparting)
+{
+	if (!bNewDeparting || !IsLocalController())
+	{
+		return;
+	}
+
+	EnterUIFocus(this, EHHUIFocusMode::UIOnly);
+
+	if (APawn* MyPawn = GetPawn())
+	{
+		MyPawn->DisableInput(this);
+		if (UCharacterMovementComponent* Move = MyPawn->FindComponentByClass<UCharacterMovementComponent>())
+		{
+			Move->StopMovementImmediately();
+		}
+	}
+
+	BP_OnDepartBegin();
+}
+
 void AShelterPlayerController::ClientShowJobSelect_Implementation()
 {
 	BP_ShowJobSelect();
@@ -581,72 +669,40 @@ void AShelterPlayerController::ClientHideJobSelect_Implementation()
 
 //-------------------------------------------------------------------------------
 
-
-void AShelterPlayerController::ServerSetEntryTag_Implementation(EEntryTag NewTag)
+bool AShelterPlayerController::ServerSetEntryTag_Validate(FGameplayTag NewEntry)
 {
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
-	{
-		return;
-	}
-
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-	if (!Subsystem)
-	{
-		return;
-	}
-
-	// 서버 GameState의 Entry 변경
-	GameState->SetEntryTag(NewTag);
-
-	FGameplayTag EntryTag;
-
-	// config/Phase.ini 참고할 것
-	switch (NewTag)
-	{
-	case EEntryTag::Front:
-		// GameplayTagList = (Tag = "Entry.Mansion.Front",DevComment="저택 정문 — 시야 노출 높음, 도주로 많음")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Front"));
-		break;
-
-
-	case EEntryTag::Garage:
-		// GameplayTagList = (Tag = "Entry.Mansion.Garage", DevComment = "저택 지하 주차장 — 은폐 좋음, 내부 동선 김")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Garage"));
-		break;
-
-	case EEntryTag::Alley:
-		// GameplayTagList = (Tag = "Entry.Mansion.Alley", DevComment = "저택 뒷골목 — 경비 적음, 진입 후 좁은 통로")
-		EntryTag = FGameplayTag::RequestGameplayTag(FName("Entry.Mansion.Alley"));
-		break;
-
-	default:
-		EntryTag = FGameplayTag();
-		break;
-	}
-
-
-	// Entry 정보도 Subsystem에 먼저 전달
-	Subsystem->TrySelectEntry(EntryTag);
-
+	// 무효 태그 확인
+	return !NewEntry.IsValid() || NewEntry.MatchesTag(HHTags::Entry);
 }
 
-void AShelterPlayerController::ServerSetSiteTag_Implementation(ESiteTag NewTag)
+void AShelterPlayerController::ServerSetEntryTag_Implementation(FGameplayTag NewEntry)
 {
-	// 서버의 GameState 가져오기
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
+	UWorld* World = GetWorld();
+	AShelterGameState* GameState = World ? World->GetGameState<AShelterGameState>() : nullptr;
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!GameState || !Run)
 	{
+		UE_LOG(LogHeist, Warning, TEXT("진입점 선택 무시 — GameState 또는 런 진행이 없습니다."));
 		return;
 	}
 
+	if (!NewEntry.IsValid())
+	{
+		GameState->SetSelectedEntry(FGameplayTag());
+		return;
+	}
 
-	 // 서버 GameState의 Site 변경
-	GameState->SetSiteTag(NewTag);
+	// 실제로 있는 진입점 확인 여부
+	const FGameplayTag Site = Run->GetNextSite();
+	if (!UHeistSettings::Get()->IsEntryRegistered(Site, NewEntry))
+	{
+		UE_LOG(LogHeist, Warning, TEXT("진입점 선택 무시 — %s 는 %s 에 등록돼 있지 않습니다."),
+		       *NewEntry.ToString(), *Site.ToString());
+		return;
+	}
+
+	GameState->SetSelectedEntry(NewEntry);
 }
-
-
 
 void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
 {
@@ -656,71 +712,97 @@ void AShelterPlayerController::ClientShowStartGameWindow_Implementation()
 
 void AShelterPlayerController::IngameTravel()
 {
-
-
-	AShelterGameState* GameState = GetWorld()->GetGameState<AShelterGameState>();
-	if (!GameState)
+	if (!HasAuthority())
 	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 요청 무시 — 호스트만 시작할 수 있습니다."));
 		return;
 	}
 
-
-	URunProgressSubsystem* Subsystem = GetGameInstance()->GetSubsystem<URunProgressSubsystem>();
-	if (!Subsystem)
+	UWorld* World = GetWorld();
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!World || !Run)
 	{
+		UE_LOG(LogHeist, Warning, TEXT("출발 실패 — 월드 또는 URunProgressSubsystem 이 없습니다."));
 		return;
 	}
 
-
-	// 로딩창 띄우기
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	// ── 갈 곳 확인 ──
+	const FGameplayTag NextSite = Run->GetNextSite();
+	if (!NextSite.IsValid())
 	{
-		AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get());
-
-		if (PC)
+		if (Run->IsCampaignComplete())
 		{
+			UE_LOG(LogHeist, Log,
+			       TEXT("출발하지 않습니다 — 전 장소를 통과했습니다. 최종 성공 처리는 UI 몫입니다."));
+		}
+		else
+		{
+			UE_LOG(LogHeist, Warning,
+			       TEXT("출발 실패 — 등록된 장소가 없습니다. "
+				       "Project Settings → Game → Heist → Site Levels 를 채우세요."));
+		}
+		return;
+	}
+
+	if (UHeistSettings::Get()->GetSiteLevel(NextSite).IsNull())
+	{
+		UE_LOG(LogHeist, Warning,
+		       TEXT("출발 실패 — %s 의 레벨이 비어 있습니다. Site Levels 항목의 Level 을 지정하세요."),
+		       *NextSite.ToString());
+		return;
+	}
+
+	// ── 명단 확정 ──
+	TArray<FUniqueNetIdRepl> Roster;
+
+	if (const AGameStateBase* GS = World->GetGameState())
+	{
+		Roster.Reserve(GS->PlayerArray.Num());
+
+		for (const APlayerState* PS : GS->PlayerArray)
+		{
+			if (IsValid(PS))
+			{
+				Roster.Add(PS->GetUniqueId());
+			}
+		}
+	}
+
+	Run->SetConfirmedRoster(Roster);
+
+	// --- 출발 절차 시작
+
+	if (AShelterGameState* GS = World->GetGameState<AShelterGameState>())
+	{
+		GS->SetDeparting(true);
+	}
+
+	if (ULoadingScreenSubsystem* Loading = GetGameInstance()->GetSubsystem<ULoadingScreenSubsystem>())
+	{
+		Loading->SetNextDestination(NextSite);
+	}
+
+	// ── 로딩창 ──
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (AShelterPlayerController* PC = Cast<AShelterPlayerController>(It->Get()))
+		{
+			PC->Client_BeginTravel(NextSite);
 			PC->ClientShowStartGameWindow();
 		}
 	}
 
-
-
-	ESiteTag CurrentSite = GameState->SiteTag;
-	FGameplayTag SiteGT;
-
-	// config/Phase.ini 참고할 것
-
-
-	// 맵이 클리어 형식이라면 지금처럼 액터를 나눌 이유가 없음
-	/*
-	switch (CurrentSite)
-	{
-	case ESiteTag::Mansion:
-		// GameplayTagList=(Tag="Site.Mansion",DevComment="저택 — 목표 $50,000 / 7분. 경비견, 삐걱거리는 마루")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-		break;
-
-	case ESiteTag::Museum:
-		//GameplayTagList = (Tag = "Site.Museum", DevComment = "박물관 — 목표 $120,000 / 8분. 레이저 센서, 감시 카메라")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Museum"));;
-		break;
-
-	case ESiteTag::Bank:
-		//GameplayTagList = (Tag = "Site.Bank", DevComment = "은행 — 목표 $250,000 / 9분. 압력판, 자동 셔터, 무장 경비")
-		SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Bank"));;
-		break;
-
-	default:
-		SiteGT = FGameplayTag();
-		break;
-	}
-	*/
-
-	SiteGT = FGameplayTag::RequestGameplayTag(FName("Site.Mansion"));;
-
-	// TryDepartToSite 내부에서 서버 권한 검사 후 ServerTravel 실행
-	Subsystem->TryDepartToSite(SiteGT);
-
+	// 연출
+	FTimerHandle DepartHandle;
+	World->GetTimerManager().SetTimer(DepartHandle,
+		FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+			{
+				Run->TryDepartToNextSite();
+			}
+		}),
+		FMath::Max(0.01f, UHeistSettings::Get()->DepartDelaySeconds), false);
 }
 
 void AShelterPlayerController::DebugMessage(const FString& Message, bool bError)

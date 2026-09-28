@@ -20,7 +20,7 @@ EBTNodeResult::Type UBTTask_SelectSearchPoint::ExecuteTask(UBehaviorTreeComponen
 
 	// false = 이번 조사에서 훑을 지점을 다 소진했다. Failed 로 브랜치를 끝내
 	// Selector 가 순찰로 내려가게 한다.
-	return GuardController->SelectNextSearchPoint()
+	return GuardController->SelectNextAction(EGuardAIState::Search)
 		? EBTNodeResult::Succeeded
 		: EBTNodeResult::Failed;
 }
