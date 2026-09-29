@@ -55,7 +55,7 @@ protected:
 
 public:
 
-	UFUNCTION(Category = "Guard|Perception")
+	UFUNCTION()
 	void OnTargetPerceptionUpdatedSight
 			(AActor* Actor, struct FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp);
 
