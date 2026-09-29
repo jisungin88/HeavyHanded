@@ -105,8 +105,13 @@ protected:
 	/**
 	 * 가격($). 팀 공용 골드에서 나간다.
 	 *
-	 * 여기 손으로 넣는 것은 임시다. Equipment.ini 의 DevComment 에 정가가 적혀 있지만
-	 * 그건 주석이라 코드가 읽지 못한다 — 수치 DataAsset 을 분리할 때 그쪽으로 옮긴다.
+	 * **표에 행이 있으면 BeginPlay 에서 덮어쓴다.** 진짜 값은 DT_ShopCatalog 의
+	 * `Equipment.*` 행이고(원본은 Data/ShopCatalog.csv), 이 칸은 표에 행이 없는
+	 * 일회성 진열대를 위한 폴백으로만 남아 있다.
+	 *
+	 * 노획물처럼 칸을 회색으로 잠그지는 못한다 — 잠금은 BP 가 고른 행 핸들을 근거로 거는데
+	 * 진열대는 태그로 행을 찾으므로 에디터가 미리 알 수 있는 것이 없다. 그래서 대신
+	 * 어느 값이 쓰였는지 PIE 로그에 남긴다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop", meta = (ClampMin = "0"))
 	int32 Price = 0;
@@ -190,6 +195,17 @@ private:
 	FString MakePlayerMessage(EShopPurchaseResult Result, int32 GoldAfter) const;
 
 	void ShowShopDebug(const FString& Message, const FColor& Color) const;
+
+	/**
+	 * 가격표에서 이 진열대의 가격을 가져와 Price 에 넣는다. **모든 머신에서 돈다.**
+	 *
+	 * 서버만 하면 안 되는 이유는 Multicast_ReportResult 가 클라이언트에서
+	 * MakePlayerMessage 를 부르면서 Price 를 읽기 때문이다 — 서버만 갱신하면
+	 * "잔액 부족" 문구의 가격이 클라이언트 창에서만 BP 값으로 뜬다.
+	 *
+	 * 표는 모든 머신에 같은 에셋으로 있으니 복제할 필요가 없다. 각자 자기 것을 읽으면 된다.
+	 */
+	void ResolvePriceFromCatalog();
 
 	/** 설정이 비어 있는 진열대를 켤 때 경고한다. 돈만 받고 아무것도 안 주는 사고를 막는다 */
 	void WarnIfMisconfigured() const;

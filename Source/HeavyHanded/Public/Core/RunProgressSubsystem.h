@@ -7,6 +7,8 @@
 #include "Core/RunProgressView.h"
 #include "RunProgressSubsystem.generated.h"
 
+DECLARE_MULTICAST_DELEGATE(FOnRunArrestedChanged);
+
 /**
  * 한 판(run)의 진행 상황. 레벨을 건너 살아남아야 하는 것만 들어온다 —
  * 팀 골드 · 역할 · 참가자 명단 · 구매 장비 · 체포자 · 통과한 장소.
@@ -156,6 +158,9 @@ public:
 
 	/** 잡혀 있는 사람들. 은신처 구출 UI 가 이 목록을 그린다 */
 	const TArray<FUniqueNetIdRepl>& GetArrestedPlayers() const { return ArrestedPlayers; }
+
+	/** 명단이 실제로 바뀐 경우에만 발송 */
+	FOnRunArrestedChanged OnArrestedChanged;
 
 	/**
 	 * 팀 골드를 내고 구출한다. 잡혀 있지 않거나 잔액이 모자라면 false 이고 아무것도 바꾸지 않는다.

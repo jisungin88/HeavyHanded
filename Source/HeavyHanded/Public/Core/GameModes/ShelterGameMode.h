@@ -22,4 +22,14 @@ public:
 	virtual void ChangeName(AController* Controller, const FString& NewName, bool bNameChange) override;
 
 	virtual void HandleMatchHasStarted() override;
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
+	/** 체포를 Run 명단에 맞춘다 */
+	void SyncArrestedFlags();
+
+	FDelegateHandle ArrestedChangedHandle;
 };

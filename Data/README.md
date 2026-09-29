@@ -142,6 +142,7 @@ Loot_Vase_Museum        박물관 소장품 — 더 비싸고 더 잘 깨진다
 | `LootStability.csv` | `DT_LootStability` | `FLootStabilityData` | 불안정형만 |
 | `LootDurability.csv` | `DT_LootDurability` | `FLootDurabilityData` | 파손형만 |
 | `LootHeavy.csv` | `DT_LootHeavy` | `FLootHeavyData` | 중량형만 (2인 캐리) |
+| `ShopCatalog.csv` | `DT_ShopCatalog` | `FShopItemRow` | 은신처 상점 구매 장비의 가격 |
 
 전부 김민준 담당이다.
 
@@ -149,6 +150,28 @@ Loot_Vase_Museum        박물관 소장품 — 더 비싸고 더 잘 깨진다
 없어서 **Project Settings → Game → Loot** 에 프로젝트 전체 기준으로 한 번만 지정한다.
 행 이름을 카탈로그와 공유하기 때문이다. 표를 새로 만들면 여기 연결을 잊지 말 것 —
 비어 있으면 특성 수치가 조용히 기본값으로 돈다.
+
+## 상점 가격표는 태그가 행 이름이다
+
+`ShopCatalog.csv` 만 행 이름 규칙이 다르다. **장비 태그 이름을 그대로 쓴다.**
+
+```
+Equipment.Drone,정찰 드론,4000
+```
+
+진열대(`AShopDisplay`)는 이미 `ItemTag` 를 갖고 있어서 BP 에서 행을 고를 것이 없다.
+`ItemTag.GetTagName()` 으로 바로 찾는다 — `DT_SiteCatalog` 가 `SiteTag` 로 찾는 것과 같다.
+그래서 표에 태그 열이 없다. 넣으면 행 이름과 두 벌이 되어 한쪽만 고치게 된다.
+
+연결은 **Project Settings → Game → Shop → Shop Catalog** 에 한 번만 한다.
+
+**진열대가 없는 장비도 행을 둔다** (EMP · 대차). 이 표가 가격의 전체 목록이어야
+장소별 목표 금액과 나란히 놓고 균형을 볼 수 있다.
+
+BP 의 `Price` 칸은 표에 행이 없을 때만 쓰이는 폴백으로 남아 있다. 표에 행이 있으면
+`BeginPlay` 에서 덮어쓰고, 어느 값이 쓰였는지 로그에 남는다. 노획물처럼 칸이 회색으로
+잠기지는 않는다 — 잠금은 BP 가 고른 행 핸들을 근거로 거는데 여기는 태그로 찾기 때문에
+에디터가 미리 알 수 있는 것이 없다.
 
 ## BP 에서 수치를 고칠 수 없는 이유
 
