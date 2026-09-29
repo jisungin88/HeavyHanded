@@ -13,7 +13,7 @@
 UBTService_UpdateDetectionGauge::UBTService_UpdateDetectionGauge()
 {
 	NodeName = TEXT("Update Detection Gauge");
-	Interval = 1.0f; // 0.1초마다 갱신 (매 프레임 갱신은 과함)
+	Interval = 0.1f; // 0.1초마다 갱신 (매 프레임 갱신은 과함)
 }
 
 void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)

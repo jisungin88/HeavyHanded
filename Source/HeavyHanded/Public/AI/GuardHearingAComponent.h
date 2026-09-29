@@ -83,7 +83,7 @@ private:
 	bool bDrawHearingDebug = true;
 
 
-	UPROPERTY(Category = "Guard|Perception")
+	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 	// 디버그
@@ -98,13 +98,13 @@ public:
 
 private:
 
-	UPROPERTY(Transient, Category = "Guard|Perception")
+	UPROPERTY(Transient)
 	TObjectPtr<AGuardAIController> GuardAIController;
 
-	UPROPERTY(Transient, Category = "Guard|Perception")
+	UPROPERTY(Transient)
 	TObjectPtr<AGuardCharacter> GuardCharacter;
 
-	UPROPERTY(Transient, Category = "Guard|Perception")
+	UPROPERTY(Transient)
 	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };

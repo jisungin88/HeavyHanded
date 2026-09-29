@@ -51,7 +51,7 @@ public:
 
 protected:
 
-	UPROPERTY(Category = "Guard|AI")
+	UPROPERTY()
 	TObjectPtr<AGuardCharacter> PossessGuardPawn; // 빙의할 가드 Pawn
 
 	// GuardType 에 맞는 DT_GuardStats 행을 찾아 이동/지각/순찰/조사 수치를 일괄 적용한다.
@@ -237,7 +237,7 @@ protected:
 
 	FDelegateHandle GameStateSetHandle;
 
-	UPROPERTY(Transient, Category = "Guard|Match")
+	UPROPERTY(Transient)
 	TObjectPtr<AHeistGameState> BoundGameState;
 
 
