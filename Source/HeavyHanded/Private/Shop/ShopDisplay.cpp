@@ -8,6 +8,7 @@
 #include "GameFramework/PlayerController.h"   // ClientMessage — 구매자 본인에게 가는 유일한 통로
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
+#include "Shop/ShopSettings.h"                 // 가격표 조회 — ShopTypes.h 를 같이 끌어온다
 #include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShop, Log, All);
@@ -38,10 +39,56 @@ void AShopDisplay::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 경고보다 먼저 부른다 — 표에서 가격을 채우기 전에 검사하면 BP 가 0 인 진열대가
+	// 매번 "공짜로 팔린다" 로 걸린다. 표에 값이 있으면 그것이 정상 경로다.
+	ResolvePriceFromCatalog();
+
 	if (HasAuthority())
 	{
 		WarnIfMisconfigured();
 	}
+}
+
+void AShopDisplay::ResolvePriceFromCatalog()
+{
+	if (!ItemTag.IsValid())
+	{
+		// 태그가 없으면 찾을 행도 없다. 이 사실 자체는 WarnIfMisconfigured 가 따로 찍는다.
+		return;
+	}
+
+	const UShopSettings* Settings = UShopSettings::Get();
+
+	if (!Settings->HasCatalog())
+	{
+		UE_LOG(LogShop, Warning,
+			TEXT("%s: 가격표가 지정되지 않았다. BP 가격 $%d 로 판다. "
+				 "(Project Settings → Game → Shop → Shop Catalog)"),
+			*GetName(), Price);
+		return;
+	}
+
+	const FShopItemRow* Row = Settings->FindItem(ItemTag);
+	if (!Row)
+	{
+		// 표는 있는데 행이 없다 — 대개 태그를 새로 만들고 표에 넣는 것을 잊은 경우다.
+		// 조용히 BP 값으로 돌면 "왜 가격이 옛날 값이지" 로 한참 헤매게 된다.
+		UE_LOG(LogShop, Warning,
+			TEXT("%s: 가격표에 '%s' 행이 없다. BP 가격 $%d 로 판다. "
+				 "(Data/ShopCatalog.csv 에 행을 넣고 DT_ShopCatalog 를 Reimport 할 것)"),
+			*GetName(), *ItemTag.ToString(), Price);
+		return;
+	}
+
+	// BP 에 남아 있던 값과 다르면 어느 쪽이 이겼는지 남긴다. 같은 값이면 굳이 찍지 않는다 —
+	// 진열대가 늘어나면 정상 동작이 로그를 덮는다.
+	if (Price != Row->Price)
+	{
+		UE_LOG(LogShop, Log, TEXT("%s: 가격표의 $%d 로 판다. (BP 값 $%d 는 쓰이지 않는다)"),
+			*GetName(), Row->Price, Price);
+	}
+
+	Price = Row->Price;
 }
 
 void AShopDisplay::OnInteract_Implementation(APawn* Interactor)
