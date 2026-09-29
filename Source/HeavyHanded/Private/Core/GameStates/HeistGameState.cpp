@@ -233,23 +233,8 @@ void AHeistGameState::FinalizeOutcome()
 
 	// 탈출은 '체포되지 않았다' 로 본다. 체포는 미승차와 다운을 모두 흡수한 결과라
 	// 여기서 그 조건을 다시 세면 두 곳이 어긋날 수 있다.
-	int32 CountedNum = 0;
-	int32 EscapedNum = 0;
-
-	for (const APlayerState* Player : PlayerArray)
-	{
-		if (!IsCountedPlayer(Player))
-		{
-			continue;
-		}
-
-		++CountedNum;
-
-		if (!IsArrested(Player))
-		{
-			++EscapedNum;
-		}
-	}
+	int32 CountedNum = GetCountedNum();
+	int32 EscapedNum = GetEscapedNum();
 
 	// 최소 1인이 빠져나오면 작업은 성립한다. 전원 이탈을 성공으로 읽는 함정은 이 조건이 막는다 —
 	// 셀 사람이 없으면 EscapedNum 이 0 이라 그대로 실패다
@@ -437,6 +422,32 @@ bool AHeistGameState::IsBoarded(const APlayerState* Player) const
 bool AHeistGameState::IsArrested(const APlayerState* Player) const
 {
 	return IsValid(Player) && ArrestedPlayers.Contains(Player);
+}
+
+int32 AHeistGameState::GetCountedNum() const
+{
+	int32 Num = 0;
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (IsCountedPlayer(Player))
+		{
+			++Num;
+		}
+	}
+	return Num;
+}
+
+int32 AHeistGameState::GetEscapedNum() const
+{
+	int32 Num = 0;
+	for (const APlayerState* Player : PlayerArray)
+	{
+		if (IsCountedPlayer(Player) && !IsArrested(Player))
+		{
+			++Num;
+		}
+	}
+	return Num;
 }
 
 int32 AHeistGameState::GetSurvivorNum() const
