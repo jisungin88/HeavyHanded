@@ -9,6 +9,7 @@ class USpotLightComponent;
 class USoundBase;
 class UAudioComponent;
 class ABaseCharacter;
+class AGuardCharacter;
 
 /**
  * 좌우로 시야를 훑다가 콘 안에 들어온 플레이어를 발견하면 경보를 울리는 감시 카메라.
@@ -145,6 +146,21 @@ protected:
 	float MinRetriggerInterval = 3.f;
 
 	/**
+	 * 발견한 뒤 이 시간 동안 카메라 범위(콘·거리·시야)를 벗어나지 않고 계속 감지되면
+	 * 근처 순찰 중인 경비를 불러 조사시킨다. MinRetriggerInterval 과 별개 타이머다 —
+	 * "경보가 계속 유지되는 시간"과 "실제로 경비가 출동하기까지 걸리는 시간"은
+	 * 나중에 서로 다른 값으로 튜닝될 수 있어 지금부터 분리해 둔다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float GuardCallDelay = 3.f;
+
+	/** 경비를 찾는 반경. 이 안에서 가장 가까운, 순찰 중인(이미 조사·추격 중이 아닌) 경비 한 명만 부른다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float GuardCallRadius = 2000.f;
+
+	/**
 	 * 발견하는 순간(bAlarmed 가 켜질 때) 호출된다. 판정(경보·경계도)은 이미 끝난 뒤이므로
 	 * 여기서 게임 상태를 더 바꾸지 않는다 — 경고등이 빨갛게 바뀌는 등 연출은 BP 에서 이
 	 * 이벤트에 붙인다 (ALaserTrap::OnLaserTriggered 와 같은 역할의 훅).
@@ -186,6 +202,17 @@ private:
 	void ClearAlarm();
 
 	/**
+	 * GuardCallDelay 뒤 호출된다. 그때까지도 bAlarmed 가 유지 중이면(카메라 범위를 안
+	 * 벗어났으면) GuardCallRadius 안에서 가장 가까운 순찰 중인 경비를 찾는다.
+	 *
+	 * [TODO — 실제 호출부는 잠시 빠져 있다]
+	 *   경비를 찾아 로그까지만 남기고 실제로 조사를 지시하진 않는다. AGuardAIController 쪽에
+	 *   공개 진입점(RequestInvestigate 류)을 추가해야 하는데, 지금 그 파일을 이지은이
+	 *   작업 중이라 충돌을 피하려고 되돌려 뒀다 — 작업이 끝나면 다시 이어서 연결할 것.
+	 */
+	void CallNearbyGuard();
+
+	/**
 	 * bAlarmed 가 바뀔 때 OnPlayerDetected()/OnAlarmCleared() 를 부른다. 서버에서 직접
 	 * 대입하면 RepNotify 가 안 불리므로 손으로도 불러야 한다 (ABreakableWall::OnRep_bIsBroken 과 동일 패턴).
 	 */
@@ -225,7 +252,11 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_bAlarmed)
 	bool bAlarmed = false;
 
+	/** CheckDetection 이 대상을 확인할 때마다 갱신된다. CallNearbyGuard 가 경비를 보낼 목적지로 쓴다 */
+	FVector LastDetectedLocation = FVector::ZeroVector;
+
 	FTimerHandle DetectionTimer;
 	FTimerHandle DisableTimer;
 	FTimerHandle AlarmTimer;
+	FTimerHandle GuardCallTimer;
 };
