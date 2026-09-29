@@ -1,12 +1,10 @@
 ﻿#include "Hazards/PressurePlate.h"
 
-#include "AbilitySystemComponent.h"
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
+#include "Components/AudioComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
-#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
 #include "Kismet/GameplayStatics.h"
 #include "Loot/LootBase.h"
@@ -56,23 +54,13 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 		return;
 	}
 
-	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// AGuardCharacter 는 안 걸린다 — 다른 Hazard 클래스들과 동일 사유. 그림자 이동 중에도
+	// 무시한다 — Config/Tags/State.ini 의 State.ShadowStep 코멘트에 이미 "압력판 무시"
+	// 라고 명시돼 있다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target))
 	{
 		return;
-	}
-
-	// 그림자 이동 중엔 무시한다 — Config/Tags/State.ini 의 State.ShadowStep 코멘트에 이미
-	// "압력판 무시" 라고 명시돼 있다. 네이티브 선언 대신 문자열 조회를 쓰는 이유는
-	// HeavyHandedGameplayTags.h 를 환경 방해 요소 작업 동안 건드리지 않기로 한 방침 때문이다.
-	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
-	{
-		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-		{
-			return;
-		}
 	}
 
 	// 빈손이거나 싼 물건이면 반응하지 않는다
@@ -82,19 +70,10 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 		return;
 	}
 
-	const UWorld* World = GetWorld();
-	if (!World)
+	if (!ShouldRetrigger(MinRetriggerInterval))
 	{
 		return;
 	}
-
-	const float Now = World->GetTimeSeconds();
-	if (LastTriggerTime >= 0.f && Now - LastTriggerTime < MinRetriggerInterval)
-	{
-		// 오버랩 경계에서 스치듯 들락거린 것 — 진짜 재진입이 아니다 (ACreakyFloor 와 동일 사유)
-		return;
-	}
-	LastTriggerTime = Now;
 
 	// 세계 경계도를 직접 올린다. SetAlertGauge01 은 "치트 · 스크립트 이벤트용" 으로 이미
 	// 열려 있는 통로다(AlertComponent.h) — 소음 태그를 새로 만들 필요가 없다.
@@ -105,9 +84,14 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 
 	Multicast_PlayAlarmSound();
 
-	// 경보 다음에 놓친다 — 순서 자체에 필연적 이유는 없지만, 플레이어가 "경보가 울렸다"를
-	// 먼저 인지해야 무슨 일이 일어났는지 바로 이해한다
-	Target->SetHeldActor(nullptr);
+	// 경보 다음에 손상시킨다 — 순서 자체에 필연적 이유는 없지만, 플레이어가 "경보가
+	// 울렸다"를 먼저 인지해야 무슨 일이 일어났는지 바로 이해한다.
+	//
+	// ReportImpact 는 게이팅 없이 확정 충격 하나를 그대로 방송한다(헤더 주석 참고) —
+	// ULootDurabilityComponent(파손형)가 붙어 있으면 금이 가고, 없으면 조용히 아무 일도
+	// 안 일어난다. LootBase.h/.cpp 는 건드리지 않는다 — 이미 공개된 함수만 호출한다.
+	HeldLoot->ReportImpact(ELootImpactCause::Collision, LootDamageImpulse,
+		HeldLoot->GetActorLocation(), Target);
 
 	UE_LOG(LogHazard, Log, TEXT("[PressurePlate:%s] %s 가 $%d 짜리 %s 를 들고 지나감 — 경보"),
 		*GetName(), *Target->GetName(), HeldLoot->GetCurrentValue(), *GetNameSafe(HeldLoot));
@@ -115,16 +99,19 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 
 void APressurePlate::Multicast_PlayAlarmSound_Implementation()
 {
-	const UWorld* World = GetWorld();
-
-	// 데디케이티드 서버는 화면도 스피커도 없다 (다른 Hazard 클래스들과 동일 사유)
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	// 데디케이티드 서버 가드 (PlayHazardSound 와 동일 사유)
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_DedicatedServer || !IsValid(AlarmSound))
 	{
 		return;
 	}
 
-	if (IsValid(AlarmSound))
+	// 이전 재생이 아직 끝나기 전에 재발동하면 소리가 겹친다 — 밟고 나갔다가 금방
+	// 다시 밟는 경우가 실제로 있다(ASecurityCamera 에서 이미 마주친 문제와 동일).
+	// 이전 인스턴스를 먼저 멈추고 새로 재생해 항상 한 번만 들리게 한다.
+	if (IsValid(AlarmAudioComponent))
 	{
-		UGameplayStatics::PlaySoundAtLocation(World, AlarmSound, GetActorLocation());
+		AlarmAudioComponent->Stop();
 	}
+	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation());
 }

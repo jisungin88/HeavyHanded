@@ -348,23 +348,36 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 	//+ 0910 디버그용
 	UE_LOG(LogTemp, Warning, TEXT("[GuardAI] PerceptionFull RECEIVED | Location=%s"), *LastNoiseLocation.ToString());
 
+	RequestInvestigate(LastNoiseLocation);
+
+	// 청각 게이지가 소음원이므로, 이 경로에서만 게이지를 비운다 — 카메라 등 다른
+	// 감지 수단으로 들어온 RequestInvestigate 호출은 이 게이지와 무관하다.
+	if (PossessGuardPawn)
+	{
+		PossessGuardPawn->GetPerceptionMeterComponent()->ResetPerception();
+	}
+}
+
+void AGuardAIController::RequestInvestigate(FVector Location)
+{
+	// 여러 시스템(청각 게이지, 카메라 등)이 부를 수 있는 공개 API 라 게이트를 안에 둔다
+	// (CLAUDE.md 3절 "여러 사람이 호출하는 API 는 게이트를 API 안에 둔다" 규칙)
+	if (!HasAuthority())
+	{
+		return;
+	}
 
 	if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
 	{
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, LastNoiseLocation);
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, Location);
 		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
 	}
-		
 
 	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
 	// ReportPursuitStarted() 와는 별개 카운터라 추격 횟수와 섞이지 않는다.
 	if (UAlertComponent* Alert = UAlertComponent::Get(this))
 	{
 		Alert->ReportNoiseDetected();
-	}
-
-	if (PossessGuardPawn) {
-		PossessGuardPawn->GetPerceptionMeterComponent()->ResetPerception();
 	}
 }
 

@@ -1,6 +1,5 @@
 ﻿#include "Hazards/MovementTrap.h"
 
-#include "AbilitySystemComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -64,22 +63,12 @@ void AMovementTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, A
 		return;
 	}
 
-	// AGuardCharacter 는 별도 클래스라 여기 안 걸린다 — 경비가 자기 구역 덫에 스스로 안 걸리는 이유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target))
+	// AGuardCharacter 는 별도 클래스라 여기 안 걸린다 — 경비가 자기 구역 덫에 스스로 안 걸리는
+	// 이유다. 그림자 이동 중에도 무시한다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target))
 	{
 		return;
-	}
-
-	// 그림자 이동 중엔 무시한다 — 다른 Hazard 클래스들과 동일 사유
-	// [임시: 네이티브 선언 대신 문자열 조회] — HeavyHandedGameplayTags.h 를 건드리지 않는다
-	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
-	{
-		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-		{
-			return;
-		}
 	}
 
 	UCharacterMovementComponent* Movement = Target->GetCharacterMovement();

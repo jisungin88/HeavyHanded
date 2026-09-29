@@ -1,4 +1,4 @@
-#include "UI/DetectionGaugeWidget.h"
+﻿#include "UI/DetectionGaugeWidget.h"
 #include "Components/ProgressBar.h"
 
 void UDetectionGaugeWidget::NativeConstruct()

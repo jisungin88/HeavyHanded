@@ -32,7 +32,7 @@ public:
 	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
 
 
-	UFUNCTION(Category = "Guard|Perception")
+	UFUNCTION()
 	void OnTargetPerceptionUpdatedHearing
 	(AActor* Actor, struct FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp);
 
@@ -41,10 +41,10 @@ public:
 	void SetHearingEnabled(bool bEnabled);
 
 public:
-	UFUNCTION(Category = "Guard|Movement") // 타이머 만료 함수
+	UFUNCTION() // 타이머 만료 함수
 		void HandleWorldAlertSilenceTimeout();
 
-	UFUNCTION(Category = "Guard|Debug") // 디버그용
+	UFUNCTION() // 디버그용
 		void LogWorldAlertSilenceRemaining();
 
 	void StartWorldAlertSilenceTimer();

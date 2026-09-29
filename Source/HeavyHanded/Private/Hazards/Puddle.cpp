@@ -1,13 +1,10 @@
 ﻿#include "Hazards/Puddle.h"
 
-#include "AbilitySystemComponent.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameplayEffect.h"      // UGameplayEffect 완전한 타입 — TSubclassOf 의 StaticClass() 호출에 필요하다
-#include "GameplayTagContainer.h"   // FGameplayTag::RequestGameplayTag — State.ShadowStep 임시 문자열 조회
 #include "Hazards/HazardLog.h"
-#include "Kismet/GameplayStatics.h"
 
 APuddle::APuddle()
 {
@@ -62,22 +59,12 @@ void APuddle::OnZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 		return;
 	}
 
-	// AGuardCharacter 는 안 걸린다 — AMovementTrap 과 동일 사유
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target) || !SlowEffectClass)
+	// AGuardCharacter 는 안 걸린다 — AMovementTrap 과 동일 사유. 그림자 이동 중에도
+	// 무시한다(AHazardBase::IsValidHazardTarget 참고)
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target) || !SlowEffectClass)
 	{
 		return;
-	}
-
-	// 그림자 이동 중엔 무시한다 — 다른 Hazard 클래스들과 동일 사유
-	// [임시: 네이티브 선언 대신 문자열 조회] — HeavyHandedGameplayTags.h 를 건드리지 않는다
-	if (UAbilitySystemComponent* ASC = Target->GetAbilitySystemComponent())
-	{
-		static const FGameplayTag ShadowStepTag = FGameplayTag::RequestGameplayTag(TEXT("State.ShadowStep"));
-		if (ASC->HasMatchingGameplayTag(ShadowStepTag))
-		{
-			return;
-		}
 	}
 
 	Target->ApplyGameplayEffectToSelf(SlowEffectClass);
@@ -95,8 +82,9 @@ void APuddle::OnZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor*
 		return;
 	}
 
-	ABaseCharacter* Target = Cast<ABaseCharacter>(OtherActor);
-	if (!IsValid(Target) || !SlowEffectClass)
+	// 나가는 판정은 그림자 이동 여부를 안 가린다 — 몰래 나가도 감속은 풀어줘야 한다
+	ABaseCharacter* Target = nullptr;
+	if (!IsValidHazardTarget(OtherActor, Target, /*bCheckShadowStep=*/false) || !SlowEffectClass)
 	{
 		return;
 	}
@@ -108,16 +96,5 @@ void APuddle::OnZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor*
 
 void APuddle::Multicast_PlayEnterSound_Implementation()
 {
-	const UWorld* World = GetWorld();
-
-	// 데디케이티드 서버는 화면도 스피커도 없다 (AMovementTrap::Multicast_PlayTriggerEffect 와 동일 사유)
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
-
-	if (IsValid(EnterSound))
-	{
-		UGameplayStatics::PlaySoundAtLocation(World, EnterSound, GetActorLocation());
-	}
+	PlayHazardSound(EnterSound);
 }

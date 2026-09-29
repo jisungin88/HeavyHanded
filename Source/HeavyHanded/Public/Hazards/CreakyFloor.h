@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "CreakyFloor.generated.h"
 
 class UStaticMeshComponent;
@@ -30,7 +30,7 @@ class ABaseCharacter;
  * (걸렸는지/안 걸렸는지가 남지 않는다. AVaultDoor/ABreakableWall 과 다른 점).
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ACreakyFloor : public AActor
+class HEAVYHANDED_API ACreakyFloor : public AHazardBase
 {
 	GENERATED_BODY()
 
@@ -69,7 +69,4 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayCreakSound();
 	void Multicast_PlayCreakSound_Implementation();
-
-	/** 마지막으로 소리를 낸 시각(GetWorld()->GetTimeSeconds() 기준). 복제하지 않는다 — 서버 전용 판정 */
-	float LastTriggerTime = -1.f;
 };

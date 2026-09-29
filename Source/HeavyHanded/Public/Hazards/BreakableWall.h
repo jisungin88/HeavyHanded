@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "BreakableWall.generated.h"
 
 class UStaticMeshComponent;
@@ -41,7 +41,7 @@ class UMaterialInstanceDynamic;
  * 서버 권위 + 복제. 판정은 서버가 하고 연출은 각 머신이 각자 돌린다. (AVaultDoor 와 동일)
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API ABreakableWall : public AActor
+class HEAVYHANDED_API ABreakableWall : public AHazardBase
 {
 	GENERATED_BODY()
 

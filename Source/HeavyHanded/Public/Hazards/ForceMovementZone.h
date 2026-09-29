@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "ForceMovementZone.generated.h"
 
 class UStaticMeshComponent;
@@ -41,7 +41,7 @@ class ABaseCharacter;
  * 서버 권위 — 미는 판정은 서버에서만 한다. 결과(캐릭터 위치)는 이동 복제로 전파된다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API AForceMovementZone : public AActor
+class HEAVYHANDED_API AForceMovementZone : public AHazardBase
 {
 	GENERATED_BODY()
 

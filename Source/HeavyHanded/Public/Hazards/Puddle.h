@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Hazards/HazardBase.h"
 #include "Puddle.generated.h"
 
 class UStaticMeshComponent;
@@ -40,7 +40,7 @@ class ABaseCharacter;
  *   (SlowZone)이 전담한다 — AMovementTrap 과 같은 구조다.
  */
 UCLASS(Blueprintable)
-class HEAVYHANDED_API APuddle : public AActor
+class HEAVYHANDED_API APuddle : public AHazardBase
 {
 	GENERATED_BODY()
 

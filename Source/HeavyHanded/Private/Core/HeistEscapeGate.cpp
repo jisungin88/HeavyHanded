@@ -1,4 +1,4 @@
-#include "Core/HeistEscapeGate.h"
+﻿#include "Core/HeistEscapeGate.h"
 
 namespace HeistEscapeGate
 {
