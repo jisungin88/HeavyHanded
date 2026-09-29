@@ -12,8 +12,10 @@
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
+class AActor;
 class AGuardCharacter;
 class AGuardAIController;
+class UBlackboardComponent;
 class UCapsuleComponent;
 
 UCLASS( ClassGroup=(AI), meta=(BlueprintSpawnableComponent) )
@@ -30,19 +32,19 @@ public:
 	void Initialize(AGuardCharacter* InGuardCharacter, UAIPerceptionComponent* InPerceptionComp);
 
 
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Perception")
 	void OnTargetPerceptionUpdatedHearing
 	(AActor* Actor, struct FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp);
 
 	void SetHearingRange(float InHearingRange);
 
-	void SetHearingEnabled(bool isEnable);
+	void SetHearingEnabled(bool bEnabled);
 
 public:
-	UFUNCTION() // 타이머 만료 함수
+	UFUNCTION(Category = "Guard|Movement") // 타이머 만료 함수
 		void HandleWorldAlertSilenceTimeout();
 
-	UFUNCTION() // 디버그용
+	UFUNCTION(Category = "Guard|Debug") // 디버그용
 		void LogWorldAlertSilenceRemaining();
 
 	void StartWorldAlertSilenceTimer();
@@ -81,7 +83,7 @@ private:
 	bool bDrawHearingDebug = true;
 
 
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|Perception")
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 	// 디버그
@@ -96,13 +98,13 @@ public:
 
 private:
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<AGuardAIController> GuardAIController;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<AGuardCharacter> GuardCharacter;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };

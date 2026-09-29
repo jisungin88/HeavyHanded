@@ -3,7 +3,9 @@
 #include "AITypes.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/PathFollowingComponent.h"
-#include "AI/GuardTypes.h"
+
+
+
 
 UBTTask_MoveToInvestigate::UBTTask_MoveToInvestigate()
 {
@@ -44,7 +46,7 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 
 	default:
 		// 경로를 못 냈다 - NavMesh 밖이거나 도달 불가능한 지점.
-		UE_LOG(LogGuardAI, Warning, TEXT("[%s] 조사 지점 %s 로 경로를 내지 못했다 (NavMesh 밖?)."),
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 조사 지점 %s 로 경로를 내지 못했다 (NavMesh 밖?)."),
 			*GetNameSafe(AIController->GetPawn()), *InvestigateLocation.ToCompactString());
 		return EBTNodeResult::Failed;
 	}
@@ -61,12 +63,15 @@ void UBTTask_MoveToInvestigate::TickTask(UBehaviorTreeComponent& OwnerComp, uint
 		return;
 	}
 
-	// 도착이든 중단이든 이동이 끝나면 태스크를 마친다. 여기서 Succeeded 를 주더라도
-	// 조사를 계속할지 순찰로 돌아갈지는 브랜치의 Check Search Timeout 이 판정한다.
+	//-----------------------------------------------------
+	//0929 수정
+	// 도착이든 이동 중단이든 이동이 끝나면 조사 브랜치로 제어를 넘긴다.
+	// 조사 지속 여부와 순찰 복귀는 Check Search Timeout이 판정한다.
 	if (AIController->GetMoveStatus() == EPathFollowingStatus::Idle)
 	{
 		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 	}
+	//-----------------------------------------------------
 }
 
 EBTNodeResult::Type UBTTask_MoveToInvestigate::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)

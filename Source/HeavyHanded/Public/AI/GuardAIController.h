@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
+#include "AITypes.h"                  // FAIStimulus — UFUNCTION 값 인자
 #include "AI/GuardTypes.h"
 #include "GameplayTagContainer.h"        // FGameplayTag — 델리게이트 시그니처라 전방 선언 불가
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — 같은 이유
@@ -10,7 +11,6 @@
 
 class UBehaviorTree;
 class UAIPerceptionComponent;
-class UPerceptionMeterComponent; //삭제
 
 class AActor;
 class AGameStateBase;
@@ -51,7 +51,7 @@ public:
 
 protected:
 
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|AI")
 	TObjectPtr<AGuardCharacter> PossessGuardPawn; // 빙의할 가드 Pawn
 
 	// GuardType 에 맞는 DT_GuardStats 행을 찾아 이동/지각/순찰/조사 수치를 일괄 적용한다.
@@ -77,7 +77,7 @@ public:
 	// ========================================================
 
 private:
-	UPROPERTY(EditAnywhere) // 테스트용
+	UPROPERTY(EditAnywhere, Category = "Guard|AI") // 테스트용
 	//UPROPERTY()
 	EGuardAIState AIState = EGuardAIState::Patrol;
 
@@ -92,13 +92,13 @@ public:
 	// ========================================================
 
 public: // BTT에서 사용하므로
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Components")
 	TObjectPtr<class UGuardPatrolAComponent> GuardPatrolComp;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Components")
 	TObjectPtr<class UGuardSightAComponent> GuardSightComp;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Components")
 	TObjectPtr<class UGuardHearingAComponent> GuardHearingComp;
 
 
@@ -119,13 +119,13 @@ protected:
 
 	// UPerceptionMeterComponent::OnPerceptionFull 콜백. 인지 게이지가 100%에 도달하면
 	// 마지막 소음 지점으로 조사를 시작하도록 Blackboard를 갱신하고 게이지를 리셋한다.
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Perception")
 	void HandlePerceptionFull(FVector LastNoiseLocation);
 
 public:
 
 	// AI Perception(Sight+Hearing) 콜백. TargetActor / CanSeeTarget / SoundTargetActor 갱신.
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Perception")
 	void OnTargetPerceptionUpdated(AActor* Actor, struct FAIStimulus Stimulus);
 
 	// 시야로 플레이어를 새로 포착한 순간(false->true 전환)에만 발화. 연출용(효과음 등).
@@ -164,7 +164,7 @@ public:
 
 	// 현재 월드 경계도에 따라 경비의 이동 속도를 갱신한다.
 	// 임계값을 넘으면 경계 속도를 적용하고, 다시 내려가면 기본 속도로 복구한다.
-	UFUNCTION() // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
+	UFUNCTION(Category = "Guard|Movement") // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
 	void UpdateMoveSpeedByWorldAlert(float NewGauge01);		// 2
 
 
@@ -175,10 +175,10 @@ public:
 	void SetWorldAlertSpeedUp(bool bInSpeedUp) { WorldAlertSet.bWorldAlertSpeedUp = bInSpeedUp; }
 	
 	float GetNormalMoveSpeed() const { return WorldAlertSet.NormalMoveSpeed; }    // 4
-	void SetNormalMoveSpeed(float normalSpeed) { WorldAlertSet.NormalMoveSpeed = normalSpeed; }  // 5
+	void SetNormalMoveSpeed(float NormalSpeed) { WorldAlertSet.NormalMoveSpeed = NormalSpeed; }  // 5
 
 	float GetChaseMoveSpeed() const { return WorldAlertSet.ChaseMoveSpeed; }
-	void SetChaseMoveSpeed(float chaseSpeed) { WorldAlertSet.ChaseMoveSpeed = chaseSpeed; }
+	void SetChaseMoveSpeed(float ChaseSpeed) { WorldAlertSet.ChaseMoveSpeed = ChaseSpeed; }
 
 	bool IsChasing() const { return WorldAlertSet.bIsChasing; }
 	void SetChasing(bool bChasing);
@@ -214,7 +214,7 @@ protected:
 	//
 	// 서버에서만 의미가 있다 — AIController 는 애초에 서버에만 존재한다.
 	// 여기서 판정은 하지 않는다. 무엇이 끝인지는 코어 루프가 이미 정했고 여기서는 그 결과만 받는다.
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Match")
 	void HandleHeistPhaseChanged(FGameplayTag NewPhase, FGameplayTag OldPhase, EHeistPhaseReason Reason);
 
 
@@ -237,7 +237,7 @@ protected:
 
 	FDelegateHandle GameStateSetHandle;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Match")
 	TObjectPtr<AHeistGameState> BoundGameState;
 
 

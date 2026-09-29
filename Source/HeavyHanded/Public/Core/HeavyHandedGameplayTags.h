@@ -142,6 +142,9 @@ namespace HHTags
 	/** 공통 소모품 슬롯. GAB_Throw 가 클라이언트에서 서버로 올리는 이벤트 태그로 쓴다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Slot_Consumable);
 
+	/** 경비 변장 — 경비의 시야·청각 감지 대상에서 제외한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Mimic_GuardDisguise);
+
 	// ── 게임플레이 이벤트 (공용 / Config/Tags/Event.ini) ──
 
 	/** 경비견이 플레이어에 접촉했다는 사실. 3회 누적 판정은 플레이어 파트가 한다 */
