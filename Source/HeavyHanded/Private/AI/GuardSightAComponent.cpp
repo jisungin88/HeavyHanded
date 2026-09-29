@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "AI/GuardSightAComponent.h"
@@ -689,6 +689,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 }
 
 
+/*
+//작동시삭제0929
 void UGuardSightAComponent::DrawSightDebugMesh()
 {
 	
@@ -837,6 +839,642 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	if (SightDebugMaterial)
 	{
 		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
+	}
+}
+*/
+
+void UGuardSightAComponent::DrawSightDebugMesh()
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World) || !IsValid(SightDebugMesh) || !IsValid(GuardCapsule) || !IsValid(SightConfig) || !IsValid(GuardCharacter))
+	{
+		return;
+	}
+
+	constexpr float MeshUpdateInterval = 0.1f;
+	const float CurrentTime = World->GetTimeSeconds();
+	if (SightDebugMeshLastUpdateTime >= 0.0f && CurrentTime - SightDebugMeshLastUpdateTime < MeshUpdateInterval)
+	{
+		return;
+	}
+	SightDebugMeshLastUpdateTime = CurrentTime;
+
+	const float SightRadius = SightConfig->SightRadius;
+	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;
+	if (SightRadius <= 0.0f || HalfAngle <= 0.0f)
+	{
+		SightDebugMesh->ClearAllMeshSections();
+		return;
+	}
+
+	constexpr int32 ArcSegments = 96;
+	const int32 AngularPointCount = ArcSegments + 1;
+
+	const float CapsuleHalfHeight = GuardCapsule->GetScaledCapsuleHalfHeight();
+	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
+	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
+	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
+	const FVector UpDirection = FVector::UpVector;
+	constexpr float MinGroundNormalZ = 0.7f;
+	const FVector EyeLocation(
+		WorldOrigin.X,
+		WorldOrigin.Y,
+		GuardCharacter->GetRootComponent()->GetComponentLocation().Z + GuardCharacter->GetEyeHeight());
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
+
+	// 눈높이보다 낮은 길과 턱은 건너뛰고, 눈높이에 닿는 장애물만 찾는다.
+	TArray<float> VisibleDistances;
+	VisibleDistances.Reserve(AngularPointCount);
+
+	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+	{
+		const float Alpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
+		FCollisionQueryParams AngleParams = Params;
+		float VisibleDistance = SightRadius;
+
+		// 눈높이보다 낮은 장애물은 건너뛰고, 눈높이에 닿는 장애물에서만 자른다.
+		while (true)
+		{
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(
+				Hit, WorldOrigin, TraceEnd, ECC_Visibility, AngleParams);
+			if (!bBlocked)
+			{
+				break;
+			}
+
+			const float HitDistance = FMath::Clamp(
+				FVector::DotProduct(Hit.Location - WorldOrigin, WorldDirection), 0.0f, SightRadius);
+			UPrimitiveComponent* HitComponent = Hit.GetComponent();
+			if (!IsValid(HitComponent))
+			{
+				VisibleDistance = HitDistance;
+				break;
+			}
+
+			if (Hit.ImpactNormal.Z >= MinGroundNormalZ)
+			{
+				AngleParams.AddIgnoredComponent(HitComponent);
+				continue;
+			}
+
+			const FVector BoundsOrigin = HitComponent->Bounds.Origin;
+			const FVector BoundsExtent = HitComponent->Bounds.BoxExtent;
+			const float ObstacleTopZ = BoundsOrigin.Z + BoundsExtent.Z;
+
+			// 눈높이보다 낮은 길과 턱은 부채꼴을 자르지 않는다.
+			// 눈높이에 닿는 벽과 건물부터 시야 외곽을 자른다.
+			const bool bBlocksSightFan = ObstacleTopZ >= EyeLocation.Z;
+
+			if (bBlocksSightFan)
+			{
+				VisibleDistance = HitDistance;
+				if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+				{
+					VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
+				}
+				break;
+			}
+
+			AngleParams.AddIgnoredComponent(HitComponent);
+		}
+
+		VisibleDistances.Add(VisibleDistance);
+	}
+
+	/*
+	//작동시삭제0929
+	// 중심, 중간, 바깥쪽 정점을 지면에 투영해 낮은 길 위에서도 메시가 묻히지 않게 한다.
+	constexpr int32 RadialSegments = 2;
+	constexpr float GroundTraceUp = 1000.0f;
+	constexpr float GroundTraceDown = 5000.0f;
+	constexpr float GroundSurfaceOffset = 2.0f;
+	const FVector FlatMeshOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 10.0f);
+	const FVector FlatMeshOriginWorld = MeshTransform.TransformPosition(FlatMeshOrigin);
+
+	TArray<FVector> SurfaceVertices;
+	TArray<int32> SurfaceTriangles;
+	TArray<FVector> SurfaceNormals;
+	TArray<FVector2D> SurfaceUV0;
+	TArray<FLinearColor> SurfaceVertexColors;
+	TArray<FProcMeshTangent> SurfaceTangents;
+	const int32 SurfaceVertexCount = 1 + RadialSegments * AngularPointCount;
+	SurfaceVertices.Reserve(SurfaceVertexCount);
+	SurfaceTriangles.Reserve(ArcSegments * RadialSegments * 6);
+	SurfaceNormals.Reserve(SurfaceVertexCount);
+	SurfaceUV0.Reserve(SurfaceVertexCount);
+	SurfaceVertexColors.Reserve(SurfaceVertexCount);
+
+	auto AddSurfaceVertex = [&](const FVector& SampleWorldPoint, const FVector2D& UV)
+	{
+		const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
+		const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
+		FHitResult GroundHit;
+		const bool bGroundTraceHit = World->LineTraceSingleByChannel(
+			GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
+		const AActor* GroundActor = GroundHit.GetActor();
+		const bool bUseGroundPoint = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+			(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
+
+		const FVector VertexWorldPoint = bUseGroundPoint
+			? GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset
+			: FVector(SampleWorldPoint.X, SampleWorldPoint.Y, FlatMeshOriginWorld.Z);
+		const FVector VertexWorldNormal = bUseGroundPoint ? GroundHit.ImpactNormal : UpDirection;
+		SurfaceVertices.Add(MeshTransform.InverseTransformPosition(VertexWorldPoint));
+		SurfaceNormals.Add(MeshTransform.InverseTransformVectorNoScale(VertexWorldNormal).GetSafeNormal());
+		SurfaceUV0.Add(UV);
+		SurfaceVertexColors.Add(FLinearColor::White);
+	};
+
+	AddSurfaceVertex(WorldOrigin, FVector2D::ZeroVector);
+	for (int32 RadialIndex = 1; RadialIndex <= RadialSegments; ++RadialIndex)
+	{
+		const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(RadialSegments);
+		for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+		{
+			const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+			const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+			const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+			const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+			const float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
+			const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
+			AddSurfaceVertex(SampleWorldPoint, FVector2D(RadialAlpha, AngleAlpha));
+		}
+	}
+
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		const int32 CurrentIndex = 1 + AngleIndex;
+		const int32 NextIndex = CurrentIndex + 1;
+		SurfaceTriangles.Add(0);
+		SurfaceTriangles.Add(NextIndex);
+		SurfaceTriangles.Add(CurrentIndex);
+	}
+
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		const int32 InnerCurrent = 1 + AngleIndex;
+		const int32 InnerNext = InnerCurrent + 1;
+		const int32 OuterCurrent = 1 + AngularPointCount + AngleIndex;
+		const int32 OuterNext = OuterCurrent + 1;
+		SurfaceTriangles.Add(OuterNext);
+		SurfaceTriangles.Add(OuterCurrent);
+		SurfaceTriangles.Add(InnerCurrent);
+		SurfaceTriangles.Add(OuterNext);
+		SurfaceTriangles.Add(InnerCurrent);
+		SurfaceTriangles.Add(InnerNext);
+	}
+	*/
+
+	// 평면 부채꼴은 발밑보다 조금 위에 두어 항상 깔끔한 형태를 유지한다.
+	constexpr float FlatMeshHeightOffset = 10.0f;
+	const FVector FlatMeshOrigin(0.0f, 0.0f, -CapsuleHalfHeight + FlatMeshHeightOffset);
+
+	TArray<FVector> FlatVertices;
+	TArray<int32> FlatTriangles;
+	TArray<FVector> FlatNormals;
+	TArray<FVector2D> FlatUV0;
+	TArray<FLinearColor> FlatVertexColors;
+	TArray<FProcMeshTangent> FlatTangents;
+	FlatVertices.Reserve(AngularPointCount + 1);
+	FlatTriangles.Reserve(ArcSegments * 3);
+	FlatNormals.Reserve(AngularPointCount + 1);
+	FlatUV0.Reserve(AngularPointCount + 1);
+	FlatVertexColors.Reserve(AngularPointCount + 1);
+
+	FlatVertices.Add(FlatMeshOrigin);
+	FlatNormals.Add(FVector::UpVector);
+	FlatUV0.Add(FVector2D::ZeroVector);
+	FlatVertexColors.Add(FLinearColor::White);
+
+	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+	{
+		const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+		FlatVertices.Add(FlatMeshOrigin + LocalDirection * VisibleDistances[AngleIndex]);
+		FlatNormals.Add(FVector::UpVector);
+		FlatUV0.Add(FVector2D::ZeroVector);
+		FlatVertexColors.Add(FLinearColor::White);
+	}
+
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		FlatTriangles.Add(0);
+		FlatTriangles.Add(AngleIndex + 2);
+		FlatTriangles.Add(AngleIndex + 1);
+	}
+
+	// 낮은 길의 윗면은 평면 부채꼴과 별도 메시로 만든다.
+	// 서로 다른 높이의 바닥을 연결하지 않아 경사 삼각형이 생기지 않는다.
+	constexpr float GroundTraceUp = 1000.0f;
+	constexpr float GroundTraceDown = 5000.0f;
+	constexpr float GroundSurfaceOffset = 2.0f;
+	// 길 표면을 더 촘촘히 샘플링해 큰 삼각형 조각을 줄인다.
+	constexpr float GroundSampleSpacing = 100.0f;
+	// 같은 평면에 가까운 정점만 연결한다.
+	// 낮은 길의 경계는 끊기므로 바닥으로 내려가는 경사 삼각형이 생기지 않는다.
+	constexpr float FlatSurfaceNormalZ = 0.98f;
+	constexpr float MaxOverlayHeightDelta = 5.0f;
+	const int32 GroundRadialSegments = FMath::Clamp(FMath::CeilToInt(SightRadius / GroundSampleSpacing), 4, 24);
+	const FVector FlatMeshOriginWorld = MeshTransform.TransformPosition(FlatMeshOrigin);
+
+	TArray<FVector> GroundVertices;
+	TArray<int32> GroundTriangles;
+	TArray<FVector> GroundNormals;
+	TArray<FVector2D> GroundUV0;
+	TArray<FLinearColor> GroundVertexColors;
+	TArray<FProcMeshTangent> GroundTangents;
+	struct FGroundOverlaySample
+	{
+		FVector SampleWorldPoint = FVector::ZeroVector;
+		FVector SurfaceWorldPoint = FVector::ZeroVector;
+		FVector SurfaceWorldNormal = FVector::UpVector;
+		float SurfaceHeight = 0.0f;
+		bool bIsValid = false;
+	};
+
+	TArray<FGroundOverlaySample> GroundOverlaySamples;
+	const int32 GroundVertexCount = (GroundRadialSegments + 1) * AngularPointCount;
+	GroundOverlaySamples.Reserve(GroundVertexCount);
+	const int32 GroundCellCount = GroundRadialSegments * ArcSegments;
+	GroundVertices.Reserve(GroundCellCount * 8);
+	GroundNormals.Reserve(GroundCellCount * 8);
+	GroundUV0.Reserve(GroundCellCount * 8);
+	GroundVertexColors.Reserve(GroundCellCount * 8);
+	GroundTriangles.Reserve(GroundCellCount * 12);
+
+	auto QueryGroundOverlaySample = [&](const FVector& SampleWorldPoint)
+	{
+		FGroundOverlaySample Sample;
+		Sample.SampleWorldPoint = SampleWorldPoint;
+		const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
+		const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
+		FHitResult GroundHit;
+		const bool bGroundTraceHit = World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
+		const AActor* GroundActor = GroundHit.GetActor();
+		const bool bIsWalkableGround = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+			(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
+		const bool bIsFlatSurface = bIsWalkableGround && GroundHit.ImpactNormal.Z >= FlatSurfaceNormalZ;
+		const bool bIsAboveFlatMesh = bIsWalkableGround &&
+			GroundHit.ImpactPoint.Z > FlatMeshOriginWorld.Z + GroundSurfaceOffset;
+		const bool bIsBelowEyeHeight = bIsWalkableGround && GroundHit.ImpactPoint.Z < EyeLocation.Z;
+		Sample.bIsValid = bIsFlatSurface && bIsAboveFlatMesh && bIsBelowEyeHeight;
+		if (Sample.bIsValid)
+		{
+			Sample.SurfaceWorldPoint = GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
+			Sample.SurfaceWorldNormal = GroundHit.ImpactNormal;
+			Sample.SurfaceHeight = GroundHit.ImpactPoint.Z;
+		}
+		return Sample;
+	};
+
+	for (int32 RadialIndex = 0; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+	{
+		const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(GroundRadialSegments);
+		for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+		{
+			const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+			const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+			const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+			const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+			const float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
+			const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
+			GroundOverlaySamples.Add(QueryGroundOverlaySample(SampleWorldPoint));
+		}
+	}
+
+	// 삼각형 단위로 유효한 지면 경계를 찾아 잘라낸다.
+	TArray<FGroundOverlaySample> ClippedTriangle;
+	ClippedTriangle.Reserve(4);
+	auto AddClippedGroundTriangle = [&](int32 FirstIndex, int32 SecondIndex, int32 ThirdIndex)
+	{
+		const int32 TriangleIndices[] = { FirstIndex, SecondIndex, ThirdIndex };
+		ClippedTriangle.Reset();
+		for (int32 EdgeIndex = 0; EdgeIndex < UE_ARRAY_COUNT(TriangleIndices); ++EdgeIndex)
+		{
+			const FGroundOverlaySample& EdgeStart = GroundOverlaySamples[TriangleIndices[EdgeIndex]];
+			const FGroundOverlaySample& EdgeEnd = GroundOverlaySamples[
+				TriangleIndices[(EdgeIndex + 1) % UE_ARRAY_COUNT(TriangleIndices)]];
+
+			if (EdgeStart.bIsValid)
+			{
+				ClippedTriangle.Add(EdgeStart);
+			}
+
+			if (EdgeStart.bIsValid == EdgeEnd.bIsValid)
+			{
+				continue;
+			}
+
+			float ValidAlpha = EdgeStart.bIsValid ? 0.0f : 1.0f;
+			float InvalidAlpha = EdgeStart.bIsValid ? 1.0f : 0.0f;
+			FGroundOverlaySample BoundarySample = EdgeStart.bIsValid ? EdgeStart : EdgeEnd;
+			for (int32 SubdivisionIndex = 0; SubdivisionIndex < 8; ++SubdivisionIndex)
+			{
+				const float TestAlpha = (ValidAlpha + InvalidAlpha) * 0.5f;
+				const FVector TestWorldPoint = FMath::Lerp(
+					EdgeStart.SampleWorldPoint, EdgeEnd.SampleWorldPoint, TestAlpha);
+				const FGroundOverlaySample TestSample = QueryGroundOverlaySample(TestWorldPoint);
+				if (TestSample.bIsValid)
+				{
+					ValidAlpha = TestAlpha;
+					BoundarySample = TestSample;
+				}
+				else
+				{
+					InvalidAlpha = TestAlpha;
+				}
+			}
+			ClippedTriangle.Add(BoundarySample);
+		}
+
+		if (ClippedTriangle.Num() < 3)
+		{
+			return;
+		}
+
+		float MinHeight = ClippedTriangle[0].SurfaceHeight;
+		float MaxHeight = MinHeight;
+		for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+		{
+			MinHeight = FMath::Min(MinHeight, TriangleSample.SurfaceHeight);
+			MaxHeight = FMath::Max(MaxHeight, TriangleSample.SurfaceHeight);
+		}
+		if (MaxHeight - MinHeight > MaxOverlayHeightDelta)
+		{
+			return;
+		}
+
+		const int32 TriangleVertexStart = GroundVertices.Num();
+		for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+		{
+			GroundVertices.Add(MeshTransform.InverseTransformPosition(TriangleSample.SurfaceWorldPoint));
+			GroundNormals.Add(MeshTransform.InverseTransformVectorNoScale(TriangleSample.SurfaceWorldNormal).GetSafeNormal());
+			GroundUV0.Add(FVector2D::ZeroVector);
+			GroundVertexColors.Add(FLinearColor::White);
+		}
+
+		for (int32 TriangleIndex = 1; TriangleIndex < ClippedTriangle.Num() - 1; ++TriangleIndex)
+		{
+			GroundTriangles.Add(TriangleVertexStart);
+			GroundTriangles.Add(TriangleVertexStart + TriangleIndex);
+			GroundTriangles.Add(TriangleVertexStart + TriangleIndex + 1);
+		}
+	};
+
+	for (int32 RadialIndex = 1; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+	{
+		const int32 InnerBase = (RadialIndex - 1) * AngularPointCount;
+		const int32 OuterBase = RadialIndex * AngularPointCount;
+		for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+		{
+			const int32 InnerCurrent = InnerBase + AngleIndex;
+			const int32 InnerNext = InnerCurrent + 1;
+			const int32 OuterCurrent = OuterBase + AngleIndex;
+			const int32 OuterNext = OuterCurrent + 1;
+			AddClippedGroundTriangle(InnerCurrent, InnerNext, OuterNext);
+			AddClippedGroundTriangle(OuterNext, OuterCurrent, InnerCurrent);
+		}
+	}
+
+	const bool bHasGroundOverlay = GroundTriangles.Num() > 0;
+
+	/*
+	//작동시삭제0929
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> VertexColors;
+	TArray<FProcMeshTangent> Tangents;
+	TArray<uint8> bGroundVertexValid;
+	TArray<float> GroundHeights;
+
+	const int32 GroundVertexCount = 1 + RadialSegments * AngularPointCount;
+	Vertices.Reserve(GroundVertexCount);
+	Normals.Reserve(GroundVertexCount);
+	UV0.Reserve(GroundVertexCount);
+	VertexColors.Reserve(GroundVertexCount);
+	bGroundVertexValid.Reserve(GroundVertexCount);
+	GroundHeights.Reserve(GroundVertexCount);
+	Triangles.Reserve(ArcSegments * RadialSegments * 6);
+
+	// 지면을 못 찾은 정점은 삼각형 생성에서 제외한다.
+	auto AddGroundVertex = [&](const FVector& SampleWorldPoint, const FVector2D& UV)
+	{
+		const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
+		const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
+		FHitResult GroundHit;
+		const bool bGroundTraceHit = World->LineTraceSingleByChannel(
+			GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
+		const AActor* GroundActor = GroundHit.GetActor();
+		const bool bHeightWithinRange = bGroundTraceHit &&
+			FMath::Abs(GroundHit.ImpactPoint.Z - GroundReferenceZ) <= MaxGroundHeightOffset;
+		const bool bHasGround = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+			bHeightWithinRange &&
+			(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
+
+		if (bHasGround)
+		{
+			const FVector GroundPoint = GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
+			Vertices.Add(MeshTransform.InverseTransformPosition(GroundPoint));
+			Normals.Add(MeshTransform.InverseTransformVectorNoScale(GroundHit.ImpactNormal).GetSafeNormal());
+			bGroundVertexValid.Add(1);
+			GroundHeights.Add(GroundHit.ImpactPoint.Z);
+		}
+		else
+		{
+			Vertices.Add(MeshTransform.InverseTransformPosition(SampleWorldPoint));
+			Normals.Add(FVector::UpVector);
+			bGroundVertexValid.Add(0);
+			GroundHeights.Add(SampleWorldPoint.Z);
+		}
+
+		UV0.Add(UV);
+		VertexColors.Add(FLinearColor::White);
+	};
+
+	FHitResult CenterGroundHit;
+	const bool bCenterGroundTraceHit = World->LineTraceSingleByChannel(
+		CenterGroundHit,
+		WorldOrigin + UpDirection * GroundTraceUp,
+		WorldOrigin - UpDirection * GroundTraceDown,
+		ECC_Visibility,
+		Params);
+	const AActor* CenterGroundActor = CenterGroundHit.GetActor();
+	const bool bCenterHeightWithinRange = bCenterGroundTraceHit &&
+		FMath::Abs(CenterGroundHit.ImpactPoint.Z - GroundReferenceZ) <= MaxGroundHeightOffset;
+	const bool bHasCenterGround = bCenterGroundTraceHit && CenterGroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+		bCenterHeightWithinRange &&
+		(!IsValid(CenterGroundActor) || !CenterGroundActor->IsA<ACharacter>());
+
+	if (!bHasCenterGround)
+	{
+		SightDebugMesh->ClearAllMeshSections();
+		return;
+	}
+
+	const FVector CenterGroundPoint = CenterGroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
+	Vertices.Add(MeshTransform.InverseTransformPosition(CenterGroundPoint));
+	Normals.Add(MeshTransform.InverseTransformVectorNoScale(CenterGroundHit.ImpactNormal).GetSafeNormal());
+	UV0.Add(FVector2D::ZeroVector);
+	VertexColors.Add(FLinearColor::White);
+	bGroundVertexValid.Add(1);
+	GroundHeights.Add(CenterGroundHit.ImpactPoint.Z);
+
+	// 발밑에서 살짝 띄워 보여줄 평면 부채꼴 메시를 준비한다.
+	TArray<FVector> FlatVertices;
+	TArray<int32> FlatTriangles;
+	TArray<FVector> FlatNormals;
+	TArray<FVector2D> FlatUV0;
+	TArray<FLinearColor> FlatVertexColors;
+	TArray<FProcMeshTangent> FlatTangents;
+	const FVector FlatMeshOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 5.0f);
+	FlatVertices.Reserve(AngularPointCount + 1);
+	FlatTriangles.Reserve(ArcSegments * 3);
+	FlatNormals.Reserve(AngularPointCount + 1);
+	FlatUV0.Reserve(AngularPointCount + 1);
+	FlatVertexColors.Reserve(AngularPointCount + 1);
+	FlatVertices.Add(FlatMeshOrigin);
+	FlatNormals.Add(FVector::UpVector);
+	FlatUV0.Add(FVector2D::ZeroVector);
+	FlatVertexColors.Add(FLinearColor::White);
+
+	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+	{
+		const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+		FlatVertices.Add(FlatMeshOrigin + LocalDirection * VisibleDistances[AngleIndex]);
+		FlatNormals.Add(FVector::UpVector);
+		FlatUV0.Add(FVector2D::ZeroVector);
+		FlatVertexColors.Add(FLinearColor::White);
+	}
+
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		FlatTriangles.Add(0);
+		FlatTriangles.Add(AngleIndex + 2);
+		FlatTriangles.Add(AngleIndex + 1);
+	}
+
+	// 각도별 시야 거리 안쪽을 여러 반경으로 나누고, 각 지점을 지면에 투영한다.
+	for (int32 RadialIndex = 1; RadialIndex <= RadialSegments; ++RadialIndex)
+	{
+		const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(RadialSegments);
+
+		for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+		{
+			const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+			const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+			const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+			const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+			float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
+			if (bBlockedByObstacle[AngleIndex] && RadialIndex == RadialSegments)
+			{
+				Distance = FMath::Max(0.0f, Distance - WallEdgeInset);
+			}
+
+			const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
+
+			AddGroundVertex(SampleWorldPoint, FVector2D(RadialAlpha, AngleAlpha));
+		}
+	}
+
+	// 중심과 첫 번째 지면 링을 연결한다.
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		const int32 CurrentIndex = 1 + AngleIndex;
+		const int32 NextIndex = CurrentIndex + 1;
+		const float MinHeight = FMath::Min3(
+			GroundHeights[0], GroundHeights[CurrentIndex], GroundHeights[NextIndex]);
+		const float MaxHeight = FMath::Max3(
+			GroundHeights[0], GroundHeights[CurrentIndex], GroundHeights[NextIndex]);
+		if (bGroundVertexValid[0] && bGroundVertexValid[CurrentIndex] && bGroundVertexValid[NextIndex] &&
+			MaxHeight - MinHeight <= MaxTriangleHeightDelta)
+		{
+			Triangles.Add(0);
+			Triangles.Add(NextIndex);
+			Triangles.Add(CurrentIndex);
+		}
+	}
+
+	// 인접한 지면 링 사이를 사각형 두 개의 삼각형으로 연결한다.
+	for (int32 RadialIndex = 2; RadialIndex <= RadialSegments; ++RadialIndex)
+	{
+		const int32 InnerBase = 1 + (RadialIndex - 2) * AngularPointCount;
+		const int32 OuterBase = 1 + (RadialIndex - 1) * AngularPointCount;
+
+		for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+		{
+			const int32 InnerCurrent = InnerBase + AngleIndex;
+			const int32 InnerNext = InnerCurrent + 1;
+			const int32 OuterCurrent = OuterBase + AngleIndex;
+			const int32 OuterNext = OuterCurrent + 1;
+			const float MinHeight = FMath::Min(
+				FMath::Min(GroundHeights[InnerCurrent], GroundHeights[InnerNext]),
+				FMath::Min(GroundHeights[OuterCurrent], GroundHeights[OuterNext]));
+			const float MaxHeight = FMath::Max(
+				FMath::Max(GroundHeights[InnerCurrent], GroundHeights[InnerNext]),
+				FMath::Max(GroundHeights[OuterCurrent], GroundHeights[OuterNext]));
+
+			if (bGroundVertexValid[InnerCurrent] && bGroundVertexValid[InnerNext] &&
+				bGroundVertexValid[OuterCurrent] && bGroundVertexValid[OuterNext] &&
+				MaxHeight - MinHeight <= MaxTriangleHeightDelta)
+			{
+				Triangles.Add(OuterNext);
+				Triangles.Add(OuterCurrent);
+				Triangles.Add(InnerCurrent);
+				Triangles.Add(OuterNext);
+				Triangles.Add(InnerCurrent);
+				Triangles.Add(InnerNext);
+			}
+		}
+	}
+
+	*/
+
+	SightDebugMesh->ClearAllMeshSections();
+	SightDebugMesh->CreateMeshSection_LinearColor(
+		0,
+		FlatVertices,
+		FlatTriangles,
+		FlatNormals,
+		FlatUV0,
+		FlatVertexColors,
+		FlatTangents,
+		false);
+
+	if (bHasGroundOverlay)
+	{
+		SightDebugMesh->CreateMeshSection_LinearColor(
+			1,
+			GroundVertices,
+			GroundTriangles,
+			GroundNormals,
+			GroundUV0,
+			GroundVertexColors,
+			GroundTangents,
+			false);
+	}
+
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	if (SightDebugMaterial)
+	{
+		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
+		if (bHasGroundOverlay)
+		{
+			SightDebugMesh->SetMaterial(1, SightDebugMaterial);
+		}
 	}
 }
 

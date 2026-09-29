@@ -114,6 +114,9 @@ private:
 	// 음수는 "현재 상실 상태가 아님".
 	float SightLostAtTime = -1.f;
 
+	// 시야 디버그 메시 재생성 간격 제어용.
+	float SightDebugMeshLastUpdateTime = -1.0f;
+
 	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
