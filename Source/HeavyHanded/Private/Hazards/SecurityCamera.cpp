@@ -351,14 +351,13 @@ void ASecurityCamera::CallNearbyGuard()
 		return;
 	}
 
-	// TODO: AGuardAIController::RequestInvestigate() 로 실제 조사를 지시하는 부분은
-	// 잠시 되돌려 뒀다 — 이지은이 GuardAIController.h/.cpp 를 작업 중이라 충돌을 피하려는
-	// 것뿐, 이 클래스 쪽 설계(3초 지속 감지 → 가장 가까운 순찰 중 경비 탐색)는 그대로다.
-	// 작업이 끝나면 여기서 GuardController->RequestInvestigate(LastDetectedLocation) 를
-	// 다시 추가할 것.
-	UE_LOG(LogHazard, Log,
-		TEXT("[SecurityCamera:%s] %.0f초 연속 감지 — %s 를 호출할 예정이었다(경비 호출 연동 대기 중)"),
-		*GetName(), GuardCallDelay, *NearestGuard->GetName());
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(NearestGuard->GetController()))
+	{
+		GuardController->RequestInvestigate(LastDetectedLocation);
+
+		UE_LOG(LogHazard, Log, TEXT("[SecurityCamera:%s] %.0f초 연속 감지 — %s 를 호출한다"),
+			*GetName(), GuardCallDelay, *NearestGuard->GetName());
+	}
 }
 
 void ASecurityCamera::OnRep_bAlarmed()

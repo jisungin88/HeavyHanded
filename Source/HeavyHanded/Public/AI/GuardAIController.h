@@ -51,7 +51,7 @@ public:
 
 protected:
 
-	UPROPERTY(Category = "Guard|AI")
+	UPROPERTY()
 	TObjectPtr<AGuardCharacter> PossessGuardPawn; // 빙의할 가드 Pawn
 
 	// GuardType 에 맞는 DT_GuardStats 행을 찾아 이동/지각/순찰/조사 수치를 일괄 적용한다.
@@ -118,14 +118,22 @@ protected:
 
 
 	// UPerceptionMeterComponent::OnPerceptionFull 콜백. 인지 게이지가 100%에 도달하면
-	// 마지막 소음 지점으로 조사를 시작하도록 Blackboard를 갱신하고 게이지를 리셋한다.
-	UFUNCTION(Category = "Guard|Perception")
+	// RequestInvestigate() 로 조사를 시작시키고, 이 경로에서만 의미 있는 게이지 리셋을 마저 한다.
+	UFUNCTION()
 	void HandlePerceptionFull(FVector LastNoiseLocation);
 
 public:
 
+	// 소음(청각 게이지)이 아닌 다른 경로(카메라 등 Hazard)에서도 "여기를 조사하라" 고
+	// 지시할 수 있는 공개 진입점. HandlePerceptionFull 의 Blackboard 갱신 부분과 동일한
+	// 처리를 공유한다 — 조사 시작이라는 결과는 감지 수단이 무엇이든 같아야 하기 때문이다.
+	UFUNCTION(BlueprintCallable, Category = "Guard|Perception")
+	void RequestInvestigate(FVector Location);
+
+
+
 	// AI Perception(Sight+Hearing) 콜백. TargetActor / CanSeeTarget / SoundTargetActor 갱신.
-	UFUNCTION(Category = "Guard|Perception")
+	UFUNCTION()
 	void OnTargetPerceptionUpdated(AActor* Actor, struct FAIStimulus Stimulus);
 
 	// 시야로 플레이어를 새로 포착한 순간(false->true 전환)에만 발화. 연출용(효과음 등).
@@ -164,7 +172,7 @@ public:
 
 	// 현재 월드 경계도에 따라 경비의 이동 속도를 갱신한다.
 	// 임계값을 넘으면 경계 속도를 적용하고, 다시 내려가면 기본 속도로 복구한다.
-	UFUNCTION(Category = "Guard|Movement") // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
+	UFUNCTION() // AddDynamic을 쓰려면 UpdateMoveSpeedByWorldAlert()에 UFUNCTION()이 필요
 	void UpdateMoveSpeedByWorldAlert(float NewGauge01);		// 2
 
 
@@ -214,7 +222,7 @@ protected:
 	//
 	// 서버에서만 의미가 있다 — AIController 는 애초에 서버에만 존재한다.
 	// 여기서 판정은 하지 않는다. 무엇이 끝인지는 코어 루프가 이미 정했고 여기서는 그 결과만 받는다.
-	UFUNCTION(Category = "Guard|Match")
+	UFUNCTION()
 	void HandleHeistPhaseChanged(FGameplayTag NewPhase, FGameplayTag OldPhase, EHeistPhaseReason Reason);
 
 
@@ -237,7 +245,7 @@ protected:
 
 	FDelegateHandle GameStateSetHandle;
 
-	UPROPERTY(Transient, Category = "Guard|Match")
+	UPROPERTY(Transient)
 	TObjectPtr<AHeistGameState> BoundGameState;
 
 

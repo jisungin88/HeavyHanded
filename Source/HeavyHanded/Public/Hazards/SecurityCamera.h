@@ -203,12 +203,8 @@ private:
 
 	/**
 	 * GuardCallDelay 뒤 호출된다. 그때까지도 bAlarmed 가 유지 중이면(카메라 범위를 안
-	 * 벗어났으면) GuardCallRadius 안에서 가장 가까운 순찰 중인 경비를 찾는다.
-	 *
-	 * [TODO — 실제 호출부는 잠시 빠져 있다]
-	 *   경비를 찾아 로그까지만 남기고 실제로 조사를 지시하진 않는다. AGuardAIController 쪽에
-	 *   공개 진입점(RequestInvestigate 류)을 추가해야 하는데, 지금 그 파일을 이지은이
-	 *   작업 중이라 충돌을 피하려고 되돌려 뒀다 — 작업이 끝나면 다시 이어서 연결할 것.
+	 * 벗어났으면) GuardCallRadius 안에서 가장 가까운 순찰 중인 경비를 찾아
+	 * AGuardAIController::RequestInvestigate() 로 그 자리를 조사하게 한다.
 	 */
 	void CallNearbyGuard();
 
