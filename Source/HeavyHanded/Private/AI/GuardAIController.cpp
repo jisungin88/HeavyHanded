@@ -415,6 +415,7 @@ void AGuardAIController::ApplyGuardStats()// APawn* InPawn)
 
 	// DataTable에서 설정한 이동 속도를 기본 속도로 저장한다.
 	SetNormalMoveSpeed(Row->MoveSpeed);
+	SetChaseMoveSpeed(Row->MoveSpeedChase);
 	PossessGuardPawn->SetGuardMoveSpeed(GetNormalMoveSpeed());
 
 
@@ -500,6 +501,14 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 	switch (State)
 	{
 	case EGuardAIState::Patrol:
+
+		if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
+		{
+			// 정찰 상태로 진입했으므로 이전 추격 대상을 해제한다.
+			// 수색 중에는 기존 TargetActor를 유지하고, 실제 Patrol 복귀 시에만 초기화한다.
+			BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+		}
+
 		GuardPatrolComp->SelectNextPatrolPoint2();
 		return true;
 
@@ -514,6 +523,42 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 	return false;
 }
 
+
+void AGuardAIController::ApplyCurrentMoveSpeed()
+{
+	// 현재 경비의 이동 상태를 기준으로 최종 이동 속도를 계산하고 적용한다.
+	// 월드 경계도에 의해 속도가 증가된 상태라면 WorldAlertMoveSpeedMultiplier를 추가로 적용한다.
+	// 추격 상태와 월드 경계도 상태가 변경될 때만 호출한다.
+
+	AGuardCharacter* GuardCharacter = GetPossessGuardPawn();
+	if (!IsValid(GuardCharacter))
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* MovementComp = GuardCharacter->GetCharacterMovement();
+	if (!IsValid(MovementComp))
+	{
+		return;
+	}
+
+	// 추격 중이면 추격 속도를 사용하고, 추격 중이 아니면 일반 이동 속도를 사용한다.
+	float NewMoveSpeed = WorldAlertSet.bIsChasing ? WorldAlertSet.ChaseMoveSpeed : WorldAlertSet.NormalMoveSpeed;
+
+	// 월드 경계도에 의해 속도가 증가된 상태라면 현재 선택된 이동 속도에 경계도 배율을 적용한다.
+	if (WorldAlertSet.bWorldAlertSpeedUp)
+	{
+		NewMoveSpeed *= WorldAlertSet.WorldAlertMoveSpeedMultiplier;
+	}
+
+	// 계산된 최종 이동 속도를 경비의 CharacterMovement에 적용한다.
+	MovementComp->MaxWalkSpeed = NewMoveSpeed;
+
+	// 현재 적용된 이동 속도와 추격 및 월드 경계도 가속 상태를 확인할 수 있도록 로그를 출력한다.
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] 이동속도 갱신: %.1f (Chasing=%d WorldAlertSpeedUp=%d)"),
+		*GetNameSafe(GuardCharacter), NewMoveSpeed, WorldAlertSet.bIsChasing, WorldAlertSet.bWorldAlertSpeedUp);
+
+}
 
 float AGuardAIController::GetWorldAlertLevel() const
 {
@@ -548,17 +593,24 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 	{
 		WorldAlertSet.bWorldAlertSpeedTriggered = false;
 
+		// 현재 속도 증가 상태가 아니라면 더 처리할 필요가 없다.
 		if (!IsWorldAlertSpeedUp())
 		{
 			return;
 		}
 
+		// 월드 경계도에 의한 속도 증가 상태를 해제한다.
 		SetWorldAlertSpeedUp(false);
 
-
+		// 경계도 속도 증가를 위해 실행 중인 무소음 타이머를 정리한다.
 		GuardHearingComp->ClearWorldAlertSilenceTimer();
 
-		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = GetNormalMoveSpeed();
+		// 속도 변경 0928 / 작동시 삭제
+		//PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = GetNormalMoveSpeed();
+
+		// 추격 여부까지 고려한 최종 이동 속도를 다시 적용한다.
+		// 추격 중이었다면 MoveSpeedChase가 적용되고, 아니면 MoveSpeed가 적용된다.
+		ApplyCurrentMoveSpeed();
 
 		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 경계도 감소 - Pawn = %s | Alert = %.1f | Speed = %.1f"),
 			*PossessGuardPawn->GetName(), WorldAlertLevel, GetNormalMoveSpeed());
@@ -571,11 +623,16 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 		WorldAlertSet.bWorldAlertSpeedTriggered = true;
 		SetWorldAlertSpeedUp(true);
 
-		const float NewMoveSpeed = GetNormalMoveSpeed() * WorldAlertSet.WorldAlertMoveSpeedMultiplier;
-		PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
+		// 속도 변경 0928 / 작동시 삭제
+		//const float NewMoveSpeed = GetNormalMoveSpeed() * WorldAlertSet.WorldAlertMoveSpeedMultiplier;
+		//PossessGuardPawn->GetCharacterMovement()->MaxWalkSpeed = NewMoveSpeed;
 
-		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | Speed = %.1f | SilenceTimer = %.1f sec"),
-			*PossessGuardPawn->GetName(), WorldAlertLevel, NewMoveSpeed, GetWorldAlertSilenceDelay());
+		// 추격 여부와 월드 경계도 배율을 함께 고려한 최종 이동 속도를 적용한다.
+		ApplyCurrentMoveSpeed();
+
+		UE_LOG(LogTemp, Warning, TEXT("[GuardSpeed] 속도 증가 - Pawn = %s | Alert = %.1f | SilenceTimer = %.1f sec"),
+			*PossessGuardPawn->GetName(), WorldAlertLevel, GetWorldAlertSilenceDelay());
+
 	}
 	// 경계도가 올라올 때마다 무소음 타이머를 다시 시작한다.
 	if (IsWorldAlertSpeedUp())
@@ -586,6 +643,17 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 	WorldAlertSet.PreviousWorldAlertLevel = WorldAlertLevel;
 
+}
+
+void AGuardAIController::SetChasing(bool bChasing)
+{
+	if (WorldAlertSet.bIsChasing == bChasing)
+	{
+		return;
+	}
+
+	WorldAlertSet.bIsChasing = bChasing;
+	ApplyCurrentMoveSpeed();
 }
 
 

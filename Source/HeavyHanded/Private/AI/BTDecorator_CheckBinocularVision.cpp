@@ -32,6 +32,5 @@ bool UBTDecorator_CheckBinocularVision::CalculateRawConditionValue(UBehaviorTree
 		return false;
 	}
 
-	return IsValid(Target);
-	//return GuardSightComp->GetBinocularVisionRate(Target) > 0.f;
+	return GuardSightComp->IsWithinBinocularVisionAngle(Target);
 }

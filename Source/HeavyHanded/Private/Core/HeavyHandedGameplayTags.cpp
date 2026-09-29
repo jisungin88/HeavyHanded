@@ -38,6 +38,7 @@ namespace HHTags
 
 	UE_DEFINE_GAMEPLAY_TAG(Ability_HeavyCarryAssist, "Ability.HeavyCarryAssist");
 	UE_DEFINE_GAMEPLAY_TAG(Ability_Slot_Consumable,  "Ability.Slot.Consumable");
+	UE_DEFINE_GAMEPLAY_TAG(Ability_Mimic_GuardDisguise, "Ability.Mimic.GuardDisguise");
 
 	UE_DEFINE_GAMEPLAY_TAG(Event_Guard_Contacted,   "Event.Guard.Contacted");
 	UE_DEFINE_GAMEPLAY_TAG(Event_Player_Downed,     "Event.Player.Downed");

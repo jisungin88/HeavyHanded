@@ -68,7 +68,7 @@ private:
 	void HandleSpawnTimer();
 
 	// UAlertComponent::OnReinforcementTriggered 구독 콜백. 경비 1명을 즉시 추가 스폰한다.
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Spawner")
 	void HandleReinforcement(int32 ReinforcementIndex);
 
 	// 다음 경비에게 줄 순찰 패턴을 뽑는다. "가방 뽑기" 방식 - Loop/PingPong/Random 3개를

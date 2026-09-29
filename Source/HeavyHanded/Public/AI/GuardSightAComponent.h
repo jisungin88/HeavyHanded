@@ -13,6 +13,7 @@ class AGuardAIController;
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
+class UBlackboardComponent;
 
 class AActor;
 class AGuardCharacter;
@@ -54,7 +55,7 @@ protected:
 
 public:
 
-	UFUNCTION()
+	UFUNCTION(Category = "Guard|Perception")
 	void OnTargetPerceptionUpdatedSight
 			(AActor* Actor, struct FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp);
 
@@ -70,7 +71,7 @@ public:
 
 
 
-	void SetSightEnabled(bool isEnable);
+	void SetSightEnabled(bool bEnabled);
 
 	// 경비의 전체 시야 설정을 적용한다.
 	// 전체 수평 시야각은 AI Perception의 실제 시야 범위에 사용하고,
@@ -93,18 +94,18 @@ public:
 	void SetSightDebugEnabled(bool bInEnabled);
 
 private:
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|Perception")
 	float BinocularVisionAngleDegrees = 0.0f;
 
 	float VerticalVisionAngleDegrees = 0.0f;
 
 
 	// 양안 시야 안에서의 게이지 배율
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|Perception")
 	float BinocularVisionRate = 1.0f;
 
 	// 양안 시야 밖, 주변 시야에서의 게이지 배율
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|Perception")
 	float PeripheralVisionRate = 0.5f;
 
 
@@ -113,7 +114,7 @@ private:
 	// 음수는 "현재 상실 상태가 아님".
 	float SightLostAtTime = -1.f;
 
-	UPROPERTY()
+	UPROPERTY(Category = "Guard|Perception")
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
 
 
@@ -139,16 +140,16 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Debug")
 	TObjectPtr<UMaterialInterface> SightDebugMaterial;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<AGuardAIController> GuardAIController;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<AGuardCharacter> GuardCharacter;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Debug")
 	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Category = "Guard|Perception")
 	TObjectPtr<UCapsuleComponent> GuardCapsule;
 
 };
