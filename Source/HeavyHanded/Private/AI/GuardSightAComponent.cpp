@@ -11,6 +11,8 @@
 #include "AI/GuardBlackboardKeys.h"
 
 #include "AI/GuardTypes.h"
+#include "Core/HeavyHandedGameplayTags.h"
+#include "Shared/NetAuthority.h"
 
 
 #include "DrawDebugHelpers.h"
@@ -20,7 +22,6 @@
 #include "Components/CapsuleComponent.h"
 
 
-#include "GameplayTagContainer.h"
 #include "ProceduralMeshComponent.h"
 
 #include "AbilitySystemGlobals.h"
@@ -221,10 +222,10 @@ void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 }
 
 
-void UGuardSightAComponent::SetSightEnabled(bool isEnable)
+void UGuardSightAComponent::SetSightEnabled(bool bEnabled)
 {
 	//if (!PerceptionComp) return;
-	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), isEnable);
+	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), bEnabled);
 }
 
 
@@ -232,12 +233,14 @@ void UGuardSightAComponent::SetSightEnabled(bool isEnable)
 void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
-
-	const FGameplayTag GuardDisguiseTag = FGameplayTag::RequestGameplayTag(FName("Ability.Mimic.GuardDisguise"));
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
 
 	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
 
-	if (TargetASC && TargetASC->HasMatchingGameplayTag(GuardDisguiseTag))
+	if (TargetASC && TargetASC->HasMatchingGameplayTag(HHTags::Ability_Mimic_GuardDisguise))
 	{
 		return;
 	}
@@ -275,6 +278,12 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 		else
 		{
 			SightLostAtTime = NowSeconds;
+
+			// 추격 속도 설정
+			if (GuardAIController)
+			{
+				GuardAIController->SetChasing(false);
+			}
 
 			//UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 상실: %s"),
 			//	*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
@@ -314,6 +323,8 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 					// 필요한지 확인 한번 더하고 주석 풀 것
 					/// OnPlayerSpotted.Broadcast(Actor);
 				}
+
+
 
 				BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
 				BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);

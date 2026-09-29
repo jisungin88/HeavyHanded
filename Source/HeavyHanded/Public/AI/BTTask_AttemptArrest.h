@@ -24,7 +24,7 @@ public:
 
 	// 체포 판정을 완료하기까지 걸리는 시간.
 	UPROPERTY(EditAnywhere, Category = "Arrest", meta = (ClampMin = "0.0"))
-	float ArrestDuration = 2.0f;
+	float ArrestDuration = 3.0f;
 
 protected:
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
