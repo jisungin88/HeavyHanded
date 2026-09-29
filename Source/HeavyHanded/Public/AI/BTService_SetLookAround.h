@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AI/GuardTypes.h"
 #include "BehaviorTree/BTService.h"
 #include "BTService_SetLookAround.generated.h"
 
@@ -17,6 +18,10 @@ class HEAVYHANDED_API UBTService_SetLookAround : public UBTService
 public:
 
 	UBTService_SetLookAround();
+
+	// 이 서비스가 활성화된 Wait에서 재생할 두리번 애니메이션 종류.
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	EGuardLookAroundType LookAroundType = EGuardLookAroundType::None;
 
 protected:
 
