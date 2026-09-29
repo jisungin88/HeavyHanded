@@ -131,18 +131,24 @@ protected:
 	virtual void BeginPlay() override;
 
 	/**
-	 * 자리를 잡았다. 붙었거나 바닥에 닿았다. (모든 머신)
+	 * 자리를 잡았다. 붙었거나 바닥에 닿았다. **(서버 전용)**
 	 * 서브클래스가 여기서 '준비' 를 한다 — 폭탄이라면 퓨즈 소리를 낸다.
 	 */
 	virtual void OnDeployed(const FHitResult& Hit);
 
 	/**
-	 * 효과가 발동했다. (모든 머신)
-	 * 실제 효과는 **서버에서만** 적용할 것. 여기는 모든 머신에서 불린다.
+	 * 효과가 발동했다. **(서버 전용)**
+	 *
+	 * ⚠ 아래 세 훅은 Deploy / Activate / Finish 에서만 불리고 그 셋은 전부 서버 전용이다.
+	 * 클라이언트의 OnRep_State 는 ApplyStateEffects(연출)만 실행한다 —
+	 * 2026-09-11 까지 이 주석이 "(모든 머신)" 이라고 잘못 적혀 있었다.
+	 *
+	 * 그래서 **클라이언트에서 무언가를 해야 하는 장비는 자기 상태를 따로 복제해야 한다.**
+	 * ADrone 이 bFlightActive 를 복제해 조종사의 화면에서 시점을 가져가는 것이 그 예다.
 	 */
 	virtual void OnActivated();
 
-	/** 효과가 끝났다. (모든 머신) */
+	/** 효과가 끝났다. **(서버 전용 — OnActivated 주석을 볼 것)** */
 	virtual void OnSpent();
 
 	/** BP 확장점. C++ 가상 함수로 부족할 때만 쓴다 */
@@ -262,12 +268,9 @@ protected:
 	 *   (특대 지속 / +3%/초 / 전 구역) 이름이 '절단' 이라 지금 설계와 어긋난다.
 	 *   지성인 님께 태그를 요청해 두었고, 정해지면 BP 에서 지정한다.
 	 *
-	 * [Active 구간에는 아직 같은 슬롯이 없다]
-	 *   미끼는 발동한 뒤 20초 동안 시끄러워야 하므로(Noise.Equipment.Decoy) 이 훅으로는
-	 *   안 된다 — 여기는 Deployed 구간, 즉 '자리는 잡았지만 아직 발동 전' 이다.
-	 *   미끼를 만들 때 ActiveNoiseTag 를 대칭으로 붙인다. 지금 미리 파지 않는 것은
-	 *   그 20초를 EffectDuration 으로 둘지가 아직 안 정해져서, 추측으로 만든 슬롯이
-	 *   정작 그때 안 맞을 가능성이 높기 때문이다.
+	 * [Active 구간은 ActiveNoiseTag 가 맡는다]
+	 *   여기는 Deployed, 즉 '자리는 잡았지만 아직 발동 전' 이다.
+	 *   발동한 뒤에 나는 소리는 아래 ActiveNoiseTag 로 간다. (2026-09-08 미끼 작업에서 추가)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise")
 	FGameplayTag DeployNoiseTag;
@@ -281,6 +284,36 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise",
 		meta = (ClampMin = "0.05", Units = "s"))
 	float DeployNoiseInterval = 1.f;
+
+	/**
+	 * 발동한 뒤(Active) 주기적으로 발행할 소음 태그. DeployNoiseTag 와 대칭이다.
+	 *
+	 * 미끼가 이것으로 동작한다 — 20초(EffectDuration) 동안 Noise.Equipment.Decoy 를 계속 내면,
+	 * 소음이 UAISense_Hearing 을 거쳐 경비의 InvestigateLocation 이 되어 경비가 그리로 온다.
+	 * "이리 와라" 같은 AI 호출 경로는 만들지 않는다 — 소음 시스템을 우회하는 두 번째 길이 생긴다.
+	 *
+	 * 비워 두면 아무것도 발행하지 않는다. 점착 폭탄처럼 EffectDuration 이 0 인 장비는
+	 * Active 구간 자체가 한 프레임도 없으므로 지정해도 의미가 없다.
+	 *
+	 * [경계도 억제를 여기서 하지 않는다]
+	 *   "경비는 부르되 경계도는 덜 올린다" 를 AlertScale 로 넘기고 싶어지지만 그러면 안 된다.
+	 *   AlertScale 은 소음 파트의 스팸 필터가 계산해 넘기는 값이고(NoiseSpamFilter.cpp),
+	 *   같은 자리에서 반복되는 소음의 기여를 자동으로 깎는 것이 그쪽 일이다.
+	 *   미끼의 20초 반복이 정확히 그 상황이라 손대면 오히려 망가진다.
+	 *   경계도를 몇 % 올릴지는 DT_NoiseProfiles 의 AlertDelta 가 정한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise")
+	FGameplayTag ActiveNoiseTag;
+
+	/**
+	 * ActiveNoiseTag 를 몇 초마다 발행할지. 짧을수록 경비를 강하게 끈다.
+	 *
+	 * 미끼의 유인력을 조절하는 값이 이것이다. 너무 짧게 잡아도 소음 파트의 쿨다운
+	 * (FNoiseProfileRow::CooldownSeconds)에 걸려 그대로 나가지는 않고, 걸러지는 호출만 늘어난다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Noise",
+		meta = (ClampMin = "0.05", Units = "s"))
+	float ActiveNoiseInterval = 1.f;
 
 	// ---- 연출 (BP 는 에셋만 고른다) ----
 
@@ -332,6 +365,14 @@ protected:
 	/** 지금 상태를 바꾼다. 서버 전용이고, 값이 실제로 달라졌을 때만 일한다 */
 	void SetEquipmentState(EEquipmentState NewState);
 
+	/**
+	 * 효과를 예정보다 일찍 끝낸다. EffectDuration 타이머를 지우고 Spent 로 넘어간다. (서버 전용)
+	 *
+	 * 드론이 이걸 쓴다 — 준비 시간이 끝나면 남은 시간과 무관하게 조종을 끊어야 한다.
+	 * Active 가 아니면 아무 일도 하지 않는다.
+	 */
+	void FinishEffectEarly();
+
 private:
 	UFUNCTION()
 	void HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
@@ -350,6 +391,9 @@ private:
 
 	/** DeployNoiseTag 를 한 번 발행한다. Deployed 인 동안 타이머가 반복해서 부른다 (서버 전용) */
 	void EmitDeployNoise();
+
+	/** ActiveNoiseTag 를 한 번 발행한다. Active 인 동안 타이머가 반복해서 부른다 (서버 전용) */
+	void EmitActiveNoise();
 
 	/**
 	 * 퓨즈 경고음을 끈다.
@@ -403,6 +447,7 @@ private:
 	FTimerHandle EffectTimer;
 	FTimerHandle DestroyTimer;
 	FTimerHandle DeployNoiseTimer;
+	FTimerHandle ActiveNoiseTimer;
 
 	/** 사람 통과 구간의 타이머. 액터가 먼저 사라지면 타이머 매니저가 스스로 정리한다 */
 	FTimerHandle ReleaseIgnorePawnTimer;

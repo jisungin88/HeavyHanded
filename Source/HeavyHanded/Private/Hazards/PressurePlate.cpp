@@ -2,9 +2,11 @@
 
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
+#include "Components/AudioComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Hazards/HazardLog.h"
+#include "Kismet/GameplayStatics.h"
 #include "Loot/LootBase.h"
 
 APressurePlate::APressurePlate()
@@ -82,9 +84,14 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 
 	Multicast_PlayAlarmSound();
 
-	// 경보 다음에 놓친다 — 순서 자체에 필연적 이유는 없지만, 플레이어가 "경보가 울렸다"를
-	// 먼저 인지해야 무슨 일이 일어났는지 바로 이해한다
-	Target->SetHeldActor(nullptr);
+	// 경보 다음에 손상시킨다 — 순서 자체에 필연적 이유는 없지만, 플레이어가 "경보가
+	// 울렸다"를 먼저 인지해야 무슨 일이 일어났는지 바로 이해한다.
+	//
+	// ReportImpact 는 게이팅 없이 확정 충격 하나를 그대로 방송한다(헤더 주석 참고) —
+	// ULootDurabilityComponent(파손형)가 붙어 있으면 금이 가고, 없으면 조용히 아무 일도
+	// 안 일어난다. LootBase.h/.cpp 는 건드리지 않는다 — 이미 공개된 함수만 호출한다.
+	HeldLoot->ReportImpact(ELootImpactCause::Collision, LootDamageImpulse,
+		HeldLoot->GetActorLocation(), Target);
 
 	UE_LOG(LogHazard, Log, TEXT("[PressurePlate:%s] %s 가 $%d 짜리 %s 를 들고 지나감 — 경보"),
 		*GetName(), *Target->GetName(), HeldLoot->GetCurrentValue(), *GetNameSafe(HeldLoot));
@@ -92,5 +99,19 @@ void APressurePlate::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, 
 
 void APressurePlate::Multicast_PlayAlarmSound_Implementation()
 {
-	PlayHazardSound(AlarmSound);
+	// 데디케이티드 서버 가드 (PlayHazardSound 와 동일 사유)
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_DedicatedServer || !IsValid(AlarmSound))
+	{
+		return;
+	}
+
+	// 이전 재생이 아직 끝나기 전에 재발동하면 소리가 겹친다 — 밟고 나갔다가 금방
+	// 다시 밟는 경우가 실제로 있다(ASecurityCamera 에서 이미 마주친 문제와 동일).
+	// 이전 인스턴스를 먼저 멈추고 새로 재생해 항상 한 번만 들리게 한다.
+	if (IsValid(AlarmAudioComponent))
+	{
+		AlarmAudioComponent->Stop();
+	}
+	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation());
 }

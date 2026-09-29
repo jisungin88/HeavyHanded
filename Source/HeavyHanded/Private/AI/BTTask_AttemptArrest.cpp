@@ -10,6 +10,11 @@
 
 #include "AI/GuardAIController.h"
 #include "AI/GuardBlackboardKeys.h"
+#include "AI/GuardAnimInstance.h"
+
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+
 
 UBTTask_AttemptArrest::UBTTask_AttemptArrest()
 {
@@ -69,6 +74,16 @@ EBTNodeResult::Type UBTTask_AttemptArrest::ExecuteTask(UBehaviorTreeComponent& O
 	// 체포 판정이 끝날 때까지 경비의 이동을 중지한다.
 	GuardAIController->StopMovement();
 
+	//0928 추가
+	// 경비의 AnimInstance를 가져와 체포 애니메이션을 시작한다.
+	if (ACharacter* GuardCharacter = Cast<ACharacter>(GuardPawn))
+	{
+		if (UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GuardCharacter->GetMesh()->GetAnimInstance()))
+		{
+			AnimInstance->SetArresting(true);
+		}
+	}
+
 	// 설정된 체포 시간만큼 기다린 뒤 최종 체포 판정을 수행한다.
 	GetWorld()->GetTimerManager().SetTimer(ArrestTimerHandle, FTimerDelegate::CreateUObject(this, &UBTTask_AttemptArrest::FinishArrest, &OwnerComp), ArrestDuration, false);
 
@@ -102,6 +117,18 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 	// 최종 체포 판정에 사용할 경비 Pawn과 체포 대상 Actor를 가져온다.
 	APawn* GuardPawn = AIController->GetPawn();
 	AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+
+
+	//0928 추가
+	// 체포 판정 시간이 끝났으므로 체포 애니메이션을 종료한다.
+	if (ACharacter* GuardCharacter = Cast<ACharacter>(GuardPawn))
+	{
+		if (UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GuardCharacter->GetMesh()->GetAnimInstance()))
+		{
+			AnimInstance->SetArresting(false);
+		}
+	}
+
 
 	if (!IsValid(GuardPawn) || !IsValid(TargetActor))
 	{
@@ -147,6 +174,20 @@ EBTNodeResult::Type UBTTask_AttemptArrest::AbortTask(UBehaviorTreeComponent& Own
 	{
 		World->GetTimerManager().ClearTimer(ArrestTimerHandle);
 	}
+
+	// 0928 추가
+	// 체포 Task가 중단되었으므로 체포 애니메이션도 즉시 종료한다.
+	if (AAIController* AIController = OwnerComp.GetAIOwner())
+	{
+		if (ACharacter* GuardCharacter = Cast<ACharacter>(AIController->GetPawn()))
+		{
+			if (UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GuardCharacter->GetMesh()->GetAnimInstance()))
+			{
+				AnimInstance->SetArresting(false);
+			}
+		}
+	}
+
 
 	// 체포 Task가 중단된 상황을 로그로 확인한다.
 	UE_LOG(LogGuardAI, Log, TEXT("[%s] 체포 시도 중단"),

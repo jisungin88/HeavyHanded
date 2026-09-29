@@ -70,7 +70,11 @@ struct FGuardStatsRow : public FTableRowBase
 
 	// 단위: cm/s (UE 에는 cm/s 단위 지정자가 없어 Units 메타 없이 클램프만 건다)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Movement", meta = (ClampMin = "0.0"))
-	float MoveSpeed = 300.f;
+	float MoveSpeed = 150.f;
+
+	// 단위: cm/s (UE 에는 cm/s 단위 지정자가 없어 Units 메타 없이 클램프만 건다)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard|Movement", meta = (ClampMin = "0.0"))
+	float MoveSpeedChase = 300.f;
 
 	// ── 지각 (AISenseConfig_Sight/Hearing 에 그대로 적용) ──
 
@@ -156,6 +160,13 @@ struct FGuardWorldAlertSettings
 	// GuardStats DataTable에서 적용한 기본 이동 속도.
 	// 월드 경계도가 다시 내려가면 이 속도로 복구한다.
 	float NormalMoveSpeed = 0.0f;
+
+	// GuardStats DataTable에서 적용한 추격 이동 속도.
+	float ChaseMoveSpeed = 0.0f;
+
+	// 현재 추격 중인지 여부.
+	bool bIsChasing = false;
+
 
 	// 현재 월드 경계도에 의해 가속된 상태인지 여부.
 	// 상태가 실제로 변경될 때만 이동 속도를 갱신하기 위해 사용한다.

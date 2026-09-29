@@ -12,8 +12,10 @@
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
+class AActor;
 class AGuardCharacter;
 class AGuardAIController;
+class UBlackboardComponent;
 class UCapsuleComponent;
 
 UCLASS( ClassGroup=(AI), meta=(BlueprintSpawnableComponent) )
@@ -36,7 +38,7 @@ public:
 
 	void SetHearingRange(float InHearingRange);
 
-	void SetHearingEnabled(bool isEnable);
+	void SetHearingEnabled(bool bEnabled);
 
 public:
 	UFUNCTION() // 타이머 만료 함수

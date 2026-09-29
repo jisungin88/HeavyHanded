@@ -13,6 +13,7 @@ class AGuardAIController;
 
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
+class UBlackboardComponent;
 
 class AActor;
 class AGuardCharacter;
@@ -70,7 +71,7 @@ public:
 
 
 
-	void SetSightEnabled(bool isEnable);
+	void SetSightEnabled(bool bEnabled);
 
 	// 경비의 전체 시야 설정을 적용한다.
 	// 전체 수평 시야각은 AI Perception의 실제 시야 범위에 사용하고,

@@ -1,7 +1,9 @@
 ﻿#include "Hazards/SecurityCamera.h"
 
+#include "AI/GuardAIController.h"
 #include "Alert/AlertComponent.h"
 #include "Character/BaseCharacter.h"
+#include "Character/GuardCharacter.h"
 #include "Components/AudioComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -248,8 +250,12 @@ void ASecurityCamera::CheckDetection()
 			continue;
 		}
 
-		// 지금 이 순간에도 보인다. 새로 포착한 순간(bAlarmed 가 꺼져 있던 상태)에만
-		// 사운드·경계도·연출 훅을 한 번 내보낸다 — 계속 보이는 동안 매번 반복되지 않는다.
+		// 지금 이 순간에도 보인다. CallNearbyGuard 가 나중에(GuardCallDelay 뒤) 쓸 목적지를
+		// 매번 최신 위치로 갱신해둔다 — 그 사이 대상이 움직였을 수 있다
+		LastDetectedLocation = Target->GetActorLocation();
+
+		// 새로 포착한 순간(bAlarmed 가 꺼져 있던 상태)에만 사운드·경계도·연출 훅을 한 번
+		// 내보낸다 — 계속 보이는 동안 매번 반복되지 않는다.
 		if (!bAlarmed)
 		{
 			// 서버에서 직접 대입하면 RepNotify 가 안 불리므로 손으로도 불러야
@@ -263,6 +269,11 @@ void ASecurityCamera::CheckDetection()
 			{
 				Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + AlertGaugeIncrease, 0.f, 1.f));
 			}
+
+			// GuardCallDelay 뒤에도 여전히 감지 중이면(카메라 범위를 안 벗어났으면)
+			// 근처 경비를 부른다. ClearAlarm() 이 중간에 이 타이머를 지운다
+			GetWorldTimerManager().SetTimer(GuardCallTimer, this, &ASecurityCamera::CallNearbyGuard,
+				GuardCallDelay, false);
 
 			UE_LOG(LogHazard, Log, TEXT("[SecurityCamera:%s] %s 를 발견했다 — 경보"),
 				*GetName(), *Target->GetName());
@@ -291,6 +302,62 @@ void ASecurityCamera::ClearAlarm()
 {
 	bAlarmed = false;
 	OnRep_bAlarmed();
+
+	// 아직 GuardCallDelay 가 다 안 지나서 대기 중이던 경비 호출도 같이 취소한다 —
+	// 범위를 벗어났으니 "계속 감지됨" 조건이 깨진 것이다
+	GetWorldTimerManager().ClearTimer(GuardCallTimer);
+}
+
+void ASecurityCamera::CallNearbyGuard()
+{
+	// 타이머 자체는 ClearAlarm() 이 지우지만, 혹시 모를 프레임 경계를 방어적으로 재확인한다
+	if (!bAlarmed)
+	{
+		return;
+	}
+
+	AGuardCharacter* NearestGuard = nullptr;
+	float NearestDistSq = FMath::Square(GuardCallRadius);
+
+	TArray<AActor*> Guards;
+	UGameplayStatics::GetAllActorsOfClass(this, AGuardCharacter::StaticClass(), Guards);
+
+	for (AActor* GuardActor : Guards)
+	{
+		AGuardCharacter* Guard = Cast<AGuardCharacter>(GuardActor);
+		if (!IsValid(Guard))
+		{
+			continue;
+		}
+
+		const AGuardAIController* GuardController = Cast<AGuardAIController>(Guard->GetController());
+
+		// 순찰 중이 아니면(이미 조사·추격 중) 건너뛴다 — 하던 일을 가로채지 않는다
+		if (!IsValid(GuardController) || GuardController->GetAIState() != EGuardAIState::Patrol)
+		{
+			continue;
+		}
+
+		const float DistSq = FVector::DistSquared(GetActorLocation(), Guard->GetActorLocation());
+		if (DistSq < NearestDistSq)
+		{
+			NearestDistSq = DistSq;
+			NearestGuard = Guard;
+		}
+	}
+
+	if (!NearestGuard)
+	{
+		return;
+	}
+
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(NearestGuard->GetController()))
+	{
+		GuardController->RequestInvestigate(LastDetectedLocation);
+
+		UE_LOG(LogHazard, Log, TEXT("[SecurityCamera:%s] %.0f초 연속 감지 — %s 를 호출한다"),
+			*GetName(), GuardCallDelay, *NearestGuard->GetName());
+	}
 }
 
 void ASecurityCamera::OnRep_bAlarmed()

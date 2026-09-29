@@ -18,6 +18,9 @@ namespace HHTags
 	/** 파손형 노획물이 깨질 때 나가는 태그 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Break);
 
+	/** 미끼가 놓인 자리에서 반복해 내는 소리. 경비를 그쪽으로 끌어오는 근거다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Equipment_Decoy);
+
 	/** 불안정형이 기울어져 내용물을 쏟을 때. 충돌이 아니라 내 판정으로 나가는 소리다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Noise_Loot_Spill);
 
@@ -142,6 +145,9 @@ namespace HHTags
 	/** 공통 소모품 슬롯. GAB_Throw 가 클라이언트에서 서버로 올리는 이벤트 태그로 쓴다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Slot_Consumable);
 
+	/** 경비 변장 — 경비의 시야·청각 감지 대상에서 제외한다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Mimic_GuardDisguise);
+
 	// ── 게임플레이 이벤트 (공용 / Config/Tags/Event.ini) ──
 
 	/** 경비견이 플레이어에 접촉했다는 사실. 3회 누적 판정은 플레이어 파트가 한다 */
@@ -181,4 +187,13 @@ namespace HHTags
 
 	/** 점착 폭탄. 던져서 붙이고 몇 초 뒤 폭발해 대형 금고 문을 부순다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_StickyBomb);
+
+	/** 미끼(개껌·소음탄). 던져 놓으면 그 자리에서 소리를 내 경비를 끌어온다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Decoy);
+
+	/** 응급 키트. 던져서 다운된 동료를 즉시 일으킨다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_MedKit);
+
+	/** 정찰 드론. 던져 놓으면 떠올라 조종하고, 그 시점으로 잠긴 스테이지 안을 미리 본다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Drone);
 }
