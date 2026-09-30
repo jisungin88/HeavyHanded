@@ -20,6 +20,7 @@
 #include "AI/GuardHearingAComponent.h"
 #include "Character/GuardCharacter.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 
 #include "ProceduralMeshComponent.h"
@@ -91,6 +92,10 @@ void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPer
 
 	GuardCharacter = InGuardCharacter;
 	PerceptionComp = InPerceptionComp;
+	if (USkeletalMeshComponent* CharacterMesh = GuardCharacter->GetMesh())
+	{
+		PrimaryComponentTick.AddPrerequisite(CharacterMesh, CharacterMesh->PrimaryComponentTick);
+	}
 
 	SightDebugMesh = GuardCharacter->GetSightDebugMesh();
 	if (!IsValid(SightDebugMesh))
@@ -199,6 +204,29 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		return;
 	}
 
+	if (IsValid(GuardCharacter))
+	{
+		const FTransform EyeTransform = GuardCharacter->GetEyeSocketTransform();
+		const FRotator EyeRotation = GuardCharacter->GetSightSocketRotation();
+		GuardCharacter->SetReplicatedSightDebugRotation(FRotator(0.0f, EyeRotation.Yaw, 0.0f));
+
+		SightRotationDiagnosticElapsed += DeltaTime;
+		if (SightRotationDiagnosticElapsed >= 1.0f)
+		{
+			SightRotationDiagnosticElapsed = 0.0f;
+			const USkeletalMeshComponent* CharacterMesh = GuardCharacter->GetMesh();
+			UE_LOG(LogGuardAI, Warning,
+				TEXT("[SightRotation] Guard=%s Authority=%d UseSocket=%d SocketExists=%d EyeYaw=%.1f ActorYaw=%.1f MeshYaw=%.1f"),
+				*GetNameSafe(GuardCharacter),
+				GuardCharacter->HasAuthority() ? 1 : 0,
+				GuardCharacter->IsEyeSocketSightEnabled() ? 1 : 0,
+				IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(TEXT("EyeSocket")) ? 1 : 0,
+				EyeRotation.Yaw,
+				GuardCharacter->GetActorRotation().Yaw,
+				IsValid(SightDebugMesh) ? SightDebugMesh->GetComponentRotation().Yaw : 0.0f);
+		}
+	}
+
 	// 테스트용 DebugLine과 인지 액터 표시입니다. 테스트가 끝나면 아래 호출을 주석 처리해 Tick 갱신을 끌 수 있습니다.
 	DrawSightDebug();
 	DrawPerceivedActorsDebug();
@@ -269,7 +297,9 @@ bool UGuardSightAComponent::IsWithinBinocularVisionAngle(AActor* TargetActor) co
 	ToTarget.Normalize();
 
 	// 경비가 바라보는 방향도 수평 방향만 사용한다.
-	FVector Forward = OwnerActor->GetActorForwardVector();
+	FVector Forward = IsValid(GuardCharacter)
+		? GuardCharacter->GetSightSocketRotation().Vector()
+		: OwnerActor->GetActorForwardVector();
 	Forward.Z = 0.f;
 
 	if (Forward.IsNearlyZero())
@@ -496,14 +526,17 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 
 
 	// 테스트용. 추후 사용시 수정 반드시 필요
-	const FVector GuardEyeLocation =
-		GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
+	const FTransform EyeTransform = GuardCharacter->GetEyeSocketTransform();
+	const FVector GuardEyeLocation = EyeTransform.GetLocation();
 	//const FVector GuardEyeLocation = GuardCharacter->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
 	const FVector TargetHeadLocation = TargetActor->GetRootComponent()->GetComponentLocation() + FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
-	const FVector Direction = (TargetHeadLocation - GuardEyeLocation).GetSafeNormal();
-
-	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Asin(Direction.Z));
+	const FVector ToTarget = TargetHeadLocation - GuardEyeLocation;
+	const FVector Forward = GuardCharacter->GetSightSocketRotation().Vector().GetSafeNormal();
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward).GetSafeNormal();
+	const float ForwardDistance = FVector::DotProduct(ToTarget, Forward);
+	const float VerticalDistance = FVector::DotProduct(ToTarget, FVector::UpVector);
+	const float VerticalAngle = FMath::RadiansToDegrees(FMath::Atan2(VerticalDistance, ForwardDistance));
 
 	return FMath::Abs(VerticalAngle) <= VerticalVisionAngleDegrees;
 
@@ -519,10 +552,15 @@ void UGuardSightAComponent::DrawSightDebug() const
 		return;
 	}
 
-	const FVector Origin = GuardCharacter->GetRootComponent()->GetComponentLocation() + GuardCharacter->GetActorForwardVector() * GuardCapsule->GetScaledCapsuleRadius() + FVector(0.0f, 0.0f, GuardCharacter->GetEyeHeight());
-	const FVector HorizontalOrigin = GuardCharacter->GetCapsuleComponent()->GetComponentLocation() - FVector(0.0f, 0.0f, GuardCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	const FTransform EyeTransform = GuardCharacter->GetEyeSocketTransform();
+	const FVector Origin = EyeTransform.GetLocation();
+	// 양안 경계선은 시야 메시와 같은 바닥 높이에 표시하고, 회전/방향은 눈 기준 그대로 둔다.
+	const FVector HorizontalOrigin = GuardCharacter->GetActorLocation() + FVector(
+		0.0f, 0.0f, -GuardCapsule->GetScaledCapsuleHalfHeight() + 10.0f);
 
-	const FVector Forward = GuardCharacter->GetActorForwardVector().GetSafeNormal();
+	FVector Forward = GuardCharacter->GetSightSocketRotation().Vector();
+	Forward.Z = 0.0f;
+	Forward = Forward.GetSafeNormal();
 	const FVector Up = FVector::UpVector;
 
 	const float SightRadius = SightConfig->SightRadius;
@@ -619,63 +657,36 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 	{
 		const FVector HorizontalForward = Forward.GetSafeNormal2D();
-
 		const FVector UpDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) + Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
 		const FVector DownDirection = (HorizontalForward * FMath::Cos(VerticalAngleRadians) - Up * FMath::Sin(VerticalAngleRadians)).GetSafeNormal();
 
 		const FVector UpTraceEnd = Origin + UpDirection * LoseSightRadius;
-		const FVector DownTraceEnd = Origin + DownDirection * LoseSightRadius;
 
 		FHitResult UpHit;
-		FHitResult DownHit;
 
 		const bool bUpBlocked = World->LineTraceSingleByChannel(UpHit, Origin, UpTraceEnd, ECC_Visibility, Params);
-		const bool bDownBlocked = World->LineTraceSingleByChannel(DownHit, Origin, DownTraceEnd, ECC_Visibility, Params);
 
 		float UpVisibleDistance = bUpBlocked ? FVector::Distance(Origin, UpHit.Location) : LoseSightRadius;
-		float DownVisibleDistance = bDownBlocked ? FVector::Distance(Origin, DownHit.Location) : LoseSightRadius;
 
 		const bool bUpHitCharacter = bUpBlocked && UpHit.GetActor() && UpHit.GetActor()->IsA<ACharacter>();
-		const bool bDownHitCharacter = bDownBlocked && DownHit.GetActor() && DownHit.GetActor()->IsA<ACharacter>();
 
 		if (bUpHitCharacter)
 		{
 			UpVisibleDistance = FMath::Min(UpVisibleDistance + CharacterDebugOffset, LoseSightRadius);
 		}
-
-		if (bDownHitCharacter)
-		{
-			DownVisibleDistance = FMath::Min(DownVisibleDistance + CharacterDebugOffset, LoseSightRadius);
-		}
-
 		const float UpGreenDistance = FMath::Min(SightRadius, UpVisibleDistance);
-		const float DownGreenDistance = FMath::Min(SightRadius, DownVisibleDistance);
 
 		DrawDebugLine(World, Origin, Origin + UpDirection * UpGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
-		DrawDebugLine(World, Origin, Origin + DownDirection * DownGreenDistance, FColor::Green, false, 0.0f, 0, 4.0f);
 
 		if (UpVisibleDistance > SightRadius)
 		{
 			DrawDebugLine(World, Origin + UpDirection * SightRadius, Origin + UpDirection * UpVisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
 		}
-
-		if (DownVisibleDistance > SightRadius)
-		{
-			DrawDebugLine(World, Origin + DownDirection * SightRadius, Origin + DownDirection * DownVisibleDistance, FColor::Yellow, false, 0.0f, 0, 4.0f);
-		}
-
 		if (bUpBlocked)
 		{
 			const FVector RedStart = bUpHitCharacter ? UpHit.Location + UpDirection * CharacterDebugOffset : UpHit.Location;
 
 			DrawDebugLine(World, RedStart, UpTraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
-		}
-
-		if (bDownBlocked)
-		{
-			const FVector RedStart = bDownHitCharacter ? DownHit.Location + DownDirection * CharacterDebugOffset : DownHit.Location;
-
-			DrawDebugLine(World, RedStart, DownTraceEnd, FColor::Red, false, 0.0f, 0, 2.0f);
 		}
 	}
 
@@ -765,8 +776,14 @@ void UGuardSightAComponent::DrawSightDebug() const
 		{
 			const float BinocularHalfAngle = BinocularVisionAngleDegrees * 0.5f;
 
-			const FVector BinocularLeftDirection = Forward.RotateAngleAxis(-BinocularHalfAngle, Up);
-			const FVector BinocularRightDirection = Forward.RotateAngleAxis(BinocularHalfAngle, Up);
+			// 양안 경계선은 바닥 평면에서만 회전시킨다. 소켓의 Pitch/Roll은 적용하지 않는다.
+			const FRotator SightYawRotation(0.0f, GuardCharacter->GetSightSocketRotation().Yaw, 0.0f);
+			const FVector BinocularLeftDirection = SightYawRotation.RotateVector(
+				FVector(FMath::Cos(FMath::DegreesToRadians(BinocularHalfAngle)),
+					-FMath::Sin(FMath::DegreesToRadians(BinocularHalfAngle)), 0.0f)).GetSafeNormal();
+			const FVector BinocularRightDirection = SightYawRotation.RotateVector(
+				FVector(FMath::Cos(FMath::DegreesToRadians(BinocularHalfAngle)),
+					FMath::Sin(FMath::DegreesToRadians(BinocularHalfAngle)), 0.0f)).GetSafeNormal();
 
 			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularLeftDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
 			DrawDebugLine(World, HorizontalOrigin, HorizontalOrigin + BinocularRightDirection * SightRadius, FColor::Cyan, false, 0.0f, 0, 2.0f);
@@ -813,6 +830,9 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	// Procedural Mesh가 실제로 배치된 Transform을 사용한다.
 	// Trace는 World 좌표를 사용하고 Mesh Vertex는 Local 좌표를 사용해야 하므로
 	// 두 좌표계를 변환할 때 이 Transform을 기준으로 사용한다.
+	const FRotator EyeRotation = GuardCharacter->GetSightSocketRotation();
+	const FRotator SightMeshRotation(0.0f, EyeRotation.Yaw, 0.0f);
+	SightDebugMesh->SetWorldRotation(SightMeshRotation);
 	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
 
 	// Mesh 중심점을 World 좌표로 변환한다.
@@ -952,6 +972,9 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 
 	const float CapsuleHalfHeight = GuardCapsule->GetScaledCapsuleHalfHeight();
 	const FVector LocalOrigin(0.0f, 0.0f, -CapsuleHalfHeight + 2.0f);
+	const FRotator EyeRotation = GuardCharacter->GetSightSocketRotation();
+	const FRotator SightMeshRotation(0.0f, EyeRotation.Yaw, 0.0f);
+	SightDebugMesh->SetWorldRotation(SightMeshRotation);
 	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
 	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
 	const FVector UpDirection = FVector::UpVector;
@@ -1598,7 +1621,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
 	{
 		GuardCharacter->Multicast_UpdateSightDebugMesh(
-			FlatVertices, FlatTriangles, GroundVertices, GroundTriangles, FlatFanColor, SightDebugMaterial);
+			FlatVertices, FlatTriangles, GroundVertices, GroundTriangles, SightMeshRotation, FlatFanColor, SightDebugMaterial);
 	}
 }
 

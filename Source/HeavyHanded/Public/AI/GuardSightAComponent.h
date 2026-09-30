@@ -126,6 +126,7 @@ private:
 
 
 	bool bDrawSightDebug = true;
+	float SightRotationDiagnosticElapsed = 0.0f;
 
 
 	//public:

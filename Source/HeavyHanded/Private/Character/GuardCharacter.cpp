@@ -4,6 +4,7 @@
 //#include "Noise/PerceptionMeterComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 #include "Noise/PerceptionMeterComponent.h"
@@ -43,6 +44,8 @@ AGuardCharacter::AGuardCharacter()
 
 	// AIController가 원하는 회전 방향을 캐릭터가 따라감
 	GetCharacterMovement()->bUseControllerDesiredRotation = true;
+	// 서버 AI Perception과 EyeSocket 읽기가 두리번 애니메이션의 최신 본 포즈를 보게 한다.
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
 
 
@@ -75,12 +78,41 @@ AGuardCharacter::AGuardCharacter()
 
 }
 
+FTransform AGuardCharacter::GetEyeSocketTransform() const
+{
+	static const FName EyeSocketName(TEXT("EyeSocket"));
+	const USkeletalMeshComponent* CharacterMesh = GetMesh();
+	if (bUseEyeSocketForSight && IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(EyeSocketName))
+	{
+		return CharacterMesh->GetSocketTransform(EyeSocketName, RTS_World);
+	}
+
+	return FTransform(GetActorRotation(), GetActorLocation() + FVector(0.0f, 0.0f, EyeHeight));
+}
+
+FRotator AGuardCharacter::GetSightSocketRotation() const
+{
+	// EyeSocket의 로컬 정면 축이 경비 시야 정면에서 왼쪽으로 90도 돌아 있어
+	// 소켓 회전을 그대로 쓰면 메시와 AI Perception이 함께 옆을 향한다.
+	FRotator SightRotation = GetEyeSocketTransform().Rotator();
+	SightRotation.Yaw += 90.0f;
+	return SightRotation;
+}
+
+void AGuardCharacter::GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const
+{
+	const FTransform EyeTransform = GetEyeSocketTransform();
+	OutLocation = EyeTransform.GetLocation();
+	OutRotation = GetSightSocketRotation();
+}
+
 void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedSightRadius);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedSightHalfAngle);
 	DOREPLIFETIME(AGuardCharacter, bReplicatedDrawSightDebug);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightDebugRotation);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedDetectionGaugePercent);
 }
 
@@ -91,6 +123,14 @@ void AGuardCharacter::OnRep_SightDebugState()
 		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
 	}
 
+}
+
+void AGuardCharacter::OnRep_SightDebugRotation()
+{
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetWorldRotation(ReplicatedSightDebugRotation);
+	}
 }
 
 void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled)
@@ -110,6 +150,20 @@ void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float In
 	ForceNetUpdate();
 }
 
+void AGuardCharacter::SetReplicatedSightDebugRotation(FRotator InRotation)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedSightDebugRotation = InRotation;
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetWorldRotation(ReplicatedSightDebugRotation);
+	}
+}
+
 void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
 {
 	if (!HasAuthority())
@@ -123,13 +177,14 @@ void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
 void AGuardCharacter::Multicast_UpdateSightDebugMesh_Implementation(
 	const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
 	const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
-	FLinearColor InFanColor, UMaterialInterface* InMaterial)
+	FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial)
 {
 	if (!IsValid(SightDebugMesh) || !bReplicatedDrawSightDebug || FlatVertices.IsEmpty() || FlatTriangles.IsEmpty())
 	{
 		return;
 	}
 
+	SightDebugMesh->SetWorldRotation(InSightRotation);
 	TArray<FVector> FlatNormals;
 	TArray<FVector2D> FlatUV0;
 	TArray<FLinearColor> FlatVertexColors;
@@ -173,6 +228,18 @@ void AGuardCharacter::Multicast_UpdateSightDebugMesh_Implementation(
 void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+	{
+		// 파생 블루프린트의 Mesh 기본값이 생성자 설정을 덮을 수 있어 런타임에도 강제한다.
+		CharacterMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		CharacterMesh->bEnableUpdateRateOptimizations = false;
+
+		if (bUseEyeSocketForSight && !CharacterMesh->DoesSocketExist(TEXT("EyeSocket")))
+		{
+			UE_LOG(LogGuardAI, Warning, TEXT("[%s] EyeSocket을 찾지 못해 액터 방향을 시야 기준으로 사용합니다. Mesh=%s"),
+				*GetNameSafe(this), *GetNameSafe(CharacterMesh->GetSkeletalMeshAsset()));
+		}
+	}
 	SetHeadGaugeUpdateInterval(0.1f);
 
 	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
