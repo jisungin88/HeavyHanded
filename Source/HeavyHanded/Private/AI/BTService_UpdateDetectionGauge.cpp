@@ -193,5 +193,3 @@ float UBTService_UpdateDetectionGauge::GetDistanceRateMultiplier(
 
 	return FMath::Lerp(NearRateMultiplier, FarRateMultiplier, Alpha);
 }
-
-

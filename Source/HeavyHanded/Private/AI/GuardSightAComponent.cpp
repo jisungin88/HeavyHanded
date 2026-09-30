@@ -925,8 +925,11 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
 	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	const EGuardAIState CurrentState = IsValid(GuardController)
+		? GuardController->GetAIState()
+		: EGuardAIState::Patrol;
 	const bool bIsChasing = IsValid(GuardController) &&
-		GuardController->GetAIState() == EGuardAIState::Chase;
+		CurrentState == EGuardAIState::Chase;
 	if (bIsChasing)
 	{
 		if (UBlackboardComponent* BlackboardComp = GuardController->GetBlackboardComponent())
@@ -1102,7 +1105,9 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	FlatNormals.Reserve(AngularPointCount + 1);
 	FlatUV0.Reserve(AngularPointCount + 1);
 	FlatVertexColors.Reserve(AngularPointCount + 1);
-	const FLinearColor FlatFanColor = bIsChasing ? FLinearColor(1.0f, 0.35f, 0.0f, 1.0f) : FLinearColor::White;
+	const FLinearColor FlatFanColor = bIsChasing
+		? FLinearColor(1.0f, 0.35f, 0.0f, 1.0f)
+		: CurrentState == EGuardAIState::Search ? FLinearColor::Yellow : FLinearColor::White;
 
 	FlatVertices.Add(FlatMeshOrigin);
 	FlatNormals.Add(FVector::UpVector);

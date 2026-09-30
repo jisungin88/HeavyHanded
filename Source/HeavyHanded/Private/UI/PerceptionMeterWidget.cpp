@@ -16,6 +16,7 @@ DEFINE_LOG_CATEGORY(LogHeavyUI);
 void UPerceptionMeterWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	SetVisibility(ESlateVisibility::Hidden);
 
 	if (GaugeBar)
 	{
@@ -118,6 +119,7 @@ void UPerceptionMeterWidget::HandlePerceptionChanged(float NewPerception01)
 	if (bShouldShow != bShown)
 	{
 		bShown = bShouldShow;
+		SetVisibility(bShouldShow ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
 		OnMeterVisibilityChanged(bShouldShow);
 	}
 }
