@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 
 #include "Alert/AlertComponent.h"
+#include "Alert/AlertSettings.h"       // LevelThreshold01 이 단계 임계값을 돌려준다
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
 #include "UI/HeavyUILog.h"
@@ -238,11 +239,25 @@ void UAlertGaugeWidget::HandleLevelChanged(EAlertLevel NewLevel, EAlertLevel Old
 // 표시
 // ──────────────────────────────────────────────────────────────
 
+float UAlertGaugeWidget::LevelThreshold01(int32 Index)
+{
+	const UAlertSettings* Settings = UAlertSettings::Get();
+
+	switch (Index)
+	{
+		case 0:  return Settings->SuspiciousEnter;
+		case 1:  return Settings->AlertedEnter;
+		default: return -1.f;
+	}
+}
+
 void UAlertGaugeWidget::ApplyGaugeVisual(float Gauge01)
 {
 	if (Bar_Alert)
 	{
-		Bar_Alert->SetPercent(Gauge01);
+		// 경보는 래치라 게이지가 내려가도 풀리지 않는다. 그때 막대가 도로 줄면
+		// "경보인데 게이지가 내려간다" 로 보이므로 꽉 채운 채로 둔다
+		Bar_Alert->SetPercent(IsAlarmed() ? 1.f : Gauge01);
 	}
 
 	if (Txt_Percent)
@@ -266,6 +281,9 @@ void UAlertGaugeWidget::ApplyLevelVisual(EAlertLevel NewLevel)
 
 	if (Bar_Alert)
 	{
+		// 이 색은 Fill 브러시에 곱해진다. 브러시가 흰색이어야 단계 색이 그대로 나온다 —
+		// 색이 구워진 텍스처를 쓰면 두 색이 섞여 그라데이션도 단계 색도 둘 다 죽는다.
+		// 매번 명시로 쓰는 이유는 UMG 에 찍어 둔 색이나 직전 단계의 색이 그대로 남기 때문이다
 		Bar_Alert->SetFillColorAndOpacity(LevelColor);
 	}
 

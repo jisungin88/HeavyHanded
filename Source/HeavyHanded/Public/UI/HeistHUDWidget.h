@@ -89,6 +89,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|Heist")
 	bool IsUrgent() const { return bUrgent; }
 
+	/**
+	 * 준비 카운트다운을 화면에서만 흉내 낸다. 치트(hh.UI.PrepStart · hh.UI.PrepFinal)가 쓴다.
+	 *
+	 * 게임 상태는 건드리지 않는다 — 페이즈도 서버 시각도 그대로다. 끝나면 "시작!" 까지 보여 주고
+	 * 스스로 풀린다. 알림은 준비 시작 2초에만 나와서, 확인하려면 매번 판을 새로 열어야 했다.
+	 *
+	 * @param bFromStart  true 면 준비 처음(PrepSeconds)부터, false 면 마지막 PrepFinalSeconds 초부터
+	 */
+	void StartDebugPrep(bool bFromStart);
+
 protected:
 	//~ UUserWidget
 	virtual void NativePreConstruct() override;
@@ -103,6 +113,61 @@ protected:
 	/** 남은 시간 ("6:52") */
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidget))
 	TObjectPtr<UTextBlock> Txt_Timer;
+
+	/**
+	 * Txt_Timer 를 감싼 판(배경 · 그림자 · 광택). 있으면 타이머를 숨길 때 이것째로 숨긴다 —
+	 * 글자만 숨기면 빈 판이 화면에 남는다. 판 없이 글자만 쓰는 WBP 도 있어서 Optional
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> Panel_Timer;
+
+	/**
+	 * 타이머 판과 그 아래 받침. 위급할 때 이 둘을 경보 색으로 바꾼다.
+	 *
+	 * 글자를 빨갛게 하는 대신 판을 바꾸는 이유 — 어두운 판 위의 빨간 글자는 대비가 낮아
+	 * 정작 위급할 때 숫자가 흐려진다. 판이 있으면 글자는 흰색 그대로 둔다.
+	 * 둘 다 없으면 예전처럼 글자 색만 바꾼다.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_Plate;
+
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Heist", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_PlateShadow;
+
+	// ── 준비 카운트다운 ──
+	//
+	// 준비 45초는 미션 타이머 판에 띄우지 않는다. 대신 네 단계로 보여 준다.
+	//   ① 준비 시작 PrepAnnounceSeconds 동안 — 가운데 크게 "작전 준비 / 45초"
+	//   ② 그다음 — 위쪽에 작게 "작업 시작까지 0:43"
+	//   ③ 남은 PrepFinalSeconds 초 — 다시 가운데 크게 "작업 시작까지 / 5"
+	//   ④ 본 작업 진입 StartBannerSeconds 동안 — 가운데 "시작!"
+	//
+	// 판에 그대로 띄우지 않는 이유 — 0:00 에서 7:00 으로 튀어 올라, "준비" 글자를 못 본
+	// 사람은 본 작업 타이머로 착각한다. 전부 Optional 이라 안 만들어 둔 WBP 도 그대로 돈다.
+
+	/** 가운데 큰 글자 묶음 (①③④). 이것째로 숨기고 보인다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> Panel_PrepCenter;
+
+	/** 가운데 위 작은 글자 ("작전 준비" · "작업 시작까지"). ④ 에서는 숨는다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_PrepCenterLabel;
+
+	/** 가운데 큰 글자 ("45초" · "5" · "시작!") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_PrepCenterValue;
+
+	/** 위쪽 작은 카운트다운 묶음 (②). "작업 시작까지" 글자는 WBP 에 고정으로 둔다 */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> Panel_PrepMini;
+
+	/** ② 의 남은 시간 ("0:43") */
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_PrepMini;
+
+	/** 가운데 글자가 바뀔 때마다 재생한다 (숫자가 톡 커지는 연출). 없으면 글자만 바뀐다 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "UI|Prep", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> PrepPop;
 
 	/**
 	 * 페이즈 이름 ("본 작업"). 아직 WBP 에 없어서 Optional 이다 —
@@ -174,6 +239,25 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD", meta = (ClampMin = "0.0"))
 	float MoneyInterpSpeed = 6.f;
 
+	/** 준비 시작 후 "작전 준비 45초" 를 가운데 띄워 두는 시간. 0 이면 알림 없이 바로 작은 카운트다운 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD|Prep", meta = (ClampMin = "0.0", Units = "s"))
+	float PrepAnnounceSeconds = 2.f;
+
+	/** 준비가 이만큼 남으면 다시 가운데 크게 센다 (5 · 4 · 3 · 2 · 1) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD|Prep", meta = (ClampMin = "0"))
+	int32 PrepFinalSeconds = 5;
+
+	/** 본 작업 진입 때 "시작!" 을 띄워 두는 시간. 0 이면 안 띄운다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD|Prep", meta = (ClampMin = "0.0", Units = "s"))
+	float StartBannerSeconds = 1.f;
+
+	/**
+	 * 가운데 큰 글자 크기 — 타이머 폰트(TimerFont)에 곱한다.
+	 * 전용 폰트 토큰을 새로 만들지 않는다. 폰트 3단계를 유지하려는 것이다 (HeldSlotFontScale 과 같은 방식)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heist HUD|Prep", meta = (ClampMin = "0.1"))
+	float PrepCenterFontScale = 2.2f;
+
 	// ── BP 연출 훅 ──
 	//
 	// 필수 표시는 C++ 이 이미 끝냈다. 여기는 화면 흔들림 · 사운드처럼
@@ -219,6 +303,21 @@ private:
 	void RefreshTimer();
 
 	/**
+	 * 준비 카운트다운 네 단계 중 지금 것을 그린다. RefreshTimer 가 매 주기 부른다.
+	 *
+	 * @param bPrep      지금 준비 페이즈이고 남은 시간을 알 수 있는가
+	 * @param Remaining  준비 남은 초. bPrep 이 false 면 무시한다
+	 */
+	void RefreshPrepCountdown(bool bPrep, float Remaining);
+
+	/** 가운데 큰 글자를 띄운다. Key 가 직전과 같으면 아무것도 안 한다 (PrepPop 이 매 주기 리셋되지 않게). 숨기는 쪽은 항상 적용한다 */
+	void ShowPrepCenter(const FText& Label, const FText& Value, int32 Key);
+	void HidePrepCenter();
+
+	/** 위쪽 작은 카운트다운. INDEX_NONE 이면 숨긴다 */
+	void SetPrepMini(int32 Seconds);
+
+	/**
 	 * 목표 금액 표시를 갱신한다.
 	 *
 	 * @param bImmediate  true 면 롤업 없이 바로 그 숫자를 찍는다.
@@ -245,6 +344,9 @@ private:
 
 	/** 타이머 · 목표 금액을 통째로 보이거나 숨긴다 */
 	void SetHeistWidgetsVisible(bool bVisible);
+
+	/** 타이머 글자와 판을 같이 보이거나 숨긴다 */
+	void SetTimerVisible(bool bVisible);
 
 	/**
 	 * 주기 콜백. 손에 든 것이 바뀌었는지 확인한다.
@@ -319,6 +421,46 @@ private:
 
 	/** 마지막으로 Txt_Timer 에 쓴 정수 초. 같은 값이면 SetText 를 건너뛴다 */
 	int32 LastShownSeconds = INDEX_NONE;
+
+	/**
+	 * WBP 에 찍어 둔 판 · 받침의 평소 색. 위급이 풀리면 이 색으로 되돌린다.
+	 *
+	 * 평소 색을 C++ 에 박지 않는 이유 — 판 색은 아직 시안 단계라 WBP 에서 바꿔 가며 본다.
+	 * 여기에 숫자를 두면 WBP 를 고쳐도 위급 한 번 뒤에 C++ 색으로 덮인다.
+	 */
+	FLinearColor PlateNormalColor = FLinearColor::White;
+	FLinearColor PlateShadowNormalColor = FLinearColor::White;
+
+	/** 받침은 경보 색을 이 비율로 어둡게 쓴다. 판과 받침의 명도 차가 입체감이다 */
+	static constexpr float UrgentShadowScale = 0.3f;
+
+	/**
+	 * 지금 가운데에 띄운 것. 1~PrepFinalSeconds 는 그 숫자, 아래 둘은 알림 · 시작이다.
+	 * 같은 것을 다시 띄우지 않기 위한 값이다 — 0.1초마다 PrepPop 을 처음부터 틀면 멈춘 것처럼 보인다
+	 */
+	int32 LastPrepCenterKey = INDEX_NONE;
+	static constexpr int32 PrepKeyAnnounce = -2;
+	static constexpr int32 PrepKeyStart    = -3;
+
+	/** 마지막으로 Txt_PrepMini 에 쓴 초 */
+	int32 LastPrepMiniSeconds = INDEX_NONE;
+
+	/** 이 월드 시각까지 "시작!" 을 띄운다. 음수면 안 띄운다 */
+	float StartBannerUntil = -1.f;
+
+	// ── 준비 카운트다운 흉내 (치트 전용) ──
+
+	/** 흉내 준비가 끝나는 월드 시각. 음수면 흉내 중이 아니다 */
+	float DebugPrepEndTime = -1.f;
+
+	/** 흉내 준비가 아직 세는 중인가. 이 동안은 진짜 페이즈와 무관하게 준비 화면이다 */
+	bool bDebugPrepCounting = false;
+
+	FTimerHandle DebugPrepHandle;
+
+	/** 흉내 1스텝. 준비 → "시작!" → 해제 순으로 스스로 넘어간다 */
+	void StepDebugPrep();
+	void StopDebugPrep();
 
 	// ── 금액 롤업 ──
 	//
