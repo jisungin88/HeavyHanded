@@ -107,9 +107,23 @@ void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPer
 	}
 
 	PerceptionComp->ConfigureSense(*SightConfig);
+	SetComponentTickEnabled(!GetOwner()->HasAuthority());
+	if (GetOwner()->HasAuthority())
+	{
+		GuardCharacter->SetReplicatedSightDebugState(
+			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bDrawSightDebug);
+	}
+	else
+	{
+		SightConfig->SightRadius = GuardCharacter->GetReplicatedSightRadius();
+		SightConfig->PeripheralVisionAngleDegrees = GuardCharacter->GetReplicatedSightHalfAngle();
+		bDrawSightDebug = GuardCharacter->GetReplicatedDrawSightDebug();
+	}
 
 	SetSightEnabled(GuardCharacter->IsSightEnabled());
-	SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
+	SetSightDebugEnabled(GetOwner()->HasAuthority()
+		? GuardCharacter->IsDrawSightDebugEnabled()
+		: GuardCharacter->GetReplicatedDrawSightDebug());
 
 }
 
@@ -163,7 +177,17 @@ void UGuardSightAComponent::UpdateSightDebug()
 		IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.0f,
 		IsValid(GuardAIController) ? *StaticEnum<EGuardAIState>()->GetNameStringByValue(static_cast<int64>(GuardAIController->GetAIState())) : TEXT("Invalid"));
 
-	DrawSightDebugMesh();
+	if (IsValid(GuardCharacter))
+	{
+		if (!GuardCharacter->HasAuthority())
+		{
+			SightConfig->SightRadius = GuardCharacter->GetReplicatedSightRadius();
+			SightConfig->PeripheralVisionAngleDegrees = GuardCharacter->GetReplicatedSightHalfAngle();
+			bDrawSightDebug = GuardCharacter->GetReplicatedDrawSightDebug();
+		}
+
+		DrawSightDebugMesh();
+	}
 }
 
 void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -207,6 +231,15 @@ void UGuardSightAComponent::SetSightConfig (float InSightRadius, float InLoseSig
 	// 전체 시야 안에서 중앙 양안 시야에 해당하는 각도를 저장한다.
 	// 이후 인지 게이지 상승 속도를 계산할 때 사용한다.
 	BinocularVisionAngleDegrees = InBinocularVisionAngle * 0.5f;
+	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
+	{
+		GuardCharacter->SetReplicatedSightDebugState(
+			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bDrawSightDebug);
+		if (bDrawSightDebug)
+		{
+			DrawSightDebugMesh();
+		}
+	}
 
 }
 
@@ -269,12 +302,17 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 {
 	bDrawSightDebug = bInEnabled;
+	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
+	{
+		GuardCharacter->SetReplicatedSightDebugState(
+			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bInEnabled);
+	}
 	if (IsValid(SightDebugMesh))
 	{
 		SightDebugMesh->SetVisibility(bInEnabled);
 	}
 	SetComponentTickEnabled(bInEnabled);
-	if (bInEnabled)
+	if (bInEnabled && GetOwner()->HasAuthority())
 	{
 		UpdateSightDebug();
 	}
@@ -1296,7 +1334,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 				GroundVertices.Add(MeshTransform.InverseTransformPosition(TriangleSample.SurfaceWorldPoint));
 				GroundNormals.Add(MeshTransform.InverseTransformVectorNoScale(TriangleSample.SurfaceWorldNormal).GetSafeNormal());
 				GroundUV0.Add(FVector2D::ZeroVector);
-				GroundVertexColors.Add(FLinearColor::White);
+				GroundVertexColors.Add(FlatFanColor);
 			}
 
 			for (int32 TriangleIndex = 1; TriangleIndex < ClippedTriangle.Num() - 1; ++TriangleIndex)
@@ -1555,6 +1593,12 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		{
 			SightDebugMesh->SetMaterial(1, SightDebugMaterial);
 		}
+	}
+
+	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
+	{
+		GuardCharacter->Multicast_UpdateSightDebugMesh(
+			FlatVertices, FlatTriangles, GroundVertices, GroundTriangles, FlatFanColor, SightDebugMaterial);
 	}
 }
 

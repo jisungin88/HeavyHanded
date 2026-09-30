@@ -13,13 +13,17 @@
 
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardBlackboardKeys.h"
+#include "BehaviorTree/BlackboardComponent.h"
 //#include "AI/GuardSightAComponent.h"
 
 #include "ProceduralMeshComponent.h"
+#include "Net/UnrealNetwork.h"
 
 
 AGuardCharacter::AGuardCharacter()
 {
+	bReplicates = true;
 	//???? < AI 컨트롤러에도 있음 > 다시 이쪽으로 옮김
 	PerceptionMeterComponent = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
 
@@ -71,10 +75,105 @@ AGuardCharacter::AGuardCharacter()
 
 }
 
+void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightRadius);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightHalfAngle);
+	DOREPLIFETIME(AGuardCharacter, bReplicatedDrawSightDebug);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedDetectionGaugePercent);
+}
+
+void AGuardCharacter::OnRep_SightDebugState()
+{
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
+	}
+
+}
+
+void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedSightRadius = InSightRadius;
+	ReplicatedSightHalfAngle = InSightHalfAngle;
+	bReplicatedDrawSightDebug = bInEnabled;
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
+	}
+	ForceNetUpdate();
+}
+
+void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedDetectionGaugePercent = FMath::Clamp(InGaugePercent, 0.0f, 100.0f);
+}
+
+void AGuardCharacter::Multicast_UpdateSightDebugMesh_Implementation(
+	const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
+	const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
+	FLinearColor InFanColor, UMaterialInterface* InMaterial)
+{
+	if (!IsValid(SightDebugMesh) || !bReplicatedDrawSightDebug || FlatVertices.IsEmpty() || FlatTriangles.IsEmpty())
+	{
+		return;
+	}
+
+	TArray<FVector> FlatNormals;
+	TArray<FVector2D> FlatUV0;
+	TArray<FLinearColor> FlatVertexColors;
+	FlatNormals.Init(FVector::UpVector, FlatVertices.Num());
+	FlatUV0.Init(FVector2D::ZeroVector, FlatVertices.Num());
+	FlatVertexColors.Init(InFanColor, FlatVertices.Num());
+	TArray<FProcMeshTangent> FlatTangents;
+
+	SightDebugMesh->ClearAllMeshSections();
+	SightDebugMesh->CreateMeshSection_LinearColor(
+		0, FlatVertices, FlatTriangles, FlatNormals, FlatUV0, FlatVertexColors, FlatTangents, false);
+
+	if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+	{
+		TArray<FVector> GroundNormals;
+		TArray<FVector2D> GroundUV0;
+		TArray<FLinearColor> GroundVertexColors;
+		GroundNormals.Init(FVector::UpVector, GroundVertices.Num());
+		GroundUV0.Init(FVector2D::ZeroVector, GroundVertices.Num());
+		GroundVertexColors.Init(InFanColor, GroundVertices.Num());
+		TArray<FProcMeshTangent> GroundTangents;
+		SightDebugMesh->CreateMeshSection_LinearColor(
+			1, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, false);
+	}
+
+	if (IsValid(InMaterial))
+	{
+		SightDebugMesh->SetMaterial(0, InMaterial);
+		if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+		{
+			SightDebugMesh->SetMaterial(1, InMaterial);
+		}
+	}
+
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+}
+
 
 void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	SetHeadGaugeUpdateInterval(0.1f);
 
 	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
 
@@ -141,6 +240,23 @@ void AGuardCharacter::StopHeadGaugeUpdate()
 
 void AGuardCharacter::UpdateHeadGaugeWidget()
 {
+	if (HasAuthority())
+	{
+		AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
+		if (!IsValid(GuardAIController))
+		{
+			SetReplicatedDetectionGauge(0.0f);
+		}
+		else
+		{
+			const UBlackboardComponent* BlackboardComp = GuardAIController->GetBlackboardComponent();
+			AActor* TargetActor = IsValid(BlackboardComp)
+				? Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor))
+				: nullptr;
+			const float GaugePercent = IsValid(TargetActor) ? GuardAIController->GetDetectionGaugePercent() : 0.0f;
+			SetReplicatedDetectionGauge(GaugePercent);
+		}
+	}
 
 	if (!IsValid(DetectionGaugeWidgetComponent))
 	{
@@ -155,19 +271,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 		return;
 	}
 
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
-	if (!GuardAIController)
-	{
-		GaugeWidget->SetGaugePercent(0.f);
-		return;
-	}
-
-	// 인덱스 0 로컬 플레이어 기준. 이 프로토타입은 단일 플레이어 대상 테스트 씬이라
-	// 화면 하나에 여러 로컬 플레이어가 동시에 있는 상황(스플릿스크린)은 다루지 않는다.
-	const APawn* LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	const float GaugePercent = GuardAIController->IsTargeting(LocalPlayerPawn) ? GuardAIController->GetDetectionGaugePercent() : 0.f;
-
-	GaugeWidget->SetGaugePercent(GaugePercent);
+	GaugeWidget->SetGaugePercent(ReplicatedDetectionGaugePercent);
 }
 
 //
@@ -229,5 +333,3 @@ bool AGuardCharacter::GetPatrolLocation(int32 Index, FVector& OutLocation) const
 	OutLocation = Point->GetActorLocation();
 	return true;
 }
-
-

@@ -19,6 +19,7 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 public:
 
 	AGuardCharacter();
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 
 	// Guard Info (경비 정보)
@@ -47,6 +48,21 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
 
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedSightRadius = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedSightHalfAngle = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	bool bReplicatedDrawSightDebug = true;
+
+	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedDetectionGaugePercent = 0.0f;
+
+	UFUNCTION()
+	void OnRep_SightDebugState();
+
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
@@ -61,6 +77,15 @@ public:
 	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
 	UFUNCTION(BlueprintCallable, Category = "Guard|Debug")
 	void SetDrawSightDebugEnabled(bool bInEnabled);
+	void SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled);
+	void SetReplicatedDetectionGauge(float InGaugePercent);
+	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Perception")
+	void Multicast_UpdateSightDebugMesh(const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
+		const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
+		FLinearColor InFanColor, UMaterialInterface* InMaterial);
+	float GetReplicatedSightRadius() const { return ReplicatedSightRadius; }
+	float GetReplicatedSightHalfAngle() const { return ReplicatedSightHalfAngle; }
+	bool GetReplicatedDrawSightDebug() const { return bReplicatedDrawSightDebug; }
 
 	UProceduralMeshComponent* GetSightDebugMesh() const { return SightDebugMesh; }
 
