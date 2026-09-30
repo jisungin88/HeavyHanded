@@ -124,7 +124,7 @@ protected:
 	/** 새로 발견하는 순간(bAlarmed 가 켜질 때) 한 번 세계 경계도(0~1)에 더할 양 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Camera",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AlertGaugeIncrease = 0.25f;
+	float AlertGaugeIncrease = 0.1f;
 
 	/**
 	 * 계속 시야 안에 잡혀있는(bAlarmed 유지) 동안 초당 추가로 올릴 경계도(0~1) —
