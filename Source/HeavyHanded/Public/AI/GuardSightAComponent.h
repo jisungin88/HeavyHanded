@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "AITypes.h"
+#include "TimerManager.h"
 
 #include "GuardSightAComponent.generated.h"
 
@@ -114,8 +115,7 @@ private:
 	// 음수는 "현재 상실 상태가 아님".
 	float SightLostAtTime = -1.f;
 
-	// 시야 디버그 메시 재생성 간격 제어용.
-	float SightDebugMeshLastUpdateTime = -1.0f;
+	FTimerHandle SightDebugTimerHandle;
 
 	UPROPERTY()
 	TObjectPtr<UAIPerceptionComponent> PerceptionComp;
@@ -133,8 +133,8 @@ private:
 	void DrawSightDebug() const;
 	void DrawSightDebugMesh();
 	void DrawPerceivedActorsDebug() const;
-
-	// Called every frame
+	void UpdateSightDebug();
+	void UpdateSightDebugTimer();
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 

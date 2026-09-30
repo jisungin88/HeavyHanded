@@ -23,6 +23,7 @@
 
 
 #include "ProceduralMeshComponent.h"
+#include "TimerManager.h"
 
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemComponent.h"
@@ -32,6 +33,7 @@
 UGuardSightAComponent::UGuardSightAComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 	// Sight/Hearing 감지 설정은 생성자에서 기본값만 잡는다.
 	// 시야각·거리 등 세부 파라미터는 OnPossess -> ApplyGuardStats() 가 DT_GuardStats 에서
 	// GuardType 에 맞는 행을 찾아 덮어쓴다. 멤버(UPROPERTY)로 들고 있어야 디테일 패널에도 뜬다.
@@ -117,7 +119,65 @@ void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPer
 void UGuardSightAComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	UpdateSightDebugTimer();
 
+}
+
+void UGuardSightAComponent::UpdateSightDebugTimer()
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer not configured: World invalid. bDraw=%s"),
+			*GetNameSafe(GuardCharacter), bDrawSightDebug ? TEXT("true") : TEXT("false"));
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(SightDebugTimerHandle);
+	if (bDrawSightDebug)
+	{
+		const float UpdateInterval = IsValid(GuardCharacter)
+			? FMath::Max(GuardCharacter->GetSightDebugUpdateInterval(), 0.05f)
+			: 0.25f;
+		World->GetTimerManager().SetTimer(
+			SightDebugTimerHandle, this, &UGuardSightAComponent::UpdateSightDebug, UpdateInterval, true);
+	}
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer configured. bDraw=%s Active=%s Interval=%.2f WorldBegunPlay=%s"),
+		*GetNameSafe(GuardCharacter),
+		bDrawSightDebug ? TEXT("true") : TEXT("false"),
+		World->GetTimerManager().IsTimerActive(SightDebugTimerHandle) ? TEXT("true") : TEXT("false"),
+		IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.25f,
+		World->HasBegunPlay() ? TEXT("true") : TEXT("false"));
+}
+
+void UGuardSightAComponent::UpdateSightDebug()
+{
+	if (!bDrawSightDebug)
+	{
+		return;
+	}
+
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer fired. Interval=%.2f AIState=%s"),
+		*GetNameSafe(GuardCharacter),
+		IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.0f,
+		IsValid(GuardAIController) ? *StaticEnum<EGuardAIState>()->GetNameStringByValue(static_cast<int64>(GuardAIController->GetAIState())) : TEXT("Invalid"));
+
+	DrawSightDebugMesh();
+}
+
+void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (!bDrawSightDebug)
+	{
+		return;
+	}
+
+	// 테스트용 DebugLine과 인지 액터 표시입니다. 테스트가 끝나면 아래 호출을 주석 처리해 Tick 갱신을 끌 수 있습니다.
+	DrawSightDebug();
+	DrawPerceivedActorsDebug();
 }
 
 
@@ -209,8 +269,16 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 {
 	bDrawSightDebug = bInEnabled;
-	SightDebugMesh->SetVisibility(bInEnabled);
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetVisibility(bInEnabled);
+	}
 	SetComponentTickEnabled(bInEnabled);
+	if (bInEnabled)
+	{
+		UpdateSightDebug();
+	}
+	UpdateSightDebugTimer();
 
 	//if (!bInEnabled)
 	//{
@@ -358,31 +426,6 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
 
 
 
-// Called every frame
-void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-
-#if WITH_EDITOR
-	if (bDrawSightDebug)
-	{
-		DrawSightDebug();
-		DrawSightDebugMesh();
-		DrawPerceivedActorsDebug();
-	}
-
-#endif
-
-	// ...
-
-
-}
-
-
-
-
-
 //경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
 bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const
 {
@@ -462,6 +505,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
 
+/*
 	// ========================================================
 	// 수평 시야 외곽
 	// ========================================================
@@ -529,6 +573,8 @@ void UGuardSightAComponent::DrawSightDebug() const
 		}
 	}
 
+*/
+
 	// ========================================================
 	// 수직 시야 경계
 	// ========================================================
@@ -595,6 +641,7 @@ void UGuardSightAComponent::DrawSightDebug() const
 		}
 	}
 
+/*
 	// ========================================================
 	// 수평 좌우 경계
 	// ========================================================
@@ -669,6 +716,9 @@ void UGuardSightAComponent::DrawSightDebug() const
 			}
 		}
 
+*/
+
+	{
 		// ========================================================
 		// 양안 시야 경계
 		// ========================================================
@@ -850,14 +900,6 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	{
 		return;
 	}
-
-	constexpr float MeshUpdateInterval = 0.1f;
-	const float CurrentTime = World->GetTimeSeconds();
-	if (SightDebugMeshLastUpdateTime >= 0.0f && CurrentTime - SightDebugMeshLastUpdateTime < MeshUpdateInterval)
-	{
-		return;
-	}
-	SightDebugMeshLastUpdateTime = CurrentTime;
 
 	const float SightRadius = SightConfig->SightRadius;
 	const float HalfAngle = SightConfig->PeripheralVisionAngleDegrees;

@@ -43,15 +43,19 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bDrawSightDebug = true;
 
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
 
 
 public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float SightDebugUpdateInterval = 0.25f;
 
 	bool IsSightEnabled() const { return bEnableSight; }
 	bool IsHearingEnabled() const { return bEnableHearing; }
 	bool IsDrawSightDebugEnabled() const { return bDrawSightDebug; }
+	float GetSightDebugUpdateInterval() const { return SightDebugUpdateInterval; }
 
 	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
 	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
