@@ -1,4 +1,4 @@
-﻿#include "AI/BTService_UpdateDetectionGauge.h"
+#include "AI/BTService_UpdateDetectionGauge.h"
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AITypes.h"
@@ -128,10 +128,10 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	{
 
 		// 속도 조정 0928
-		if (AGuardAIController* GuardAIController = Cast<AGuardAIController>(AIController))
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
 		{
 			// 인지 게이지가 100에 도달했으므로 추격 속도를 적용한다.
-			GuardAIController->SetChasing(true);
+			GuardController->SetChasing(true);
 		}
 
 		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
@@ -151,6 +151,11 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	// "마지막으로 확실히 본 시점/위치"로 남는다.
 	if (bCanSeeTarget && NewGauge >= 100.f)
 	{
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+		{
+			GuardController->SetAIState(EGuardAIState::Chase);
+		}
+
 		const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
 		if (FAISystem::IsValidLocation(LastKnown))
 		{
@@ -159,6 +164,7 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		}
 	}
 
+	// 0929 변경점
 	// 상태 전환은 더 이상 여기서 하지 않는다.
 	// Pursue 브랜치는 CanSeeTarget == true 인 동안 게이지가 100에서 유지되므로 그대로 게이지 판정 사용.
 	// Investigate 브랜치는 위에서 기록한 SearchStartTime을 BTDecorator_CheckSearchTimeout이 판정한다.

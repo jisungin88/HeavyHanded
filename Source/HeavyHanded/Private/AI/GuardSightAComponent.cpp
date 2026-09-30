@@ -392,7 +392,7 @@ bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) con
 		return false;
 	}
 
-	//const AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
+	//const AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
 	//if (!GuardAIController)
 	//{
 	//	return false;
@@ -882,6 +882,20 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		GuardCharacter->GetRootComponent()->GetComponentLocation().Z + GuardCharacter->GetEyeHeight());
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, GuardCharacter);
+	AGuardAIController* GuardController = Cast<AGuardAIController>(GetOwner());
+	const bool bIsChasing = IsValid(GuardController) &&
+		GuardController->GetAIState() == EGuardAIState::Chase;
+	if (bIsChasing)
+	{
+		if (UBlackboardComponent* BlackboardComp = GuardController->GetBlackboardComponent())
+		{
+			AActor* CurrentTarget = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+			if (IsValid(CurrentTarget))
+			{
+				Params.AddIgnoredActor(CurrentTarget);
+			}
+		}
+	}
 
 	// 눈높이보다 낮은 길과 턱은 건너뛰고, 눈높이에 닿는 장애물만 찾는다.
 	TArray<float> VisibleDistances;
@@ -1046,11 +1060,12 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 	FlatNormals.Reserve(AngularPointCount + 1);
 	FlatUV0.Reserve(AngularPointCount + 1);
 	FlatVertexColors.Reserve(AngularPointCount + 1);
+	const FLinearColor FlatFanColor = bIsChasing ? FLinearColor(1.0f, 0.35f, 0.0f, 1.0f) : FLinearColor::White;
 
 	FlatVertices.Add(FlatMeshOrigin);
 	FlatNormals.Add(FVector::UpVector);
 	FlatUV0.Add(FVector2D::ZeroVector);
-	FlatVertexColors.Add(FLinearColor::White);
+	FlatVertexColors.Add(FlatFanColor);
 
 	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
 	{
@@ -1060,7 +1075,7 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		FlatVertices.Add(FlatMeshOrigin + LocalDirection * VisibleDistances[AngleIndex]);
 		FlatNormals.Add(FVector::UpVector);
 		FlatUV0.Add(FVector2D::ZeroVector);
-		FlatVertexColors.Add(FLinearColor::White);
+		FlatVertexColors.Add(FlatFanColor);
 	}
 
 	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
@@ -1070,180 +1085,198 @@ void UGuardSightAComponent::DrawSightDebugMesh()
 		FlatTriangles.Add(AngleIndex + 1);
 	}
 
-	// 낮은 길의 윗면은 평면 부채꼴과 별도 메시로 만든다.
-	// 서로 다른 높이의 바닥을 연결하지 않아 경사 삼각형이 생기지 않는다.
-	constexpr float GroundTraceUp = 1000.0f;
-	constexpr float GroundTraceDown = 5000.0f;
-	constexpr float GroundSurfaceOffset = 2.0f;
-	// 길 표면을 더 촘촘히 샘플링해 큰 삼각형 조각을 줄인다.
-	constexpr float GroundSampleSpacing = 100.0f;
-	// 같은 평면에 가까운 정점만 연결한다.
-	// 낮은 길의 경계는 끊기므로 바닥으로 내려가는 경사 삼각형이 생기지 않는다.
-	constexpr float FlatSurfaceNormalZ = 0.98f;
-	constexpr float MaxOverlayHeightDelta = 5.0f;
-	const int32 GroundRadialSegments = FMath::Clamp(FMath::CeilToInt(SightRadius / GroundSampleSpacing), 4, 24);
-	const FVector FlatMeshOriginWorld = MeshTransform.TransformPosition(FlatMeshOrigin);
-
 	TArray<FVector> GroundVertices;
 	TArray<int32> GroundTriangles;
 	TArray<FVector> GroundNormals;
 	TArray<FVector2D> GroundUV0;
 	TArray<FLinearColor> GroundVertexColors;
 	TArray<FProcMeshTangent> GroundTangents;
-	struct FGroundOverlaySample
-	{
-		FVector SampleWorldPoint = FVector::ZeroVector;
-		FVector SurfaceWorldPoint = FVector::ZeroVector;
-		FVector SurfaceWorldNormal = FVector::UpVector;
-		float SurfaceHeight = 0.0f;
-		bool bIsValid = false;
-	};
+	bool bHasGroundOverlay = false;
 
-	TArray<FGroundOverlaySample> GroundOverlaySamples;
-	const int32 GroundVertexCount = (GroundRadialSegments + 1) * AngularPointCount;
-	GroundOverlaySamples.Reserve(GroundVertexCount);
-	const int32 GroundCellCount = GroundRadialSegments * ArcSegments;
-	GroundVertices.Reserve(GroundCellCount * 8);
-	GroundNormals.Reserve(GroundCellCount * 8);
-	GroundUV0.Reserve(GroundCellCount * 8);
-	GroundVertexColors.Reserve(GroundCellCount * 8);
-	GroundTriangles.Reserve(GroundCellCount * 12);
-
-	auto QueryGroundOverlaySample = [&](const FVector& SampleWorldPoint)
+	if (!bIsChasing)
 	{
-		FGroundOverlaySample Sample;
-		Sample.SampleWorldPoint = SampleWorldPoint;
-		const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
-		const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
-		FHitResult GroundHit;
-		const bool bGroundTraceHit = World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
-		const AActor* GroundActor = GroundHit.GetActor();
-		const bool bIsWalkableGround = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
-			(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
-		const bool bIsFlatSurface = bIsWalkableGround && GroundHit.ImpactNormal.Z >= FlatSurfaceNormalZ;
-		const bool bIsAboveFlatMesh = bIsWalkableGround &&
-			GroundHit.ImpactPoint.Z > FlatMeshOriginWorld.Z + GroundSurfaceOffset;
-		const bool bIsBelowEyeHeight = bIsWalkableGround && GroundHit.ImpactPoint.Z < EyeLocation.Z;
-		Sample.bIsValid = bIsFlatSurface && bIsAboveFlatMesh && bIsBelowEyeHeight;
-		if (Sample.bIsValid)
+		// 낮은 길의 윗면은 평면 부채꼴과 별도 메시로 만든다.
+		// 서로 다른 높이의 바닥을 연결하지 않아 경사 삼각형이 생기지 않는다.
+		constexpr float GroundTraceUp = 1000.0f;
+		constexpr float GroundTraceDown = 5000.0f;
+		constexpr float GroundSurfaceOffset = 2.0f;
+		// 길 표면을 더 촘촘히 샘플링해 큰 삼각형 조각을 줄인다.
+		constexpr float GroundSampleSpacing = 100.0f;
+		// 같은 평면에 가까운 정점만 연결한다.
+		// 낮은 길의 경계는 끊기므로 바닥으로 내려가는 경사 삼각형이 생기지 않는다.
+		constexpr float FlatSurfaceNormalZ = 0.98f;
+		constexpr float MaxOverlayHeightDelta = 5.0f;
+		const int32 GroundRadialSegments = FMath::Clamp(FMath::CeilToInt(SightRadius / GroundSampleSpacing), 4, 24);
+		const FVector FlatMeshOriginWorld = MeshTransform.TransformPosition(FlatMeshOrigin);
+
+		struct FGroundOverlaySample
 		{
-			Sample.SurfaceWorldPoint = GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
-			Sample.SurfaceWorldNormal = GroundHit.ImpactNormal;
-			Sample.SurfaceHeight = GroundHit.ImpactPoint.Z;
-		}
-		return Sample;
-	};
+			FVector SampleWorldPoint = FVector::ZeroVector;
+			FVector SurfaceWorldPoint = FVector::ZeroVector;
+			FVector SurfaceWorldNormal = FVector::UpVector;
+			float SurfaceHeight = 0.0f;
+			bool bIsValid = false;
+		};
 
-	for (int32 RadialIndex = 0; RadialIndex <= GroundRadialSegments; ++RadialIndex)
-	{
-		const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(GroundRadialSegments);
-		for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+		TArray<FGroundOverlaySample> GroundOverlaySamples;
+		const int32 GroundVertexCount = (GroundRadialSegments + 1) * AngularPointCount;
+		GroundOverlaySamples.Reserve(GroundVertexCount);
+		const int32 GroundCellCount = GroundRadialSegments * ArcSegments;
+		GroundVertices.Reserve(GroundCellCount * 8);
+		GroundNormals.Reserve(GroundCellCount * 8);
+		GroundUV0.Reserve(GroundCellCount * 8);
+		GroundVertexColors.Reserve(GroundCellCount * 8);
+		GroundTriangles.Reserve(GroundCellCount * 12);
+
+		auto QueryGroundOverlaySample = [&](const FVector& SampleWorldPoint)
 		{
-			const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
-			const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
-			const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
-			const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
-			const float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
-			const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
-			GroundOverlaySamples.Add(QueryGroundOverlaySample(SampleWorldPoint));
-		}
-	}
-
-	// 삼각형 단위로 유효한 지면 경계를 찾아 잘라낸다.
-	TArray<FGroundOverlaySample> ClippedTriangle;
-	ClippedTriangle.Reserve(4);
-	auto AddClippedGroundTriangle = [&](int32 FirstIndex, int32 SecondIndex, int32 ThirdIndex)
-	{
-		const int32 TriangleIndices[] = { FirstIndex, SecondIndex, ThirdIndex };
-		ClippedTriangle.Reset();
-		for (int32 EdgeIndex = 0; EdgeIndex < UE_ARRAY_COUNT(TriangleIndices); ++EdgeIndex)
-		{
-			const FGroundOverlaySample& EdgeStart = GroundOverlaySamples[TriangleIndices[EdgeIndex]];
-			const FGroundOverlaySample& EdgeEnd = GroundOverlaySamples[
-				TriangleIndices[(EdgeIndex + 1) % UE_ARRAY_COUNT(TriangleIndices)]];
-
-			if (EdgeStart.bIsValid)
+			FGroundOverlaySample Sample;
+			Sample.SampleWorldPoint = SampleWorldPoint;
+			const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
+			const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
+			FHitResult GroundHit;
+			const bool bGroundTraceHit = World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
+			const AActor* GroundActor = GroundHit.GetActor();
+			const bool bIsWalkableGround = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+				(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
+			const bool bIsFlatSurface = bIsWalkableGround && GroundHit.ImpactNormal.Z >= FlatSurfaceNormalZ;
+			const bool bIsAboveFlatMesh = bIsWalkableGround &&
+				GroundHit.ImpactPoint.Z > FlatMeshOriginWorld.Z + GroundSurfaceOffset;
+			const bool bIsBelowEyeHeight = bIsWalkableGround && GroundHit.ImpactPoint.Z < EyeLocation.Z;
+			Sample.bIsValid = bIsFlatSurface && bIsAboveFlatMesh && bIsBelowEyeHeight;
+			if (Sample.bIsValid)
 			{
-				ClippedTriangle.Add(EdgeStart);
+				Sample.SurfaceWorldPoint = GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
+				Sample.SurfaceWorldNormal = GroundHit.ImpactNormal;
+				Sample.SurfaceHeight = GroundHit.ImpactPoint.Z;
 			}
+			return Sample;
+		};
 
-			if (EdgeStart.bIsValid == EdgeEnd.bIsValid)
+		for (int32 RadialIndex = 0; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+		{
+			const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(GroundRadialSegments);
+			for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
 			{
-				continue;
+				const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+				const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+				const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+				const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+				const float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
+				const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
+				GroundOverlaySamples.Add(QueryGroundOverlaySample(SampleWorldPoint));
 			}
+		}
 
-			float ValidAlpha = EdgeStart.bIsValid ? 0.0f : 1.0f;
-			float InvalidAlpha = EdgeStart.bIsValid ? 1.0f : 0.0f;
-			FGroundOverlaySample BoundarySample = EdgeStart.bIsValid ? EdgeStart : EdgeEnd;
-			for (int32 SubdivisionIndex = 0; SubdivisionIndex < 8; ++SubdivisionIndex)
+		// 삼각형 단위로 유효한 지면 경계를 찾아 잘라낸다.
+		TArray<FGroundOverlaySample> ClippedTriangle;
+		ClippedTriangle.Reserve(4);
+		TMap<uint64, FGroundOverlaySample> BoundarySampleCache;
+		BoundarySampleCache.Reserve(GroundCellCount * 2);
+		auto AddClippedGroundTriangle = [&](int32 FirstIndex, int32 SecondIndex, int32 ThirdIndex)
+		{
+			const int32 TriangleIndices[] = { FirstIndex, SecondIndex, ThirdIndex };
+			ClippedTriangle.Reset();
+			for (int32 EdgeIndex = 0; EdgeIndex < UE_ARRAY_COUNT(TriangleIndices); ++EdgeIndex)
 			{
-				const float TestAlpha = (ValidAlpha + InvalidAlpha) * 0.5f;
-				const FVector TestWorldPoint = FMath::Lerp(
-					EdgeStart.SampleWorldPoint, EdgeEnd.SampleWorldPoint, TestAlpha);
-				const FGroundOverlaySample TestSample = QueryGroundOverlaySample(TestWorldPoint);
-				if (TestSample.bIsValid)
+				const int32 EdgeStartIndex = TriangleIndices[EdgeIndex];
+				const int32 EdgeEndIndex = TriangleIndices[(EdgeIndex + 1) % UE_ARRAY_COUNT(TriangleIndices)];
+				const FGroundOverlaySample& EdgeStart = GroundOverlaySamples[EdgeStartIndex];
+				const FGroundOverlaySample& EdgeEnd = GroundOverlaySamples[EdgeEndIndex];
+
+				if (EdgeStart.bIsValid)
 				{
-					ValidAlpha = TestAlpha;
-					BoundarySample = TestSample;
+					ClippedTriangle.Add(EdgeStart);
 				}
-				else
+
+				if (EdgeStart.bIsValid == EdgeEnd.bIsValid)
 				{
-					InvalidAlpha = TestAlpha;
+					continue;
 				}
+
+				const uint64 BoundaryCacheKey =
+					(static_cast<uint64>(FMath::Min(EdgeStartIndex, EdgeEndIndex)) << 32) |
+					static_cast<uint64>(FMath::Max(EdgeStartIndex, EdgeEndIndex));
+				if (const FGroundOverlaySample* CachedSample = BoundarySampleCache.Find(BoundaryCacheKey))
+				{
+					ClippedTriangle.Add(*CachedSample);
+					continue;
+				}
+
+				float ValidAlpha = EdgeStart.bIsValid ? 0.0f : 1.0f;
+				float InvalidAlpha = EdgeStart.bIsValid ? 1.0f : 0.0f;
+				FGroundOverlaySample BoundarySample = EdgeStart.bIsValid ? EdgeStart : EdgeEnd;
+				for (int32 SubdivisionIndex = 0; SubdivisionIndex < 8; ++SubdivisionIndex)
+				{
+					const float TestAlpha = (ValidAlpha + InvalidAlpha) * 0.5f;
+					const FVector TestWorldPoint = FMath::Lerp(
+						EdgeStart.SampleWorldPoint, EdgeEnd.SampleWorldPoint, TestAlpha);
+					const FGroundOverlaySample TestSample = QueryGroundOverlaySample(TestWorldPoint);
+					if (TestSample.bIsValid)
+					{
+						ValidAlpha = TestAlpha;
+						BoundarySample = TestSample;
+					}
+					else
+					{
+						InvalidAlpha = TestAlpha;
+					}
+				}
+				BoundarySampleCache.Add(BoundaryCacheKey, BoundarySample);
+				ClippedTriangle.Add(BoundarySample);
 			}
-			ClippedTriangle.Add(BoundarySample);
+
+			if (ClippedTriangle.Num() < 3)
+			{
+				return;
+			}
+
+			float MinHeight = ClippedTriangle[0].SurfaceHeight;
+			float MaxHeight = MinHeight;
+			for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+			{
+				MinHeight = FMath::Min(MinHeight, TriangleSample.SurfaceHeight);
+				MaxHeight = FMath::Max(MaxHeight, TriangleSample.SurfaceHeight);
+			}
+			if (MaxHeight - MinHeight > MaxOverlayHeightDelta)
+			{
+				return;
+			}
+
+			const int32 TriangleVertexStart = GroundVertices.Num();
+			for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+			{
+				GroundVertices.Add(MeshTransform.InverseTransformPosition(TriangleSample.SurfaceWorldPoint));
+				GroundNormals.Add(MeshTransform.InverseTransformVectorNoScale(TriangleSample.SurfaceWorldNormal).GetSafeNormal());
+				GroundUV0.Add(FVector2D::ZeroVector);
+				GroundVertexColors.Add(FLinearColor::White);
+			}
+
+			for (int32 TriangleIndex = 1; TriangleIndex < ClippedTriangle.Num() - 1; ++TriangleIndex)
+			{
+				GroundTriangles.Add(TriangleVertexStart);
+				GroundTriangles.Add(TriangleVertexStart + TriangleIndex);
+				GroundTriangles.Add(TriangleVertexStart + TriangleIndex + 1);
+			}
+		};
+
+		for (int32 RadialIndex = 1; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+		{
+			const int32 InnerBase = (RadialIndex - 1) * AngularPointCount;
+			const int32 OuterBase = RadialIndex * AngularPointCount;
+			for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+			{
+				const int32 InnerCurrent = InnerBase + AngleIndex;
+				const int32 InnerNext = InnerCurrent + 1;
+				const int32 OuterCurrent = OuterBase + AngleIndex;
+				const int32 OuterNext = OuterCurrent + 1;
+				AddClippedGroundTriangle(InnerCurrent, InnerNext, OuterNext);
+				AddClippedGroundTriangle(OuterNext, OuterCurrent, InnerCurrent);
+			}
 		}
 
-		if (ClippedTriangle.Num() < 3)
-		{
-			return;
-		}
-
-		float MinHeight = ClippedTriangle[0].SurfaceHeight;
-		float MaxHeight = MinHeight;
-		for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
-		{
-			MinHeight = FMath::Min(MinHeight, TriangleSample.SurfaceHeight);
-			MaxHeight = FMath::Max(MaxHeight, TriangleSample.SurfaceHeight);
-		}
-		if (MaxHeight - MinHeight > MaxOverlayHeightDelta)
-		{
-			return;
-		}
-
-		const int32 TriangleVertexStart = GroundVertices.Num();
-		for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
-		{
-			GroundVertices.Add(MeshTransform.InverseTransformPosition(TriangleSample.SurfaceWorldPoint));
-			GroundNormals.Add(MeshTransform.InverseTransformVectorNoScale(TriangleSample.SurfaceWorldNormal).GetSafeNormal());
-			GroundUV0.Add(FVector2D::ZeroVector);
-			GroundVertexColors.Add(FLinearColor::White);
-		}
-
-		for (int32 TriangleIndex = 1; TriangleIndex < ClippedTriangle.Num() - 1; ++TriangleIndex)
-		{
-			GroundTriangles.Add(TriangleVertexStart);
-			GroundTriangles.Add(TriangleVertexStart + TriangleIndex);
-			GroundTriangles.Add(TriangleVertexStart + TriangleIndex + 1);
-		}
-	};
-
-	for (int32 RadialIndex = 1; RadialIndex <= GroundRadialSegments; ++RadialIndex)
-	{
-		const int32 InnerBase = (RadialIndex - 1) * AngularPointCount;
-		const int32 OuterBase = RadialIndex * AngularPointCount;
-		for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
-		{
-			const int32 InnerCurrent = InnerBase + AngleIndex;
-			const int32 InnerNext = InnerCurrent + 1;
-			const int32 OuterCurrent = OuterBase + AngleIndex;
-			const int32 OuterNext = OuterCurrent + 1;
-			AddClippedGroundTriangle(InnerCurrent, InnerNext, OuterNext);
-			AddClippedGroundTriangle(OuterNext, OuterCurrent, InnerCurrent);
-		}
+		bHasGroundOverlay = GroundTriangles.Num() > 0;
 	}
-
-	const bool bHasGroundOverlay = GroundTriangles.Num() > 0;
 
 	/*
 	//작동시삭제0929
