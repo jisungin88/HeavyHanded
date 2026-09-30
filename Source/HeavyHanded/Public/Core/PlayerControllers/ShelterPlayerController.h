@@ -29,6 +29,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	const FString&, Message
 );
 
+UENUM(BlueprintType)
+enum class ERescueResult : uint8
+{
+	Success,
+	RequesterArrested,
+	NotArrested,
+	NotEnoughGold,
+	Invalid,
+};
 
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerController : public AHeavyHandedPlayerController
@@ -187,6 +196,19 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Travel")
 	void BP_OnDepartBegin();
+
+public:
+	// --- 구출
+
+	/** 동료 구출 */
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable, Category = "Shelter|Rescue")
+	void ServerRequestRescue(APlayerState* Target);
+
+	UFUNCTION(Client, Reliable)
+	void Client_NotifyRescueResult(ERescueResult Result);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Rescue")
+	void BP_OnRescueResult(ERescueResult Result);
 
 protected:
 	UFUNCTION()

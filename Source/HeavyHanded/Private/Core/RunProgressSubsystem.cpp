@@ -330,6 +330,7 @@ void URunProgressSubsystem::RecordArrested(const TArray<FUniqueNetIdRepl>& Arres
 	{
 		UE_LOG(LogHeist, Log, TEXT("체포 %d명 기록 — 구출 대기 총 %d명"),
 			AddedNum, ArrestedPlayers.Num());
+		OnArrestedChanged.Broadcast();
 	}
 }
 
@@ -363,6 +364,7 @@ bool URunProgressSubsystem::TryRescue(const FUniqueNetIdRepl& PlayerId, int32 Co
 	}
 
 	ArrestedPlayers.Remove(PlayerId);
+	OnArrestedChanged.Broadcast();
 
 	UE_LOG(LogHeist, Log, TEXT("구출 — 비용 $%d, 잔액 $%d, 남은 체포자 %d명"),
 		Cost, TeamGold, ArrestedPlayers.Num());
@@ -398,6 +400,7 @@ void URunProgressSubsystem::ReleaseArrested(const TArray<FUniqueNetIdRepl>& Play
 	{
 		UE_LOG(LogHeist, Log, TEXT("관전 %d명 형기 만료 — 구출 대기 %d명 남음"),
 			ReleasedNum, ArrestedPlayers.Num());
+		OnArrestedChanged.Broadcast();
 	}
 }
 

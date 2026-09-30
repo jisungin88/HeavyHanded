@@ -17,6 +17,9 @@ void AShelterGameMode::PostLogin(APlayerController* NewPlayer)
 		return;
 	}
 
+	// 폰 스폰보다 먼저 채워야 서버쪽 폰이 처음부터 체포 상태를 본다
+	PS->SetArrested(Run->IsArrested(PS->GetUniqueId()));
+
 	const FString SavedNick = Run->GetNickname(PS->GetUniqueId());
 	if (!SavedNick.IsEmpty())
 	{
@@ -147,5 +150,42 @@ void AShelterGameMode::HandleMatchHasStarted()
 	if (AShelterGameState* GS = GetGameState<AShelterGameState>())
 	{
 		GS->PublishRunProgress();
+	}
+}
+
+void AShelterGameMode::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+		ArrestedChangedHandle = Run->OnArrestedChanged.AddUObject(this, &AShelterGameMode::SyncArrestedFlags);
+	}
+}
+
+void AShelterGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (URunProgressSubsystem* Run = URunProgressSubsystem::Get(this))
+	{
+		Run->OnArrestedChanged.Remove(ArrestedChangedHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void AShelterGameMode::SyncArrestedFlags()
+{
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Run || !GameState)
+	{
+		return;
+	}
+
+	for (APlayerState* Player : GameState->PlayerArray)
+	{
+		if (AShelterPlayerState* PS = Cast<AShelterPlayerState>(Player))
+		{
+			PS->SetArrested(Run->IsArrested(PS->GetUniqueId()));
+		}
 	}
 }

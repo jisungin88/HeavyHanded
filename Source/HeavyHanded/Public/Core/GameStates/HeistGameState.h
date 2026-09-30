@@ -206,6 +206,12 @@ public:
 	/** 체포된 사람들. 결과 화면의 체포 명단 */
 	const TArray<TObjectPtr<APlayerState>>& GetArrestedPlayers() const { return ArrestedPlayers; }
 
+	/** 인원 계산 대상 수. 관전자와 끊긴 PlayerState는 빠진다 */
+	int32 GetCountedNum() const;
+
+	/** 탈출 인원 */
+	int32 GetEscapedNum() const;
+
 	/**
 	 * 승차 상태를 갱신한다. (서버 전용 — AVanZone 이 부른다)
 	 * State.InVan 미러도 여기서 같이 붙고 떨어진다. 따로 부르는 구조면 한쪽만 부른 경로가

@@ -635,6 +635,55 @@ void AShelterPlayerController::Client_NotifyDepartBlocked_Implementation()
 	BP_OnDepartBlocked();
 }
 
+void AShelterPlayerController::ServerRequestRescue_Implementation(APlayerState* Target)
+{
+	const AShelterPlayerState* Requester = GetPlayerState<AShelterPlayerState>();
+	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	if (!Requester || !Run || !IsValid(Target))
+	{
+		Client_NotifyRescueResult(ERescueResult::Invalid);
+		return;
+	}
+
+	if (Run->IsArrested(Requester->GetUniqueId()))
+	{
+		Client_NotifyRescueResult(ERescueResult::RequesterArrested);
+		return;
+	}
+
+	if (!Run->IsArrested(Target->GetUniqueId()))
+	{
+		Client_NotifyRescueResult(ERescueResult::NotArrested);
+		return;
+	}
+
+	if (!Run->TryRescue(Target->GetUniqueId(), UHeistSettings::Get()->RescueCost))
+	{
+		Client_NotifyRescueResult(ERescueResult::NotEnoughGold);
+		return;
+	}
+
+	if (AShelterGameState* GS = GetWorld()->GetGameState<AShelterGameState>())
+	{
+		GS->PublishRunProgress();
+	}
+
+	UE_LOG(LogHeist, Log, TEXT("%s 가 %s 를 구출했습니다."),
+	       *Requester->GetPlayerName(), *Target->GetPlayerName());
+
+	Client_NotifyRescueResult(ERescueResult::Success);
+}
+
+bool AShelterPlayerController::ServerRequestRescue_Validate(APlayerState* Target)
+{
+	return true;
+}
+
+void AShelterPlayerController::Client_NotifyRescueResult_Implementation(ERescueResult Result)
+{
+	BP_OnRescueResult(Result);
+}
+
 void AShelterPlayerController::HandleDepartingChanged(bool bNewDeparting)
 {
 	if (!bNewDeparting || !IsLocalController())
@@ -750,6 +799,30 @@ void AShelterPlayerController::IngameTravel()
 		       TEXT("출발 실패 — %s 의 레벨이 비어 있습니다. Site Levels 항목의 Level 을 지정하세요."),
 		       *NextSite.ToString());
 		return;
+	}
+
+	// --- 체포자만 남았으면 해제
+	if (const AGameStateBase* GS = World->GetGameState())
+	{
+		TArray<FUniqueNetIdRepl> PresentIds;
+		bool bAnyoneFree = false;
+
+		for (const APlayerState* PS : GS->PlayerArray)
+		{
+			if (!IsValid(PS))
+			{
+				continue;
+			}
+
+			PresentIds.Add(PS->GetUniqueId());
+			bAnyoneFree |= !Run->IsArrested(PS->GetUniqueId());
+		}
+
+		if (!bAnyoneFree && !PresentIds.IsEmpty())
+		{
+			UE_LOG(LogHeist, Log, TEXT("체포자만 남아 %d명을 해제하고 출발합니다."), PresentIds.Num());
+			Run->ReleaseArrested(PresentIds);
+		}
 	}
 
 	// ── 명단 확정 ──
