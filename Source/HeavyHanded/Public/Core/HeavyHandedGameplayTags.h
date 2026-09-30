@@ -196,4 +196,7 @@ namespace HHTags
 
 	/** 정찰 드론. 던져 놓으면 떠올라 조종하고, 그 시점으로 잠긴 스테이지 안을 미리 본다 */
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_Drone);
+
+	/** EMP 장치. 던져서 터뜨리면 반경 안 감시 카메라가 일정 시간 멈춘다 */
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Equipment_EMP);
 }
