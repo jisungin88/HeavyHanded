@@ -7,10 +7,12 @@
 #include "GameplayTagContainer.h"  // FGameplayTag — 아래 TMap 의 키라 전방 선언이 불가능하다
 #include "UISettings.generated.h"
 
-class UDataTable;            // TSoftObjectPtr 의 인자로만 쓴다
-class ULoadingScreenWidget;  // TSoftClassPtr 의 인자로만 쓴다
-class UStartWaitWidget;      // TSoftClassPtr 의 인자로만 쓴다
-class UTexture2D;            // TSoftObjectPtr 의 인자로만 쓴다
+class UDataTable;
+class ULoadingScreenWidget;
+class UStartWaitWidget;
+class UTexture2D;
+class UToastWidget;
+
 
 // 색 토큰 (UISystem.md 2장). 시안 5장에서 픽셀 실측한 값이다.
 // 이름은 토큰 표를 그대로 따른다 — 쓰는 자리(예: ButtonColor)로 이름을 붙이면
@@ -396,4 +398,25 @@ public:
 	/** 배경을 덮는 어두운 판의 불투명도. 색은 배경 토큰을 그대로 쓴다 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "StartWait", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float PartyWaitDimOpacity = 0.35f;
+
+	// --- 토스트
+
+	/** 토스트 위젯 */
+	UPROPERTY(config, EditAnywhere, Category = "Toast")
+	TSoftClassPtr<UToastWidget> ToastWidgetClass;
+
+	/** 토스트가 기본적으로 떠 있는 시간 */
+	UPROPERTY(config, EditAnywhere, Category = "Toast", meta = (ClampMin = "0.5", Units = "s"))
+	float ToastDefaultDuration = 2.f;
+
+	/** 다음 토스트가 뜨는 여유 시간 */
+	UPROPERTY(config, EditAnywhere, Category = "Toast", meta = (ClampMin = "0", Units = "s"))
+	float ToastGapSeconds = 0.3f;
+
+	/** 토스트 최대 대기 수 */
+	UPROPERTY(config, EditAnywhere, Category = "Toast", meta = (ClampMin = "1"))
+	int32 ToastMaxQueue = 5;
+
+	UPROPERTY(config, EditAnywhere, Category = "Toast")
+	int32 ToastZOrder = 100;
 };
