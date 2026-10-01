@@ -19,6 +19,9 @@ class AGuardCharacter : public ACharacter, public IGenericTeamAgentInterface
 public:
 
 	AGuardCharacter();
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const override;
+	FTransform GetEyeSocketTransform() const;
 
 
 	// Guard Info (경비 정보)
@@ -43,20 +46,62 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 1, AllowPrivateAccess = "true"))
 	bool bDrawSightDebug = true;
 
+	// 켜면 EyeSocket의 위치와 회전을 경비 시야 판정 및 시야 메시 방향에 사용한다.
+	// 끄면 EyeSocket을 무시하고 캐릭터 위치와 회전 기준으로 동작한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 2, AllowPrivateAccess = "true"))
+	bool bUseEyeSocketForSight = true;
+
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UProceduralMeshComponent> SightDebugMesh;
 
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedSightRadius = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedSightHalfAngle = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	bool bReplicatedDrawSightDebug = true;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugRotation, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	FRotator ReplicatedSightDebugRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	float ReplicatedDetectionGaugePercent = 0.0f;
+
+	UFUNCTION()
+	void OnRep_SightDebugState();
+
+	UFUNCTION()
+	void OnRep_SightDebugRotation();
+
 
 public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	float SightDebugUpdateInterval = 0.25f;
 
 	bool IsSightEnabled() const { return bEnableSight; }
 	bool IsHearingEnabled() const { return bEnableHearing; }
 	bool IsDrawSightDebugEnabled() const { return bDrawSightDebug; }
+	bool IsEyeSocketSightEnabled() const { return bUseEyeSocketForSight; }
+	FRotator GetSightSocketRotation() const;
+	float GetSightDebugUpdateInterval() const { return SightDebugUpdateInterval; }
 
 	void SetSightEnabled(bool bInEnabled) { bEnableSight = bInEnabled; }
 	void SetHearingEnabled(bool bInEnabled) { bEnableHearing = bInEnabled; }
 	UFUNCTION(BlueprintCallable, Category = "Guard|Debug")
 	void SetDrawSightDebugEnabled(bool bInEnabled);
+	void SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled);
+	void SetReplicatedSightDebugRotation(FRotator InRotation);
+	void SetReplicatedDetectionGauge(float InGaugePercent);
+	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Perception")
+	void Multicast_UpdateSightDebugMesh(const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
+		const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
+		FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial);
+	float GetReplicatedSightRadius() const { return ReplicatedSightRadius; }
+	float GetReplicatedSightHalfAngle() const { return ReplicatedSightHalfAngle; }
+	bool GetReplicatedDrawSightDebug() const { return bReplicatedDrawSightDebug; }
 
 	UProceduralMeshComponent* GetSightDebugMesh() const { return SightDebugMesh; }
 

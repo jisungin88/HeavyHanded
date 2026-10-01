@@ -483,8 +483,11 @@ void AGuardAIController::SetAIState(EGuardAIState NewState)
 	AGuardCharacter* GuardPawn = PossessGuardPawn.Get();
 	const FString PawnName = IsValid(GuardPawn) ? GuardPawn->GetName() : TEXT("InvalidPawn");
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] AI State 변경: %d -> %d"),
-		*PawnName, static_cast<int32>(AIState), static_cast<int32>(NewState));
+	const UEnum* GuardAIStateEnum = StaticEnum<EGuardAIState>();
+	const FString PreviousStateName = GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(AIState));
+	const FString NewStateName = GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(NewState));
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] AI State 변경: %s -> %s"),
+		*PawnName, *PreviousStateName, *NewStateName);
 
 	AIState = NewState;
 }

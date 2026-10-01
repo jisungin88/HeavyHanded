@@ -45,9 +45,11 @@ class AGuardAIController : public AAIController
 public:
 	AGuardAIController();
 
+
+
+
 	// Guard Info (경비 정보)
 	// ========================================================
-
 
 protected:
 
