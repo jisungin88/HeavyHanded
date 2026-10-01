@@ -6,6 +6,7 @@
 #include "HeavyHandedPlayerController.generated.h"
 
 class UUserWidget;
+class UVoiceChatComponent;
 class UToastComponent;
 
 /**
@@ -81,12 +82,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "HeavyHanded|Input")
 	UObject* GetUIFocusOwner() const { return UIFocusOwner.Get(); }
 
+	// --- 보이스 챗
+
+	UFUNCTION(BlueprintPure, Category = "HeavyHanded|Voice")
+	UVoiceChatComponent* GetVoiceChatComponent() const { return VoiceChatComponent; }
+
 	// --- 토스트
 	UFUNCTION(BlueprintPure, Category = "HeavyHanded|Toast")
 	UToastComponent* GetToastComponent() const { return ToastComponent; }
 
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void SetupInputComponent() override;
 
 	/**
 	 * 화면에 붙일 HUD 위젯. BP 에서 값으로 지정한다.
@@ -114,6 +121,9 @@ private:
 	 * "포커스 없음" 으로 보는데 화면에는 커서가 그대로 남아 둘이 어긋난다.
 	 */
 	bool bUIFocused = false;
+
+	UPROPERTY(VisibleAnywhere, Category = "HeavyHanded|Voice")
+	TObjectPtr<UVoiceChatComponent> VoiceChatComponent;
 
 	// --- 토스트
 

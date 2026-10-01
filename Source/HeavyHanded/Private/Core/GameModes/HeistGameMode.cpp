@@ -549,6 +549,8 @@ void AHeistGameMode::PostLogin(APlayerController* NewPlayer)
 {
 	Super::PostLogin(NewPlayer);
 
+	MuteSpectatorVoices();
+
 	// 접속 대기와 무관하게, 들어온 사람은 전부 다운 감시 대상이다.
 	// 아래 이른 반환보다 위에 있어야 하는 이유가 이것이다 — 판이 시작된 뒤 들어온
 	// 사람(재접속)도 감시해야 한다
@@ -1036,6 +1038,34 @@ void AHeistGameMode::PublishNextSite()
 			GS->NextSite.IsValid() ? *GS->NextSite.ToString() : TEXT("(없음 — 최종 성공)"));
 }
 
+void AHeistGameMode::MuteSpectatorVoices()
+{
+	UWorld* World = GetWorld();
+	if (!World || !GameState)
+	{
+		return;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* Listener = It->Get();
+		if (!IsValid(Listener))
+		{
+			continue;
+		}
+
+		for (const APlayerState* Speaker : GameState->PlayerArray)
+		{
+			if (!IsValid(Speaker) || Speaker == Listener->PlayerState || !Speaker->IsOnlyASpectator())
+			{
+				continue;
+			}
+
+			Listener->GameplayMutePlayer(Speaker->GetUniqueId());
+		}
+	}
+}
+
 void AHeistGameMode::CarryOverArrests()
 {
 	const AHeistGameState* GS = GetGameState<AHeistGameState>();
@@ -1470,6 +1500,10 @@ static void SpectateForceCommand(const TArray<FString>& Args, UWorld* World)
 
 	// 정상 경로(InitNewPlayer)와 같은 신호
 	Target->SetIsOnlyASpectator(true);
+	if (AHeistGameMode* GM = World->GetAuthGameMode<AHeistGameMode>())
+	{
+		GM->MuteSpectatorVoices();
+	}
 
 	// 폰 삭제
 	APawn* Pawn = FindPawnForPlayerState(World, Target);
