@@ -1,6 +1,13 @@
 ﻿#include "Core/PlayerControllers/HeavyHandedPlayerController.h"
 
 #include "Blueprint/UserWidget.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputAction.h"
+#include "InputMappingContext.h"
+#include "Voice/VoiceChatComponent.h"
+#include "Voice/VoiceChatSettings.h"
+#include "UI/ToastComponent.h"
 
 /**
  * 이 베이스만의 로그 카테고리. LogHeist 를 쓰지 않는 것은 이 클래스가 코어 루프 소유가
@@ -137,9 +144,47 @@ void AHeavyHandedPlayerController::ApplyInputMode(bool bInUIFocused, EHHUIFocusM
 
 // ──────────────────────────────────────────────────────────────
 
+AHeavyHandedPlayerController::AHeavyHandedPlayerController()
+{
+	VoiceChatComponent = CreateDefaultSubobject<UVoiceChatComponent>(TEXT("VoiceChatComponent"));
+	ToastComponent = CreateDefaultSubobject<UToastComponent>(TEXT("ToastComponent"));
+}
+
 void AHeavyHandedPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	RemoveHUDWidget();
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void AHeavyHandedPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+
+	const UVoiceChatSettings* Settings = UVoiceChatSettings::Get();
+	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent);
+	UInputMappingContext* IMC = Settings->VoiceMappingContext.LoadSynchronous();
+	ULocalPlayer* LP = GetLocalPlayer();
+	UEnhancedInputLocalPlayerSubsystem* Sub =
+		LP ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP) : nullptr;
+
+	if (!EIC  || !IMC || !Sub || !VoiceChatComponent)
+	{
+		UE_LOG(LogHHPlayerController, Warning,
+		       TEXT("보이스 입력을 붙이지 못했습니다 (EIC=%d, IMC=%d, Sub=%d). "
+			       "Project Settings > Game > Voice Chat 에서 지정하세요."),
+		       EIC != nullptr, IMC != nullptr, Sub != nullptr);
+		return;
+	}
+	Sub->AddMappingContext(IMC, Settings->VoiceInputPriority);
+	if (UInputAction* PushToTalk = Settings->PushToTalkAction.LoadSynchronous())
+	{
+		EIC->BindAction(PushToTalk, ETriggerEvent::Started, VoiceChatComponent.Get(), &UVoiceChatComponent::OnPushToTalkPressed);
+		EIC->BindAction(PushToTalk, ETriggerEvent::Completed, VoiceChatComponent.Get(), &UVoiceChatComponent::OnPushToTalkReleased);
+	}
+
+	if (UInputAction* ToggleOpenMic = Settings->ToggleOpenMicAction.LoadSynchronous())
+	{
+		EIC->BindAction(ToggleOpenMic, ETriggerEvent::Started, VoiceChatComponent.Get(), &UVoiceChatComponent::ToggleOpenMic);
+	}
 }
