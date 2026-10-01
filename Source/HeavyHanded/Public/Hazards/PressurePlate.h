@@ -95,6 +95,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> AlarmSound;
 
+	/** 경보음 볼륨 배율. 테스트해보니 너무 커서 1/3 수준으로 낮춤 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AlarmVolumeMultiplier = 0.33f;
+
 private:
 	/** 경보가 울린 순간 모든 머신에서 재생한다. 상태를 남기지 않으므로 Unreliable 이다 */
 	UFUNCTION(NetMulticast, Unreliable)

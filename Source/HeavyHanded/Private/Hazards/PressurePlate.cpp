@@ -113,5 +113,6 @@ void APressurePlate::Multicast_PlayAlarmSound_Implementation()
 	{
 		AlarmAudioComponent->Stop();
 	}
-	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation());
+	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation(),
+		FRotator::ZeroRotator, AlarmVolumeMultiplier);
 }
