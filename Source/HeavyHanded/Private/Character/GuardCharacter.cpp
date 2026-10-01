@@ -4,6 +4,7 @@
 //#include "Noise/PerceptionMeterComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/ArrowComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -92,11 +93,27 @@ FTransform AGuardCharacter::GetEyeSocketTransform() const
 
 FRotator AGuardCharacter::GetSightSocketRotation() const
 {
-	// EyeSocket의 로컬 정면 축이 경비 시야 정면에서 왼쪽으로 90도 돌아 있어
-	// 소켓 회전을 그대로 쓰면 메시와 AI Perception이 함께 옆을 향한다.
-	FRotator SightRotation = GetEyeSocketTransform().Rotator();
-	SightRotation.Yaw += 90.0f;
-	return SightRotation;
+	static const FName EyeSocketName(TEXT("EyeSocket"));
+	const USkeletalMeshComponent* CharacterMesh = GetMesh();
+	if (bUseEyeSocketForSight && IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(EyeSocketName))
+	{
+		// EyeSocket을 사용하는 경우에만 소켓의 정면 축을 보정한다.
+		FRotator SightRotation = CharacterMesh->GetSocketTransform(EyeSocketName, RTS_World).Rotator();
+		SightRotation.Yaw += 90.0f;
+		return SightRotation;
+	}
+
+#if WITH_EDITORONLY_DATA
+	const UArrowComponent* CharacterArrow = GetArrowComponent();
+	if (IsValid(CharacterArrow))
+	{
+		return CharacterArrow->GetComponentRotation();
+	}
+#endif
+
+	// 기본 화살표가 제외되는 패키징에서는 캡슐의 정면 방향을 사용한다.
+	const UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
+	return IsValid(CharacterCapsule) ? CharacterCapsule->GetComponentRotation() : GetActorRotation();
 }
 
 void AGuardCharacter::GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const

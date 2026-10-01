@@ -43,6 +43,7 @@
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "EngineUtils.h"
+#include "DrawDebugHelpers.h"
 
 // UI
 //#include "Components/WidgetComponent.h"
@@ -60,6 +61,9 @@ DEFINE_LOG_CATEGORY(LogGuardAI);
 // 1. 생성자
 AGuardAIController::AGuardAIController()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
 
@@ -75,6 +79,87 @@ AGuardAIController::AGuardAIController()
 	// 그 값만 채운다. 모든 경비를 같은 팀으로 묶어 서로 "우호"로 판정되게 한다.
 	SetGenericTeamId(FGenericTeamId(1));
 
+}
+
+void AGuardAIController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+#if ENABLE_DRAW_DEBUG
+	if (!HasAuthority() || !IsValid(PossessGuardPawn) || !PossessGuardPawn->bDrawMoveTargetDebug)
+	{
+		return;
+	}
+
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	UWorld* World = GetWorld();
+	if (!IsValid(BlackboardComp) || !IsValid(World) || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 표시 위치만 올리고 전경에 그려 시야 메시와 바닥에 가려지지 않도록 한다.
+	const FVector DebugHeightOffset(0.0f, 0.0f, 200.0f);
+	const FVector GuardLocation = PossessGuardPawn->GetActorLocation() + DebugHeightOffset;
+	const AActor* AggroTarget = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	if (IsValid(AggroTarget))
+	{
+		// 어그로 대상은 시야 여부와 이동 목적지에 관계없이 현재 위치를 표시한다.
+		const FVector AggroTargetLocation = AggroTarget->GetActorLocation() + DebugHeightOffset;
+		DrawDebugLine(World, GuardLocation, AggroTargetLocation, FColor::White, false, -1.0f, SDPG_Foreground, 4.0f);
+		DrawDebugSphere(World, AggroTargetLocation, 30.0f, 12, FColor::Magenta, false, -1.0f, SDPG_Foreground, 2.0f);
+	}
+
+	FName TargetKey;
+	FColor LineColor;
+	FVector TargetLocation;
+	switch (AIState)
+	{
+	case EGuardAIState::Patrol:
+		TargetKey = GuardAIKeys::PatrolLocation;
+		LineColor = FColor::Green;
+		break;
+	case EGuardAIState::Search:
+		TargetKey = GuardAIKeys::InvestigateLocation;
+		LineColor = FColor::Yellow;
+		break;
+	case EGuardAIState::Chase:
+		LineColor = FColor::Red;
+		if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
+		{
+			const AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+			if (IsValid(TargetActor))
+			{
+				TargetLocation = TargetActor->GetActorLocation();
+				break;
+			}
+		}
+		TargetKey = GuardAIKeys::LastKnownLocation;
+		break;
+	default:
+		return;
+	}
+
+	if (!TargetKey.IsNone())
+	{
+		if (!BlackboardComp->IsVectorValueSet(TargetKey))
+		{
+			return;
+		}
+		TargetLocation = BlackboardComp->GetValueAsVector(TargetKey);
+	}
+
+	if (!FAISystem::IsValidLocation(TargetLocation))
+	{
+		return;
+	}
+
+	// 매 프레임 다시 그려 목표 이동과 옵션 해제가 즉시 표시되도록 한다.
+	const FVector DebugTargetLocation = TargetLocation + DebugHeightOffset;
+	DrawDebugLine(World, GuardLocation, DebugTargetLocation, FColor::White, false, -1.0f, SDPG_Foreground, 2.0f);
+	// 어그로 대상 마커와 겹쳐도 구분할 수 있도록 이동 목표 구체를 더 크게 표시한다.
+	DrawDebugSphere(World, DebugTargetLocation, 45.0f, 16, LineColor, false, -1.0f, SDPG_Foreground, 3.0f);
+#endif
 }
 
 // 2. 초기화

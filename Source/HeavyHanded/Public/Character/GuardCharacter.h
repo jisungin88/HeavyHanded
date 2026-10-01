@@ -47,7 +47,7 @@ private:
 	bool bDrawSightDebug = true;
 
 	// 켜면 EyeSocket의 위치와 회전을 경비 시야 판정 및 시야 메시 방향에 사용한다.
-	// 끄면 EyeSocket을 무시하고 캐릭터 위치와 회전 기준으로 동작한다.
+	// 끄면 캐릭터 위치와 EyeHeight, 기본 화살표 방향을 사용한다. 패키징에서는 캡슐 방향을 사용한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 2, AllowPrivateAccess = "true"))
 	bool bUseEyeSocketForSight = true;
 
@@ -80,6 +80,10 @@ private:
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
 	float SightDebugUpdateInterval = 0.25f;
+
+	// 서버에서 현재 행동의 목표와 별도의 어그로 대상까지 디버그 선을 표시한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (DisplayName = "Draw Move Target Debug"))
+	bool bDrawMoveTargetDebug = false;
 
 	bool IsSightEnabled() const { return bEnableSight; }
 	bool IsHearingEnabled() const { return bEnableHearing; }

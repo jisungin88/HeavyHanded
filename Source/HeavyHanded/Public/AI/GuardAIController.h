@@ -44,6 +44,7 @@ class AGuardAIController : public AAIController
 
 public:
 	AGuardAIController();
+	virtual void Tick(float DeltaSeconds) override;
 
 
 
