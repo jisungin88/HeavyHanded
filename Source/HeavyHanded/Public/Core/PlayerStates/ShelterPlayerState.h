@@ -66,9 +66,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedJobChanged, AShelterPlaye
 /** 역할 확정 상태가 바뀌었을 때. UI 페이지 전환은 이쪽을 구독한다 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJobConfirmedChanged, AShelterPlayerState*, PlayerState);
 
+/** 체포 상태가 바뀌었을 때. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShelterArrestedChanged, AShelterPlayerState*, PlayerState);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNicknameRejected, ENicknameError, Error);
 
 class AShelterGameState;
+class UStaticMesh;
+class UStaticMeshComponent;
 
 UCLASS()
 class HEAVYHANDED_API AShelterPlayerState : public APlayerSessionState
@@ -93,7 +98,7 @@ public:
 
 
 protected:
-
+	virtual void BeginPlay() override;
 	virtual void OnRep_PlayerName() override;
 
 	// 클라이언트에서 SelectedJob이 변경됐을 때 호출
@@ -104,6 +109,32 @@ protected:
 	UFUNCTION()
 	void OnRep_JobConfirmed();
 
+	UFUNCTION()
+	void OnRep_Arrested();
+
+	UFUNCTION()
+	void HandlePawnSet(APlayerState* Player, APawn* NewPawn, APawn* OldPawn);
+
+	/** 체포 변화 알림 */
+	void NotifyArrestedChanged();
+
+	/** 체포 비주얼 업데이트 */
+	void RefreshArrestVisual();
+
+	/** 연출 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shelter|Arrest")
+	void BP_ApplyArrestVisual(APawn* TargetPawn, bool bNewArrested);
+
+	/** 수갑 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shelter|Arrest")
+	TObjectPtr<UStaticMesh> CuffMesh;
+
+	/** 수갑 채울 소켓 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shelter|Arrest")
+	FName CuffSocket;
+
+	/** 붙인 수갑 */
+	TWeakObjectPtr<UStaticMeshComponent> CuffComponent;
 
 public:
 
@@ -112,6 +143,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable)
 	FOnJobConfirmedChanged OnJobConfirmedChanged;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Arrested, BlueprintReadOnly)
+	bool bArrested = false;
 
 	// 현재 플레이어의 직업을 변경
 	// 서버에서만 호출
@@ -134,6 +168,13 @@ public:
 	UFUNCTION(BlueprintPure)
 	bool IsJobConfirmed() const { return bJobConfirmed; }
 
+	UPROPERTY(BlueprintAssignable)
+	FOnShelterArrestedChanged OnArrestedChanged;
+
+	UFUNCTION(BlueprintPure)
+	bool IsArrested() const { return bArrested; }
+
+	void SetArrested(bool bNewArrested);
 
 	// Replication 등록
 	virtual void GetLifetimeReplicatedProps

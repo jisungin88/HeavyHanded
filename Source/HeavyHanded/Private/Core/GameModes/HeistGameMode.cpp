@@ -1044,6 +1044,13 @@ void AHeistGameMode::CarryOverArrests()
 		return;
 	}
 
+	if (GS->GetEscapedNum() == 0)
+	{
+		UE_LOG(LogHeist, Log, TEXT("전멸 - 체포 %d명을 다음 판으로 넘기지 않습니다. 같은 장소 재시작."),
+		       GS->GetArrestedPlayers().Num());
+		return;
+	}
+
 	URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
 	if (!Run)
 	{

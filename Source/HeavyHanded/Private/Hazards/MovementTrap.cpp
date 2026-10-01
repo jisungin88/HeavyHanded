@@ -112,7 +112,7 @@ void AMovementTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, A
 		Noise->ReportNoise(TrapNoiseTag, GetActorLocation(), 1.f, Target);
 	}
 
-	Multicast_PlayTriggerEffect();
+	Multicast_PlayTriggerEffect(Target);
 
 	UE_LOG(LogHazard, Log, TEXT("[MovementTrap:%s] %s 를 %.1f초간 가뒀다"),
 		*GetName(), *Target->GetName(), ImmobilizeDuration);
@@ -148,7 +148,7 @@ void AMovementTrap::Rearm()
 	bArmed = true;
 }
 
-void AMovementTrap::Multicast_PlayTriggerEffect_Implementation()
+void AMovementTrap::Multicast_PlayTriggerEffect_Implementation(ABaseCharacter* Target)
 {
 	UWorld* World = GetWorld();
 
@@ -166,6 +166,14 @@ void AMovementTrap::Multicast_PlayTriggerEffect_Implementation()
 	if (IsValid(TriggerSound))
 	{
 		UGameplayStatics::PlaySoundAtLocation(World, TriggerSound, GetActorLocation());
+	}
+
+	// 덫 자체의 소리(TriggerSound, 트랩 위치 고정)와 달리 이건 걸린 캐릭터를 따라다녀야 해서
+	// Attach 로 재생한다. 늦게 접속한 클라이언트는 이 Multicast 를 놓칠 수 있지만, 순간
+	// 재생되는 보이스 연출이라 상태로 남길 필요가 없다(CLAUDE.md 3절 — Multicast 는 연출 전용).
+	if (IsValid(CaughtVoiceSound) && IsValid(Target))
+	{
+		UGameplayStatics::SpawnSoundAttached(CaughtVoiceSound, Target->GetMesh());
 	}
 
 	// 판정은 끝났다. 턱이 맞물리는 등 메시 자체가 움직이는 연출은 BP 몫이다 (헤더 주석 참고)

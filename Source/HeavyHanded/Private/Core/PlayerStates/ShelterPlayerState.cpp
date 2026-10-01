@@ -1,10 +1,18 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
-#include "Core/PlayerStates/ShelterPlayerState.h"
+﻿#include "Core/PlayerStates/ShelterPlayerState.h"
 #include "Core/GameStates/ShelterGameState.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 
+
+void AShelterPlayerState::BeginPlay()
+{
+	Super::BeginPlay();
+
+	OnPawnSet.AddDynamic(this, &AShelterPlayerState::HandlePawnSet);
+	RefreshArrestVisual();
+}
 
 EJobType JobTypeFromRoleTag(const FGameplayTag& RoleTag)
 {
@@ -156,6 +164,71 @@ void AShelterPlayerState::OnRep_JobConfirmed()
 	OnJobConfirmedChanged.Broadcast(this);
 }
 
+void AShelterPlayerState::SetArrested(bool bNewArrested)
+{
+	if (!HasAuthority() || bArrested == bNewArrested)
+	{
+		return;
+	}
+
+	bArrested = bNewArrested;
+
+	NotifyArrestedChanged();
+}
+
+void AShelterPlayerState::OnRep_Arrested()
+{
+	NotifyArrestedChanged();
+}
+
+void AShelterPlayerState::HandlePawnSet(APlayerState* Player, APawn* NewPawn, APawn* OldPawn)
+{
+	RefreshArrestVisual();
+}
+
+void AShelterPlayerState::NotifyArrestedChanged()
+{
+	OnArrestedChanged.Broadcast(this);
+	RefreshArrestVisual();
+
+	if (AShelterGameState* GS = GetWorld()->GetGameState<AShelterGameState>())
+	{
+		GS->OnJobStateChanged.Broadcast();
+	}
+}
+
+void AShelterPlayerState::RefreshArrestVisual()
+{
+	APawn* MyPawn = GetPawn();
+
+	if (UStaticMeshComponent* Old = CuffComponent.Get())
+	{
+		if (!bArrested || Old->GetOwner() != MyPawn)
+		{
+			Old->DestroyComponent();
+			CuffComponent = nullptr;
+		}
+	}
+
+	if (bArrested && !CuffComponent.IsValid() &&CuffMesh)
+	{
+		ACharacter* Character = Cast<ACharacter>(MyPawn);
+		USkeletalMeshComponent* Body = Character ? Character->GetMesh() : nullptr;
+
+		if (Body)
+		{
+			UStaticMeshComponent* Cuff = NewObject<UStaticMeshComponent>(Character);
+			Cuff->SetStaticMesh(CuffMesh);
+			Cuff->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Cuff->RegisterComponent();
+			Cuff->AttachToComponent(Body, FAttachmentTransformRules::SnapToTargetNotIncludingScale, CuffSocket);
+			CuffComponent = Cuff;
+		}
+	}
+
+	BP_ApplyArrestVisual(MyPawn, bArrested);
+}
+
 void AShelterPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -163,6 +236,8 @@ void AShelterPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	// SelectedJob을 모든 클라이언트에 복제
 	DOREPLIFETIME(AShelterPlayerState,SelectedJob);
 	DOREPLIFETIME(AShelterPlayerState,bJobConfirmed);
+
+	DOREPLIFETIME(AShelterPlayerState, bArrested);
 
 	DOREPLIFETIME_CONDITION(AShelterPlayerState, NicknameFeedback, COND_OwnerOnly);
 }

@@ -17,10 +17,10 @@
 #include "Components/CapsuleComponent.h"
 
 #include "AI/GuardTypes.h"
-#include "GameplayTagContainer.h"
-
+#include "Core/HeavyHandedGameplayTags.h"
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemComponent.h"
+#include "Shared/NetAuthority.h"
 
 #include "Character/GuardCharacter.h"
 
@@ -120,11 +120,9 @@ void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIP
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
 
-	const FGameplayTag GuardDisguiseTag = FGameplayTag::RequestGameplayTag(FName("Ability.Mimic.GuardDisguise"));
-
 	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
 
-	if (TargetASC && TargetASC->HasMatchingGameplayTag(GuardDisguiseTag))
+	if (TargetASC && TargetASC->HasMatchingGameplayTag(HHTags::Ability_Mimic_GuardDisguise))
 	{
 		return;
 	}
@@ -169,15 +167,19 @@ void UGuardHearingAComponent::SetHearingRange(float InHearingRange)
 
 }
 
-void UGuardHearingAComponent::SetHearingEnabled(bool isEnable)
+void UGuardHearingAComponent::SetHearingEnabled(bool bEnabled)
 {
-	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), isEnable);
-	PrimaryComponentTick.bCanEverTick = isEnable;
-	bDrawHearingDebug = isEnable; // 이미 tick을 끄고 있어서 안해도 상관없음
+	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), bEnabled);
+	PrimaryComponentTick.bCanEverTick = bEnabled;
+	bDrawHearingDebug = bEnabled; // 이미 tick을 끄고 있어서 안해도 상관없음
 }
 
 void UGuardHearingAComponent::HandleWorldAlertSilenceTimeout()
 {
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
 
 	if (!GuardAIController->GetPossessGuardPawn() || !GuardAIController->IsWorldAlertSpeedUp())
 	{
@@ -222,6 +224,11 @@ void UGuardHearingAComponent::LogWorldAlertSilenceRemaining()
 
 void UGuardHearingAComponent::StartWorldAlertSilenceTimer()
 {
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
+
 	if (!GetWorld())
 	{
 		return;

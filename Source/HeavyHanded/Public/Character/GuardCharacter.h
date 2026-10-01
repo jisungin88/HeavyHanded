@@ -90,22 +90,6 @@ public:
 	int32 GetPatrolPointCount() const { return PatrolPoints.Num(); }
 
 
-private:
-
-	// float CapsuleBaseRelativeLocationZ = 0.0f;
-
-protected:
-
-	// // 캡슐의 바닥 위치를 유지하기 위한 기준 Half Height
-	// UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Guard|Collision")
-	// float CapsuleBaseHalfHeight = 88.0f;
-	// 
-	// //// 캡슐의 기본 Relative Location
-	// //UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Guard|Collision")
-	// //FVector CapsuleBaseRelativeLocation = 0// FVector::ZeroVector;
-	// 
-	// virtual void OnConstruction(const FTransform& Transform) override;
-
 
 private:
 

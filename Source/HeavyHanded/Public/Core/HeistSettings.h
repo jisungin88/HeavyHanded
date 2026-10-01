@@ -251,6 +251,12 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Payout")
 	EHeistOutcome MinOutcomeForPayout = EHeistOutcome::Partial;
 
+	// --- 구출
+
+	/** 은신처에서 체포된 동료를 꺼내는 비용 */
+	UPROPERTY(Config, EditAnywhere, Category = "Rescue", meta = (ClampMin = "0"))
+	int32 RescueCost = 3000;
+
 	// -- 관전
 
 	/** 관전자에게 보여줄 정보의 범위 */

@@ -104,6 +104,14 @@ protected:
 	TObjectPtr<USoundBase> ReleaseSound;
 
 	/**
+	 * 걸린 대상 캐릭터에 붙어서 재생되는 보이스(비명·신음 등). TriggerSound(덫 자체의 소리,
+	 * 트랩 위치에서 재생)와는 다른 축이다 — 이건 캐릭터를 따라다녀야 해서 Target 의 메시에
+	 * Attach 한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
+	TObjectPtr<USoundBase> CaughtVoiceSound;
+
+	/**
 	 * 걸리는 순간 호출된다 — Multicast_PlayTriggerEffect 안에서 불리므로 모든 머신
 	 * (데디케이티드 서버 제외)에서 실행된다. 덫의 턱이 맞물리는 것처럼 메시 자체가
 	 * 움직여야 하는 연출을 여기서 만든다. 판정은 이미 끝난 뒤라 게임 상태를 바꾸지 않는다
@@ -123,10 +131,13 @@ protected:
 	void OnTrapVisualReset();
 
 private:
-	/** 걸리는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
+	/**
+	 * 걸리는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다.
+	 * Target 은 CaughtVoiceSound 를 붙일 대상 — 복제되는 캐릭터 참조라 그대로 넘겨도 안전하다.
+	 */
 	UFUNCTION(NetMulticast, Unreliable)
-	void Multicast_PlayTriggerEffect();
-	void Multicast_PlayTriggerEffect_Implementation();
+	void Multicast_PlayTriggerEffect(ABaseCharacter* Target);
+	void Multicast_PlayTriggerEffect_Implementation(ABaseCharacter* Target);
 
 	/** 풀려나는 순간의 연출만 전달한다. 상태를 남기지 않으므로 Unreliable 이다 */
 	UFUNCTION(NetMulticast, Unreliable)
