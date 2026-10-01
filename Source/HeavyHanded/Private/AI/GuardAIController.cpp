@@ -494,6 +494,10 @@ void AGuardAIController::SetAIState(EGuardAIState NewState)
 
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 
 	if (!IsValid(GuardPatrolComp))
 	{
@@ -520,9 +524,11 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 
 		if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
 		{
-			// 정찰 상태로 진입했으므로 이전 추격 대상을 해제한다.
-			// 수색 중에는 기존 TargetActor를 유지하고, 실제 Patrol 복귀 시에만 초기화한다.
-			BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+			// 실제로 시야를 잃은 대상만 해제한다. 보이는 대상을 지우면 재감지 콜백 없이 UI가 0에 머물 수 있다.
+			if (!BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
+			{
+				BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+			}
 		}
 
 		GuardPatrolComp->SelectNextPatrolPoint2();

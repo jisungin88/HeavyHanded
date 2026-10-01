@@ -364,6 +364,90 @@ void UGuardSightAComponent::SetSightEnabled(bool bEnabled)
 	PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), bEnabled);
 }
 
+void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardComp)
+{
+	if (!HasServerAuthority(this))
+	{
+		return;
+	}
+
+	if (!IsValid(BlackboardComp) || !IsValid(PerceptionComp) || !IsValid(GuardCharacter) || !IsValid(GuardAIController))
+	{
+		return;
+	}
+
+	TArray<AActor*> PerceivedActors;
+	if (GuardCharacter->IsSightEnabled())
+	{
+		PerceptionComp->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), PerceivedActors);
+	}
+
+	const auto CanDetectActor = [this](AActor* Actor)
+	{
+		if (!IsValid(Actor) || !IsValid(Actor->GetRootComponent()))
+		{
+			return false;
+		}
+
+		const UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
+		if (IsValid(TargetASC) && TargetASC->HasMatchingGameplayTag(HHTags::Ability_Mimic_GuardDisguise))
+		{
+			return false;
+		}
+
+		return IsWithinVerticalVisionAngle(Actor);
+	};
+
+	AActor* CurrentTarget = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	AActor* VisibleTarget = nullptr;
+	if (PerceivedActors.Contains(CurrentTarget) && CanDetectActor(CurrentTarget))
+	{
+		VisibleTarget = CurrentTarget;
+	}
+	else
+	{
+		float NearestDistanceSquared = TNumericLimits<float>::Max();
+		for (AActor* Actor : PerceivedActors)
+		{
+			if (!CanDetectActor(Actor))
+			{
+				continue;
+			}
+
+			const float DistanceSquared = FVector::DistSquared(GuardCharacter->GetActorLocation(), Actor->GetActorLocation());
+			if (DistanceSquared < NearestDistanceSquared)
+			{
+				NearestDistanceSquared = DistanceSquared;
+				VisibleTarget = Actor;
+			}
+		}
+	}
+
+	const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+	const bool bCanSeeTarget = IsValid(VisibleTarget);
+	if (bCanSeeTarget)
+	{
+		// Sight 콜백이 재발화하지 않아도 대상과 목격 정보를 먼저 복구한다.
+		BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, VisibleTarget);
+		BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, VisibleTarget->GetActorLocation());
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
+
+		if (!bWasSeeing || CurrentTarget != VisibleTarget)
+		{
+			GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
+			if (IsValid(GuardAIController->GuardHearingComp))
+			{
+				GuardAIController->GuardHearingComp->ClearHearingDebug();
+			}
+
+			UE_LOG(LogGuardAI, Log, TEXT("[%s] 현재 시야 대상 복구: %s"), *GetNameSafe(GuardCharacter), *GetNameSafe(VisibleTarget));
+		}
+	}
+
+	// 시야 상실 중에는 마지막 대상을 유지해 기존 추격 유예와 수색 흐름을 보존한다.
+	BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, bCanSeeTarget);
+}
+
 
 
 void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
@@ -1671,5 +1755,4 @@ void UGuardSightAComponent::DrawPerceivedActorsDebug() const
 		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.0f);
 	}
 }
-
 

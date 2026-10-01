@@ -34,7 +34,14 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		return;
 	}
 
-	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+	// 순찰의 대상 해제나 수직 시야 변화는 엔진 Sight 상태 변경 콜백을 발생시키지 않을 수 있다.
+	UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>();
+	if (IsValid(GuardSightComp))
+	{
+		GuardSightComp->RefreshSightTarget(BlackboardComp);
+	}
+
+	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)));
 	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);
 	const float Now = AIController->GetWorld()->GetTimeSeconds();
 
@@ -60,7 +67,7 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 		if (IsValid(Target))
 		{
-			if (const UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>())
+			if (IsValid(GuardSightComp))
 			{
 				BinocularRate = GuardSightComp->GetBinocularVisionRate(Target);
 
@@ -132,17 +139,16 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 
 
+	// 게이지가 100으로 유지된 유예 중 재발견도 추격 속도를 다시 적용한다.
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+	{
+		GuardController->SetChasing(bCanSeeTarget && NewGauge >= 100.f);
+	}
+
 	// 시야를 든 채로(=실제 추격) 게이지가 막 가득 찬 순간만 "추격 시작"으로 센다.
 	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
 	if (bJustCrossedFull && bCanSeeTarget)
 	{
-
-		// 속도 조정 0928
-		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
-		{
-			// 인지 게이지가 100에 도달했으므로 추격 속도를 적용한다.
-			GuardController->SetChasing(true);
-		}
 
 		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
 		{
