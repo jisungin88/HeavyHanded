@@ -1,5 +1,7 @@
 ﻿#include "AI/BTTask_MoveToInvestigate.h"
 #include "AIController.h"
+#include "AI/GuardAIController.h"
+#include "AI/GuardPatrolAComponent.h"
 #include "AITypes.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -18,10 +20,10 @@ UBTTask_MoveToInvestigate::UBTTask_MoveToInvestigate()
 
 EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-	AAIController* AIController = OwnerComp.GetAIOwner();
-	const UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
+	AGuardAIController* AIController = Cast<AGuardAIController>(OwnerComp.GetAIOwner());
+	UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
 
-	if (!IsValid(AIController) || !IsValid(BlackboardComp))
+	if (!IsValid(AIController) || !AIController->HasAuthority() || !IsValid(BlackboardComp) || !IsValid(AIController->GuardPatrolComp))
 	{
 		return EBTNodeResult::Failed;
 	}
@@ -29,12 +31,31 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 	const FVector InvestigateLocation = BlackboardComp->GetValueAsVector(BlackboardKey.SelectedKeyName);
 	if (!FAISystem::IsValidLocation(InvestigateLocation))
 	{
+		AIController->LogSearchTransitionDebug(TEXT("InvestigateInvalidGoal"), TEXT("수색 이동 Failed: 목표 위치 무효"));
 		// 아직 조사 지점이 기록된 적이 없다. 실패로 돌려 순찰 브랜치로 넘긴다.
 		return EBTNodeResult::Failed;
 	}
 
-	const EPathFollowingRequestResult::Type RequestResult =
-		AIController->MoveToLocation(InvestigateLocation, AcceptanceRadius);
+	EPathFollowingRequestResult::Type RequestResult = EPathFollowingRequestResult::Failed;
+	constexpr int32 MaxMoveAttempts = 3;
+	for (int32 Attempt = 0; Attempt < MaxMoveAttempts; ++Attempt)
+	{
+		FVector ReachableLocation;
+		if (!AIController->GuardPatrolComp->FindReachableSearchLocation(InvestigateLocation, ReachableLocation, Attempt == 0))
+		{
+			break;
+		}
+
+		// 블랙보드에는 실제 이동 목적지만 기록하고 목격 위치와 세션 시각은 유지한다.
+		BlackboardComp->SetValueAsVector(BlackboardKey.SelectedKeyName, ReachableLocation);
+		RequestResult = AIController->MoveToLocation(ReachableLocation, AcceptanceRadius, true, true, true, true, nullptr, false);
+		AIController->LogSearchTransitionDebug(TEXT("InvestigateMoveRequest"), FString::Printf(TEXT("MoveRequest=%d Goal=%s Attempt=%d"), static_cast<int32>(RequestResult), *ReachableLocation.ToCompactString(), Attempt + 1));
+		if (RequestResult != EPathFollowingRequestResult::Failed)
+		{
+			break;
+		}
+		AIController->LogSearchTransitionDebug(TEXT("InvestigateMoveRetry"), FString::Printf(TEXT("이동 요청 실패: 다른 주변 후보 재시도 Attempt=%d"), Attempt + 1));
+	}
 
 	switch (RequestResult)
 	{
@@ -69,6 +90,10 @@ void UBTTask_MoveToInvestigate::TickTask(UBehaviorTreeComponent& OwnerComp, uint
 	// 조사 지속 여부와 순찰 복귀는 Check Search Timeout이 판정한다.
 	if (AIController->GetMoveStatus() == EPathFollowingStatus::Idle)
 	{
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(OwnerComp.GetAIOwner()))
+		{
+			GuardController->LogSearchTransitionDebug(TEXT("InvestigateIdle"), TEXT("이동 Idle 감지: 수색 이동 태스크 Succeeded"));
+		}
 		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 	}
 	//-----------------------------------------------------
@@ -80,6 +105,10 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::AbortTask(UBehaviorTreeComponent&
 	// 추격 브랜치의 Move To 와 경로가 충돌한다.
 	if (AAIController* AIController = OwnerComp.GetAIOwner())
 	{
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+		{
+			GuardController->LogSearchTransitionDebug(TEXT("InvestigateAbort"), TEXT("BT가 일반 수색 이동을 Abort함"));
+		}
 		AIController->StopMovement();
 	}
 

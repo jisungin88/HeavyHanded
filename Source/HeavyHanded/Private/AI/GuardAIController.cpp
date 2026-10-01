@@ -24,6 +24,8 @@
 
 // Navigation
 #include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "Navigation/PathFollowingComponent.h"
 
 // Gameplay / Game State
 #include "Core/GameStates/HeistGameState.h"
@@ -38,6 +40,7 @@
 
 // Character / Movement
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 
 // World / Actor
 #include "Engine/World.h"
@@ -160,6 +163,136 @@ void AGuardAIController::Tick(float DeltaSeconds)
 	// 어그로 대상 마커와 겹쳐도 구분할 수 있도록 이동 목표 구체를 더 크게 표시한다.
 	DrawDebugSphere(World, DebugTargetLocation, 45.0f, 16, LineColor, false, -1.0f, SDPG_Foreground, 3.0f);
 #endif
+}
+
+bool AGuardAIController::IsVisibleChaseMove(const FAIMoveRequest& MoveRequest) const
+{
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	return MoveRequest.IsMoveToActorRequest() && MoveRequest.IsUsingPathfinding() && IsValid(MoveRequest.GetGoalActor()) && IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f && BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) == MoveRequest.GetGoalActor();
+}
+
+FPathFollowingRequestResult AGuardAIController::MoveTo(const FAIMoveRequest& MoveRequest, FNavPathSharedPtr* OutPath)
+{
+	if (!HasAuthority())
+	{
+		return FPathFollowingRequestResult();
+	}
+
+	// 완료 콜백에서 BT가 다른 분기로 이동할 수 있으므로 요청 당시 조건을 보관한다.
+	const bool bVisibleChaseMove = IsVisibleChaseMove(MoveRequest);
+	const FPathFollowingRequestResult Result = Super::MoveTo(MoveRequest, OutPath);
+	if (bVisibleChaseMove && Result.Code == EPathFollowingRequestResult::Failed)
+	{
+		const UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+		LogSearchTransitionDebug(TEXT("ChaseMoveRequestFailed"), FString::Printf(TEXT("추격 이동 요청 실패: Request=%u Pawn=%s PathFollowing=%s Navigation=%s Start=%s %s"), Result.MoveId.GetID(), *GetNameSafe(GetPawn()), *GetNameSafe(GetPathFollowingComponent()), *GetNameSafe(NavSys), *GetNavAgentLocation().ToCompactString(), *MoveRequest.ToString()));
+	}
+	return Result;
+}
+
+void AGuardAIController::FindPathForMoveRequest(const FAIMoveRequest& MoveRequest, FPathFindingQuery& Query, FNavPathSharedPtr& OutPath) const
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (!IsVisibleChaseMove(MoveRequest))
+	{
+		Super::FindPathForMoveRequest(MoveRequest, Query, OutPath);
+		return;
+	}
+
+	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	const ANavigationData* NavData = Query.NavData.Get();
+	if (!IsValid(NavSys) || !IsValid(NavData))
+	{
+		LogSearchTransitionDebug(TEXT("ChaseNavigationMissing"), TEXT("추격 경로의 NavigationSystem 또는 NavData 없음"));
+		return;
+	}
+
+	// Actor 요청에는 엔진 MoveTo의 위치 목표 투영이 적용되지 않는다. 목표 Actor는 그대로 두고 경로의 끝점만 보정한다.
+	const FVector OriginalGoal = Query.EndLocation;
+	FVector ProjectionExtent = NavData->GetDefaultQueryExtent();
+	const UCapsuleComponent* Capsule = IsValid(PossessGuardPawn) ? PossessGuardPawn->GetCapsuleComponent() : nullptr;
+	if (IsValid(Capsule))
+	{
+		ProjectionExtent.Z = FMath::Max(ProjectionExtent.Z, static_cast<FVector::FReal>(Capsule->GetScaledCapsuleHalfHeight() * 2.0f));
+	}
+	FNavLocation ProjectedGoal;
+	const bool bProjected = MoveRequest.IsProjectingGoal() && NavSys->ProjectPointToNavigation(OriginalGoal, ProjectedGoal, ProjectionExtent, NavData, Query.QueryFilter);
+	if (bProjected)
+	{
+		Query.EndLocation = ProjectedGoal.Location;
+	}
+
+	// 이 값은 Path의 QueryData에도 저장된다. Actor 이동에 따른 엔진 재탐색에서도 NavMesh 밖 목표를 즉시 실패시키지 않는다.
+	// BT/AITask가 원래 허용한 부분 경로만 사용한다. Allow Partial Path가 꺼져 있으면 완전 경로 요구를 보존한다.
+	if (MoveRequest.IsUsingPartialPaths())
+	{
+		Query.SetRequireNavigableEndLocation(false);
+	}
+
+	FPathFindingResult PathResult = NavSys->FindPathSync(Query);
+	if (!PathResult.IsSuccessful() || !PathResult.Path.IsValid())
+	{
+		LogSearchTransitionDebug(TEXT("ChasePathFailed"), FString::Printf(TEXT("추격 경로 생성 실패: Result=%d NavData=%s Start=%s Original=%s QueryGoal=%s Projected=%d Extent=%s AllowPartial=%d"), static_cast<int32>(PathResult.Result), *GetNameSafe(NavData), *Query.StartLocation.ToCompactString(), *OriginalGoal.ToCompactString(), *Query.EndLocation.ToCompactString(), bProjected, *ProjectionExtent.ToCompactString(), MoveRequest.IsUsingPartialPaths()));
+		return;
+	}
+
+	// 수평 보정으로 목표와 다른 지점에 도착하는 경로는 부분 경로다. 마지막 구간에서 Actor 원위치로 직진하는 것을 막는다.
+	if (bProjected && MoveRequest.IsUsingPartialPaths() && FVector::DistSquared2D(OriginalGoal, ProjectedGoal.Location) > FMath::Square(1.0f))
+	{
+		PathResult.Path->SetIsPartial(true);
+	}
+	PathResult.Path->SetGoalActorObservation(*MoveRequest.GetGoalActor(), 100.0f);
+	PathResult.Path->EnableRecalculationOnInvalidation(true);
+	// 엔진의 Actor 재탐색은 이 함수를 거치지 않는다. 재탐색 뒤에도 보정된 끝점과 Actor가 다르면 부분 경로로 유지한다.
+	PathResult.Path->AddObserver(FNavigationPath::FPathObserverDelegate::FDelegate::CreateUObject(this, &AGuardAIController::HandleChasePathUpdated));
+	OutPath = PathResult.Path;
+	LogSearchTransitionDebug(TEXT("ChasePathReady"), FString::Printf(TEXT("추격 Actor 추적 유지: NavData=%s Start=%s Original=%s QueryGoal=%s PathEnd=%s Projected=%d Partial=%d AllowPartial=%d"), *GetNameSafe(NavData), *Query.StartLocation.ToCompactString(), *OriginalGoal.ToCompactString(), *Query.EndLocation.ToCompactString(), *OutPath->GetEndLocation().ToCompactString(), bProjected, OutPath->IsPartial(), MoveRequest.IsUsingPartialPaths()));
+}
+
+void AGuardAIController::HandleChasePathUpdated(FNavigationPath* UpdatedPath, ENavPathEvent::Type Event) const
+{
+	if (!HasAuthority() || !UpdatedPath || (Event != ENavPathEvent::UpdatedDueToGoalMoved && Event != ENavPathEvent::UpdatedDueToNavigationChanged))
+	{
+		return;
+	}
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const AActor* GoalActor = UpdatedPath->GetGoalActor();
+	if (!IsValid(GoalActor) || !IsValid(BlackboardComp) || !BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) != GoalActor || !UpdatedPath->GetQueryData().bAllowPartialPaths)
+	{
+		return;
+	}
+	// 저장된 QueryData의 끝점은 최초 요청 값일 수 있으므로 현재 관찰 중인 Actor의 목표를 비교한다.
+	const FVector ActorGoal = UpdatedPath->GetGoalLocation();
+	const FVector PathEnd = UpdatedPath->GetEndLocation();
+	if (FVector::DistSquared2D(ActorGoal, PathEnd) > FMath::Square(1.0f))
+	{
+		UpdatedPath->SetIsPartial(true);
+	}
+	LogSearchTransitionDebug(TEXT("ChasePathUpdated"), FString::Printf(TEXT("추격 경로 재탐색: ActorGoal=%s PathEnd=%s Partial=%d"), *ActorGoal.ToCompactString(), *PathEnd.ToCompactString(), UpdatedPath->IsPartial()));
+}
+
+void AGuardAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
+{
+	if (HasAuthority())
+	{
+		const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+		const bool bHasFullTarget = IsValid(BlackboardComp) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f && IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+		if (AIState == EGuardAIState::Chase || bHasFullTarget)
+		{
+			// 정상 완료, 경로 실패, 다른 요청에 의한 중단을 구분한다. 상태값만으로 실제 BT 분기를 단정하지 않는다.
+			const FName Event(*FString::Printf(TEXT("ChaseMoveCompleted_%d_%u"), static_cast<int32>(Result.Code.GetValue()), static_cast<uint32>(Result.Flags)));
+			LogSearchTransitionDebug(Event, FString::Printf(TEXT("Request=%u Result=%s Code=%d Flags=%u Success=%d Interrupted=%d LastKnown=%s"), RequestID.GetID(), *Result.ToString(), static_cast<int32>(Result.Code.GetValue()), static_cast<uint32>(Result.Flags), Result.IsSuccess(), Result.IsInterrupted(), IsValid(BlackboardComp) ? *BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation).ToCompactString() : TEXT("NoBlackboard")));
+		}
+	}
+
+	// BT의 완료 통지 전에 실패를 기록해 다음 지점 선택에 반영한다.
+	if (HasAuthority() && AIState == EGuardAIState::Patrol && IsValid(GuardPatrolComp) && Result.IsFailure() && !Result.IsInterrupted())
+	{
+		GuardPatrolComp->SkipCurrentPatrolPoint();
+	}
+	Super::OnMoveCompleted(RequestID, Result);
 }
 
 // 2. 초기화
@@ -577,6 +710,33 @@ void AGuardAIController::SetAIState(EGuardAIState NewState)
 	AIState = NewState;
 }
 
+void AGuardAIController::LogSearchTransitionDebug(FName Event, const FString& Detail) const
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const UWorld* World = GetWorld();
+	if (!IsValid(BlackboardComp) || !IsValid(World))
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	const float* LastLogTime = SearchDebugLastLogTimes.Find(Event);
+	if (LastLogTime && Now - *LastLogTime < 1.0f)
+	{
+		return;
+	}
+	SearchDebugLastLogTimes.Add(Event, Now);
+
+	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
+	const int32 SearchStep = IsValid(GuardPatrolComp) ? GuardPatrolComp->GetCurrentSearchStep() : INDEX_NONE;
+	const int32 SweepCount = IsValid(GuardPatrolComp) ? GuardPatrolComp->SearchSweepCount : 0;
+	UE_LOG(LogGuardAI, Warning, TEXT("[SearchDebug][%s][%s] %s | Now=%.3f State=%d See=%d Gauge=%.1f Start=%.3f Elapsed=%.3f LastSeenAge=%.3f Step=%d/%d MoveStatus=%d Target=%s Investigate=%s"), *GetNameSafe(GetPawn()), *Event.ToString(), *Detail, Now, static_cast<int32>(AIState), BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget), BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge), SearchStartTime, Now - SearchStartTime, Now - BlackboardComp->GetValueAsFloat(GuardAIKeys::LastSeenTime), SearchStep, SweepCount, static_cast<int32>(GetMoveStatus()), *GetNameSafe(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)), *BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation).ToCompactString());
+}
+
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
 	if (!HasAuthority())
@@ -601,11 +761,20 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 	UE_LOG(LogGuardAI, Warning, TEXT("[%s] SelectNextAction: 요청 State = %d"),
 		*GetNameSafe(PossessGuardPawn), static_cast<int32>(State));
 
+	if (State == EGuardAIState::Patrol)
+	{
+		const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+		if (IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f)
+		{
+			LogSearchTransitionDebug(TEXT("PatrolWhileTargetVisible"), FString::Printf(TEXT("대상이 보이고 게이지 100인데 순찰 태스크 실행: PreviousState=%d"), static_cast<int32>(AIState)));
+		}
+	}
 	SetAIState(State);
 
 	switch (State)
 	{
 	case EGuardAIState::Patrol:
+		LogSearchTransitionDebug(TEXT("PatrolEntry"), TEXT("순찰 선택 태스크 실행"));
 
 		if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
 		{
@@ -616,10 +785,10 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 			}
 		}
 
-		GuardPatrolComp->SelectNextPatrolPoint2();
-		return true;
+		return IsValid(GuardPatrolComp) && GuardPatrolComp->SelectNextPatrolPoint2();
 
 	case EGuardAIState::Search:
+		LogSearchTransitionDebug(TEXT("SearchEntry"), TEXT("수색 선택 태스크 실행"));
 		return GuardPatrolComp->SelectNextSearchPoint2();
 
 	//case EGuardAIState::Chase:

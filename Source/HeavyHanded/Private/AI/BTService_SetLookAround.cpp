@@ -49,8 +49,8 @@ void UBTService_SetLookAround::OnBecomeRelevant(UBehaviorTreeComponent& OwnerCom
 	// Wait 서비스 인스턴스에 설정된 두리번 애니메이션 종류를 적용한다.
 	AnimInstance->SetLookAroundType(LookAroundType);
 
-	UE_LOG(LogTemp, Warning, TEXT("[LookAround] Type=%d | Pawn=%s"),
-		static_cast<int32>(LookAroundType), *GetNameSafe(GuardCharacter));
+	//UE_LOG(LogTemp, Warning, TEXT("[LookAround] Type=%d | Pawn=%s"),
+		//static_cast<int32>(LookAroundType), *GetNameSafe(GuardCharacter));
 
 }
 

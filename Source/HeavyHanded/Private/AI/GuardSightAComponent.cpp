@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "AI/GuardSightAComponent.h"
@@ -177,10 +177,10 @@ void UGuardSightAComponent::UpdateSightDebug()
 		return;
 	}
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer fired. Interval=%.2f AIState=%s"),
-		*GetNameSafe(GuardCharacter),
-		IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.0f,
-		IsValid(GuardAIController) ? *StaticEnum<EGuardAIState>()->GetNameStringByValue(static_cast<int64>(GuardAIController->GetAIState())) : TEXT("Invalid"));
+	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer fired. Interval=%.2f AIState=%s"),
+	//	*GetNameSafe(GuardCharacter),
+	//	IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.0f,
+	//	IsValid(GuardAIController) ? *StaticEnum<EGuardAIState>()->GetNameStringByValue(static_cast<int64>(GuardAIController->GetAIState())) : TEXT("Invalid"));
 
 	if (IsValid(GuardCharacter))
 	{
@@ -214,16 +214,16 @@ void UGuardSightAComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		if (SightRotationDiagnosticElapsed >= 1.0f)
 		{
 			SightRotationDiagnosticElapsed = 0.0f;
-			const USkeletalMeshComponent* CharacterMesh = GuardCharacter->GetMesh();
-			UE_LOG(LogGuardAI, Warning,
-				TEXT("[SightRotation] Guard=%s Authority=%d UseSocket=%d SocketExists=%d EyeYaw=%.1f ActorYaw=%.1f MeshYaw=%.1f"),
-				*GetNameSafe(GuardCharacter),
-				GuardCharacter->HasAuthority() ? 1 : 0,
-				GuardCharacter->IsEyeSocketSightEnabled() ? 1 : 0,
-				IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(TEXT("EyeSocket")) ? 1 : 0,
-				EyeRotation.Yaw,
-				GuardCharacter->GetActorRotation().Yaw,
-				IsValid(SightDebugMesh) ? SightDebugMesh->GetComponentRotation().Yaw : 0.0f);
+			/// const USkeletalMeshComponent* CharacterMesh = GuardCharacter->GetMesh();
+			/// UE_LOG(LogGuardAI, Warning,
+			///	TEXT("[SightRotation] Guard=%s Authority=%d UseSocket=%d SocketExists=%d EyeYaw=%.1f ActorYaw=%.1f MeshYaw=%.1f"),
+			///	*GetNameSafe(GuardCharacter),
+			///	GuardCharacter->HasAuthority() ? 1 : 0,
+			///	GuardCharacter->IsEyeSocketSightEnabled() ? 1 : 0,
+			///	IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(TEXT("EyeSocket")) ? 1 : 0,
+			///	EyeRotation.Yaw,
+			///	GuardCharacter->GetActorRotation().Yaw,
+			///	IsValid(SightDebugMesh) ? SightDebugMesh->GetComponentRotation().Yaw : 0.0f);
 		}
 	}
 

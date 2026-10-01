@@ -344,3 +344,31 @@ Wait의 0.5/1.0/1.5/2.0/5.0초는 노드에 표시된 값이다. 각 Wait의 Ran
 - 추격 속도 bool은 매 서비스 틱 현재 시야와 게이지 상태로 갱신한다. 따라서 게이지가 100으로 유지되는 유예 중 재발견도 추격 속도가 복구된다. 기존 표의 '100 게이지 유지 중 재발견 속도' 문제는 수정되었다.
 - BT 에셋의 서비스 부착 위치는 변경하지 않았다. Update Detection Gauge가 최상위 Selector에 붙어 순찰에서도 실행되어야 이 복구 경로가 작동한다.
 - PIE 확인 항목: 발견 → 상실 → 수색 종료 → 순찰 → 재발견 시 TargetActor/CanSeeTarget/DetectionGauge 갱신, 수직 시야 밖에서 안으로 이동할 때 재감지, 게이지 100 유예 중 재발견 시 추격 속도 복구.
+
+## 15. 재발견 시 순찰 진입 및 추격 경로 실패 보완 (2026-10-01)
+
+### 15.1 제공 로그에서 확정되는 두 경로
+
+- `Now=24.548`: 수색 제한시간 12초를 지난 상태에서 재발견했다. `See=1`, `Gauge=5.6`이므로 수색의 `CanSeeTarget Is Not Set / Both`는 수색을 중단하지만 게이지 100 추격 조건은 통과하지 못한다. 기존 양안 전용 바라보기가 통과하지 못하면 `Finish Search`도 `See=1` 때문에 거절하고 순찰까지 내려간다. 시간 제한만 늘려서는 이 분기 공백이 해결되지 않는다.
+- `Now=64.181`: `See=1`, `Gauge=100`인 상태에서 추격 Request 22가 `Invalid`로 끝났고 이후 순찰을 선택했다. 이동 요청 실패로 추격 Sequence가 실패하여 ROOT Selector의 다음 분기로 내려간 경로다. 앞선 Request 21의 `Aborted[UserAbort OwnerFinished]`만으로 시야 상실이나 실패의 세부 원인을 확정할 수 없다.
+- 로그의 `LastKnownLocation.Z=190`은 Actor 위치다. 엔진의 Actor 이동 쿼리는 대상이 `INavAgentInterface`를 구현하면 `GetNavAgentLocation`과 목표 오프셋을 사용한다. 따라서 이 높이만으로 실제 경로 목표가 NavMesh보다 높아서 실패했다고 단정하지 않는다.
+
+### 15.2 이번 코드 변경
+
+- `AGuardAIController::FindPathForMoveRequest`: 보이는 BB TargetActor, 게이지 100 이상, Actor 목표, 경로 탐색 요청에만 적용한다. 기존 쿼리의 NavData와 필터로 목표를 투영하며 캡슐 높이를 고려한 수직 범위를 사용한다. `TargetActor`, `LastKnownLocation`, `SearchStartTime`, `InvestigateLocation`은 이 함수에서 변경하지 않는다.
+- 목표 Actor 관찰 및 엔진 경로 재탐색을 유지한다. BT 요청에서 `Allow Partial Path`를 허용하면 쿼리의 `RequireNavigableEndLocation`을 false로 설정한다. 이 조건은 경로의 QueryData에 저장되어 Actor 이동 후 엔진이 직접 재탐색하는 경로에도 전달된다. 목표가 NavMesh 밖이어도 도달 가능한 끝점까지 접근할 수 있다. 처음 요청의 투영만으로 모든 후속 재탐색을 보정한다고 설명하지 않는다.
+- 허용된 부분 경로에서 수평 투영으로 Actor와 다른 지점이 목표가 되면 부분 경로로 표시한다. 엔진이 마지막 구간에서 원래 Actor 위치로 곧장 이동하는 동작을 막는다. 경로 갱신 옵저버에서도 현재 Actor 목표와 재탐색 끝점을 비교해 이 처리를 유지한다. 최초 요청의 QueryData 끝점은 재탐색 후에도 남을 수 있으므로 현재 Actor의 목표 위치를 비교하며, 델리게이트는 컨트롤러의 유효성을 약한 참조로 확인한다. 부분 경로를 허용하지 않는 요청의 설정은 강제로 변경하지 않는다.
+- 순찰/일반 수색/마무리 수색의 Vector 목표는 기존 엔진 경로를 유지한다. 서버 권한 검사와 `ChasePathReady`, `ChasePathUpdated`, `ChasePathFailed`, `ChaseMoveRequestFailed` 진단을 추가했다. 출발점 자체가 NavMesh 밖이거나 NavData가 없으면 이동 성공을 보장하지 않는다.
+- `Check Binocular Vision`에 `Allow Peripheral Observation` 옵션을 추가했다. 기본값 false는 기존 양안 판정을 유지한다. 켜면 유효 TargetActor와 `CanSeeTarget=true`로 관찰을 허용하며 게이지나 수색 제한시간을 요구하지 않는다. 기존 바라보기 Sequence가 재발견부터 게이지가 찰 때까지 대상을 향해 회전할 수 있게 한다. 이동이 실패해도 대상이 보이면 이 관찰 분기를 후순위 대안으로 사용할 수 있다.
+
+### 15.3 필요한 BT 에셋 설정
+
+이번 작업은 C++ 기존 파일 수정이며 BT 에셋은 수정하지 않았다. 에디터에서 다음 설정이 필요하다.
+
+1. ROOT 우선순위: 추격 → 기존 `Rotate to face BB entry(TargetActor) → Wait 1초` 바라보기 → 수색/마무리 수색 → 순찰. 기존 마지막 위치 바라보기 분기가 있으면 재발견 바라보기보다 뒤에 둔다.
+2. 그 바라보기 분기의 `Check Binocular Vision`: `Allow Peripheral Observation=true`, `Blackboard Key=CanSeeTarget`, `Observer Aborts=Both`.
+3. 같은 바라보기 Sequence의 `Blackboard Based Condition`: `CanSeeTarget Is Set`, `Observer Aborts=Both`. 이 관찰 분기에는 게이지 100 또는 수색 Timeout 조건을 추가하지 않는다.
+4. 추격 `Move To(TargetActor)`: `Track Moving Goal=true`, `Project Goal Location=true`, `Allow Partial Path=true`. 목표 Actor 이동을 감시하는 옵션과 부분 경로 허용은 별개다. AITask는 원래 BT 요청의 부분 경로 허용 여부도 검사하므로 컨트롤러에서 그 설정을 강제로 뒤집지 않았다.
+5. 추격 게이지 Decorator의 관찰 키는 `DetectionGauge`이며, 낮은 우선순위의 바라보기를 게이지 100에서 끊을 수 있도록 `Lower Priority` 또는 `Both`가 필요하다. 대상 Actor 추격 분기의 시야 조건은 `CanSeeTarget Is Set / Both`를 유지한다.
+
+빌드와 PIE는 실행하지 않았다. 변경분 공백 검사 및 UE 5.4 엔진의 경로 생성, QueryData 저장, Actor 재탐색, 부분 경로와 AITask 동작을 소스로 대조했다. 실제 해결 여부는 에셋 설정 후 재현 확인이 필요하다.
