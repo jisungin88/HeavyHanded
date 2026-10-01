@@ -1,6 +1,7 @@
 ﻿#include "Core/PlayerControllers/HeavyHandedPlayerController.h"
 
 #include "Blueprint/UserWidget.h"
+#include "UI/ToastComponent.h"
 
 /**
  * 이 베이스만의 로그 카테고리. LogHeist 를 쓰지 않는 것은 이 클래스가 코어 루프 소유가
@@ -136,6 +137,11 @@ void AHeavyHandedPlayerController::ApplyInputMode(bool bInUIFocused, EHHUIFocusM
 }
 
 // ──────────────────────────────────────────────────────────────
+
+AHeavyHandedPlayerController::AHeavyHandedPlayerController()
+{
+	ToastComponent = CreateDefaultSubobject<UToastComponent>(TEXT("ToastComponent"));
+}
 
 void AHeavyHandedPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
