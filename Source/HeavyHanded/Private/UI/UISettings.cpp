@@ -146,6 +146,35 @@ TSoftObjectPtr<UTexture2D> UUISettings::GetHeldSlotIcon(const FGameplayTagContai
 	return HeldSlotFallbackIcon;
 }
 
+TSoftObjectPtr<UTexture2D> UUISettings::FindLootIcon(FName LootRow, bool& bOutRowMissing) const
+{
+	bOutRowMissing = false;
+
+	// 카탈로그 행을 지정하지 않은 노획물(BP_Loot_Fragile 같은 부모 BP)은 이름이 없다
+	if (LootRow.IsNone())
+	{
+		return nullptr;
+	}
+
+	// 집고 놓을 때만 불리는 경로라 매번 LoadSynchronous 해도 된다.
+	// 이미 로드돼 있으면 찾기만 하고 끝난다
+	const UDataTable* Table = LootIconTable.LoadSynchronous();
+	if (!Table)
+	{
+		return nullptr;
+	}
+
+	const FLootIconRow* Row = Table->FindRow<FLootIconRow>(LootRow, TEXT("FindLootIcon"), /*bWarnIfRowMissing=*/false);
+	if (!Row)
+	{
+		bOutRowMissing = true;
+		return nullptr;
+	}
+
+	// 행은 만들어 두고 그림을 아직 안 꽂은 경우 — 없는 것으로 친다 (GetHeldSlotIcon 과 같다)
+	return Row->Icon;
+}
+
 TSoftObjectPtr<UTexture2D> UUISettings::GetSkillIcon(const FGameplayTagContainer& CooldownTags) const
 {
 	for (const FGameplayTag& Tag : CooldownTags)

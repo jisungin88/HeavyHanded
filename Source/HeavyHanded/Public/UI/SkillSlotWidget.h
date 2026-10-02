@@ -18,9 +18,10 @@ class UTextBlock;
  *   이것만으로 갈린다. 어빌리티 클래스 이름으로 찾지 않는 이유는 이름이 아직 자주
  *   바뀌기 때문이다 (GA_Mimic → GA_Mimic_BodySwap).
  *
- * [임시 — 한 칸만 된다] 지금은 캐릭터마다 쿨다운 스킬이 하나라 "첫 번째" 로 충분하다.
- *   액티브 B · 팀 시너지가 들어오면 어느 스킬이 몇 번 칸인지 이 방식으로는 알 수 없다.
- *   그때는 어빌리티에 Ability.Slot.* 태그를 붙여 그걸로 찾도록 바꾼다 (플레이어 파트와 합의 필요).
+ * [몇 번째 칸인가 — SlotIndex] 쿨다운 있는 스킬을 InputID(캐릭터 BP 의 AbilityInputBindings
+ *   배열 순서) 순으로 줄 세워 SlotIndex 번째를 고른다. 0 이면 첫 번째 스킬, 1 이면 두 번째.
+ *   [임시] 배열에서 스킬 2 를 스킬 1 보다 위에 등록하면 두 칸이 뒤바뀌어 보인다.
+ *   정식으로는 어빌리티에 Ability.Slot.* 태그를 붙여 그걸로 찾는다 (플레이어 파트와 합의 필요).
  *
  * [쿨다운 시간을 들고 있지 않는다] 남은 시간 · 전체 시간은 실제로 걸린 쿨다운 GE 에서 읽는다.
  *   GE 수치가 바뀌거나 은신처 강화로 줄어도 위젯은 고칠 것이 없다.
@@ -126,6 +127,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Skill Slot", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float DimOpacity = 0.65f;
 
+	/**
+	 * 이 칸이 보여줄 스킬 순번. 0 = 첫 번째 쿨다운 스킬, 1 = 두 번째.
+	 *
+	 * WBP_HUD 에 칸을 복제해 넣었으면 칸마다 여기만 바꾼다. 순서 기준은 클래스 주석에 있다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Skill Slot", meta = (ClampMin = "0"))
+	int32 SlotIndex = 0;
+
 	// ── BP 연출 훅 ──
 	//
 	// 표시는 C++ 이 이미 끝냈다. 여기는 번쩍임 · 사운드 자리다.
@@ -155,8 +164,8 @@ private:
 	/** ASC 와 스킬을 찾을 때까지 재시도한다. 클라에는 PlayerState · 어빌리티 목록이 늦게 온다 */
 	void TryBind();
 
-	/** 부여된 어빌리티 중 쿨다운 태그가 있는 첫 번째 것. 없으면 null */
-	static const UGameplayAbility* FindCooldownAbility(const UAbilitySystemComponent& ASC);
+	/** 부여된 어빌리티 중 쿨다운 태그가 있는 것을 InputID 순으로 세워 Index 번째. 없으면 null */
+	static const UGameplayAbility* FindCooldownAbility(const UAbilitySystemComponent& ASC, int32 Index);
 
 	/** 구독을 전부 뗀다 */
 	void Unbind();
