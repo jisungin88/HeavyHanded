@@ -41,6 +41,10 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	{
 		GuardSightComp->RefreshSightTarget(BlackboardComp);
 	}
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+	{
+		GuardController->UpdateWorldAlarmBehavior();
+	}
 
 	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)));
 	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);

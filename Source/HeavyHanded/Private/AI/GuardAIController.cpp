@@ -16,6 +16,7 @@
 
 // Behavior Tree / Blackboard
 #include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BrainComponent.h"
 
@@ -90,7 +91,7 @@ void AGuardAIController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 #if ENABLE_DRAW_DEBUG
-	if (!HasAuthority() || !IsValid(PossessGuardPawn) || !PossessGuardPawn->bDrawMoveTargetDebug)
+	if (!HasAuthority() || !IsValid(PossessGuardPawn) || !PossessGuardPawn->IsDrawSightDebugEnabled() || !PossessGuardPawn->bDrawMoveTargetDebug)
 	{
 		return;
 	}
@@ -327,6 +328,10 @@ void AGuardAIController::BeginPlay()
 void AGuardAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
+	if (!HasAuthority() || bMatchEnded)
+	{
+		return;
+	}
 
 	PossessGuardPawn = Cast<AGuardCharacter>(InPawn);
 	if (!IsValid(PossessGuardPawn))
@@ -337,11 +342,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	}
 
 	// --------------------------------------------------------------------------------------------
-
-	if (UAlertComponent* Alert = UAlertComponent::Get(this))
-	{
-		Alert->OnAlertGaugeChanged.AddDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
-	}
 
 	GuardSightComp->Initialize(PossessGuardPawn, PerceptionComp);
 	GuardHearingComp->Initialize(PossessGuardPawn, PerceptionComp);
@@ -419,7 +419,16 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 첫 순찰 지점 선택 : 시작 시 첫 순찰 지점을 미리 채워둔다
 	// -------------------------------------------------------------------------------------------------------
 	// SelectNextPatrolPoint();-> 아래 함수로 변경했음
-	SelectNextAction(EGuardAIState::Patrol);
+	bWorldAlarmBehaviorActive = false;
+	BindToWorldAlert();
+	if (IsWorldAlarmActive())
+	{
+		UpdateWorldAlarmBehavior();
+	}
+	else
+	{
+		SelectNextAction(EGuardAIState::Patrol);
+	}
 
 
 	// Behavior Tree 시작
@@ -428,11 +437,18 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// bStartAILogicOnPossess 도 BrainComponent 가 있어야 의미가 있다(그 컴포넌트를
 	// 만들어주는 게 바로 이 호출이다). 여기서 부르지 않으면 BT 가 아예 시작되지 않는다.
 	RunBehaviorTree(BehaviorTreeAsset);
+	UpdateMoveSpeedByWorldAlert(GetWorldAlertLevel() / 100.f);
 }
 
 void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindFromGameState();
+	if (IsValid(BoundAlertComponent))
+	{
+		BoundAlertComponent->OnAlertGaugeChanged.RemoveDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		BoundAlertComponent->OnAlertLevelChanged.RemoveDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+		BoundAlertComponent = nullptr;
+	}
 
 	if (UWorld* World = GetWorld())
 	{
@@ -451,6 +467,7 @@ void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AGuardAIController::BindToGameState(AGameStateBase* GameState)
 {
+	BindToWorldAlert();
 	AHeistGameState* HeistState = Cast<AHeistGameState>(GameState);
 
 	// 작업 레벨이 아니면(GuardTest · L_NoiseTest 등) 아무것도 하지 않는다 —
@@ -492,8 +509,13 @@ void AGuardAIController::UnbindFromGameState()
 
 void AGuardAIController::ResetMoveSpeed()
 {
-	if (!PossessGuardPawn)
+	if (!HasAuthority() || !IsValid(PossessGuardPawn))
 	{
+		return;
+	}
+	if (IsWorldAlarmActive())
+	{
+		ApplyCurrentMoveSpeed();
 		return;
 	}
 
@@ -513,6 +535,11 @@ void AGuardAIController::HandleHeistPhaseChanged(
 
 void AGuardAIController::StopForMatchEnd()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bMatchEnded = true;
 	UE_LOG(LogGuardAI, Log, TEXT("[%s] 판이 끝나 순찰을 멈춘다."), *GetNameSafe(GetPawn()));
 
 	// BT 를 먼저 세운다. 이동 정지보다 나중에 하면 정지 직후 태스크가 한 번 더 돌아
@@ -574,17 +601,28 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 	{
 		return;
 	}
+	UPerceptionMeterComponent* PerceptionMeter = IsValid(PossessGuardPawn) ? PossessGuardPawn->GetPerceptionMeterComponent() : nullptr;
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const bool bVisibleChaseTarget = IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)) && GetDetectionGaugePercent() >= 100.f;
+	if (!IsValid(BlackboardComp) || AIState == EGuardAIState::Chase || bVisibleChaseTarget)
+	{
+		if (IsValid(PerceptionMeter))
+		{
+			PerceptionMeter->ResetPerception();
+		}
+		return;
+	}
 
 	//+ 0910 디버그용
 	UE_LOG(LogTemp, Warning, TEXT("[GuardAI] PerceptionFull RECEIVED | Location=%s"), *LastNoiseLocation.ToString());
 
 	RequestInvestigate(LastNoiseLocation);
 
-	// 청각 게이지가 소음원이므로, 이 경로에서만 게이지를 비운다 — 카메라 등 다른
-	// 감지 수단으로 들어온 RequestInvestigate 호출은 이 게이지와 무관하다.
-	if (PossessGuardPawn)
+	// 평온에서는 기존처럼 즉시 비운다. 의심 이상에서 강제로 채운 게이지는
+	// 조사 중 유지하고 순찰 복귀·추격 전환 때 해제한다.
+	if (IsValid(PerceptionMeter) && !PerceptionMeter->IsHoldingAlertInvestigationGauge())
 	{
-		PossessGuardPawn->GetPerceptionMeterComponent()->ResetPerception();
+		PerceptionMeter->ResetPerception();
 	}
 }
 
@@ -705,12 +743,30 @@ void AGuardAIController::SetSightDebugEnabled(bool bInEnabled)
 
 void AGuardAIController::SetAIState(EGuardAIState NewState)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// 경보 중에는 다른 호출 경로에서도 순찰 상태로 되돌릴 수 없다.
+	if (NewState == EGuardAIState::Patrol && IsWorldAlarmActive())
+	{
+		NewState = EGuardAIState::Search;
+	}
 	if (AIState == NewState)
 	{
 		return;
 	}
 
 	AGuardCharacter* GuardPawn = PossessGuardPawn.Get();
+	// 의심 단계에서 채운 청각 게이지는 조사 종료 또는 추격 전환 때 해제한다.
+	if (HasAuthority() && IsValid(GuardPawn) && NewState != EGuardAIState::Search)
+	{
+		UPerceptionMeterComponent* PerceptionMeter = GuardPawn->GetPerceptionMeterComponent();
+		if (IsValid(PerceptionMeter) && PerceptionMeter->IsHoldingAlertInvestigationGauge())
+		{
+			PerceptionMeter->ResetPerception();
+		}
+	}
 	const FString PawnName = IsValid(GuardPawn) ? GuardPawn->GetName() : TEXT("InvalidPawn");
 
 	const UEnum* GuardAIStateEnum = StaticEnum<EGuardAIState>();
@@ -874,6 +930,14 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 		return false;
 	}
 
+	if (State == EGuardAIState::Patrol && IsWorldAlarmActive())
+	{
+		EnsureAlarmSearchSession();
+		SetAIState(EGuardAIState::Search);
+		LogSearchTransitionDebug(TEXT("AlarmPatrolBlocked"), TEXT("경보 중 순찰 요청 차단: 경보 수색 분기 설정 확인"));
+		return false;
+	}
+
 	//if (AIState == State)
 	//{
 	//	return false;
@@ -927,6 +991,10 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 
 void AGuardAIController::ApplyCurrentMoveSpeed()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	// 현재 경비의 이동 상태를 기준으로 최종 이동 속도를 계산하고 적용한다.
 	// 월드 경계도에 의해 속도가 증가된 상태라면 WorldAlertMoveSpeedMultiplier를 추가로 적용한다.
 	// 추격 상태와 월드 경계도 상태가 변경될 때만 호출한다.
@@ -943,11 +1011,12 @@ void AGuardAIController::ApplyCurrentMoveSpeed()
 		return;
 	}
 
-	// 추격 중이면 추격 속도를 사용하고, 추격 중이 아니면 일반 이동 속도를 사용한다.
-	float NewMoveSpeed = WorldAlertSet.bIsChasing ? WorldAlertSet.ChaseMoveSpeed : WorldAlertSet.NormalMoveSpeed;
+	// 경보 중에는 수색도 추격 속도로 이동한다.
+	const bool bAlarm = IsWorldAlarmActive();
+	float NewMoveSpeed = (bAlarm || WorldAlertSet.bIsChasing) ? WorldAlertSet.ChaseMoveSpeed : WorldAlertSet.NormalMoveSpeed;
 
 	// 월드 경계도에 의해 속도가 증가된 상태라면 현재 선택된 이동 속도에 경계도 배율을 적용한다.
-	if (WorldAlertSet.bWorldAlertSpeedUp)
+	if (bAlarm || WorldAlertSet.bWorldAlertSpeedUp)
 	{
 		NewMoveSpeed *= WorldAlertSet.WorldAlertMoveSpeedMultiplier;
 	}
@@ -976,9 +1045,126 @@ float AGuardAIController::GetWorldAlertLevel() const
 	return 0.f;
 }
 
+bool AGuardAIController::IsWorldAlarmActive() const
+{
+	const UAlertComponent* Alert = UAlertComponent::Get(this);
+	return IsValid(Alert) && Alert->IsAlarmed();
+}
+
+void AGuardAIController::BindToWorldAlert()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	UAlertComponent* Alert = UAlertComponent::Get(this);
+	if (Alert == BoundAlertComponent.Get())
+	{
+		return;
+	}
+	if (IsValid(BoundAlertComponent))
+	{
+		BoundAlertComponent->OnAlertGaugeChanged.RemoveDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		BoundAlertComponent->OnAlertLevelChanged.RemoveDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+	}
+	BoundAlertComponent = Alert;
+	if (IsValid(Alert))
+	{
+		Alert->OnAlertGaugeChanged.AddUniqueDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		// 게이지 복제의 양자화 값이 이미 255여도 실제 경보 단계 진입은 별도로 받는다.
+		Alert->OnAlertLevelChanged.AddUniqueDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+	}
+}
+
+void AGuardAIController::HandleWorldAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel OldLevel)
+{
+	if (!HasAuthority() || (NewLevel != EAlertLevel::Alarm && OldLevel != EAlertLevel::Alarm))
+	{
+		return;
+	}
+	UpdateMoveSpeedByWorldAlert(GetWorldAlertLevel() / 100.f);
+}
+
+void AGuardAIController::EnsureAlarmSearchSession()
+{
+	if (!HasAuthority() || bMatchEnded || !IsWorldAlarmActive() || !IsValid(GetWorld()) || !IsValid(PossessGuardPawn))
+	{
+		return;
+	}
+	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	if (!IsValid(BlackboardComp))
+	{
+		return;
+	}
+	const bool bHasSearchLocation = BlackboardComp->IsVectorValueSet(GuardAIKeys::InvestigateLocation) && FAISystem::IsValidLocation(BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation));
+	if (!bHasSearchLocation)
+	{
+		FVector SearchLocation = PossessGuardPawn->GetActorLocation();
+		if (BlackboardComp->IsVectorValueSet(GuardAIKeys::LastKnownLocation))
+		{
+			const FVector LastKnownLocation = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
+			if (FAISystem::IsValidLocation(LastKnownLocation))
+			{
+				SearchLocation = LastKnownLocation;
+			}
+		}
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SearchLocation);
+	}
+	if (!bHasSearchLocation || BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime) < 0.f)
+	{
+		// 새 소음 감지로 집계하지 않고 경보에 필요한 수색 세션만 만든다.
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+	}
+}
+
+void AGuardAIController::UpdateWorldAlarmBehavior()
+{
+	if (!HasAuthority() || bMatchEnded || !IsValid(PossessGuardPawn) || !IsValid(GetBlackboardComponent()))
+	{
+		return;
+	}
+	BindToWorldAlert();
+	const bool bAlarm = IsWorldAlarmActive();
+	const bool bAlarmChanged = bAlarm != bWorldAlarmBehaviorActive;
+	bWorldAlarmBehaviorActive = bAlarm;
+	if (bAlarm)
+	{
+		EnsureAlarmSearchSession();
+	}
+	if (!bAlarmChanged)
+	{
+		return;
+	}
+	if (IsValid(GuardHearingComp))
+	{
+		GuardHearingComp->ClearWorldAlertSilenceTimer();
+	}
+	WorldAlertSet.bWorldAlertSpeedTriggered = bAlarm;
+	SetWorldAlertSpeedUp(bAlarm);
+	ApplyCurrentMoveSpeed();
+	UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][경보] %s"), *GetNameSafe(PossessGuardPawn), bAlarm ? TEXT("최대 속도·무제한 수색 시작") : TEXT("경보 초기화: 일반 수색 규칙 복구"));
+	// 추격·체포가 진행 중이면 그대로 유지한다. 나머지는 순찰/마무리 대기를 끊고 루트부터 판단한다.
+	if (bAlarm && AIState != EGuardAIState::Chase)
+	{
+		SetAIState(EGuardAIState::Search);
+		if (UBehaviorTreeComponent* BehaviorTreeComp = Cast<UBehaviorTreeComponent>(GetBrainComponent()))
+		{
+			if (BehaviorTreeComp->IsRunning() && !BehaviorTreeComp->IsPaused())
+			{
+				BehaviorTreeComp->RestartTree(EBTRestartMode::ForceReevaluateRootNode);
+			}
+		}
+	}
+}
+
 void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 {
-	if (!PossessGuardPawn)
+	if (!HasAuthority() || bMatchEnded || !IsValid(PossessGuardPawn))
+	{
+		return;
+	}
+	UpdateWorldAlarmBehavior();
+	if (IsWorldAlarmActive())
 	{
 		return;
 	}
@@ -1048,6 +1234,10 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 void AGuardAIController::SetChasing(bool bChasing)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (WorldAlertSet.bIsChasing == bChasing)
 	{
 		return;

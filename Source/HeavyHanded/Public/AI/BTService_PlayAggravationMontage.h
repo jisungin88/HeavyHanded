@@ -18,6 +18,7 @@ class HEAVYHANDED_API UBTService_PlayAggravationMontage : public UBTService
 public:
 	UBTService_PlayAggravationMontage();
 
+	// 캐릭터 BP 미지정 시 사람 경비가 사용하는 기존 BT 설정. 경비견에는 적용하지 않는다.
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimMontage> AggravationMontage;
 
@@ -30,4 +31,8 @@ protected:
 
 private:
 	AGuardCharacter* GetGuardCharacter(UBehaviorTreeComponent& OwnerComp) const;
+
+	// 재생 때 선택한 몽타주를 보관해 종료 때도 같은 몽타주만 중단한다.
+	UPROPERTY(Transient, VisibleInstanceOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> ActiveMontage;
 };

@@ -10,6 +10,10 @@
 
 #include "AI/GuardHearingAComponent.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardBlackboardKeys.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Character/GuardCharacter.h"
+#include "Alert/AlertComponent.h"
 
 UPerceptionMeterComponent::UPerceptionMeterComponent()
 {
@@ -119,6 +123,26 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 		return;
 	}
 
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	AGuardAIController* GuardController = IsValid(OwnerPawn) ? Cast<AGuardAIController>(OwnerPawn->GetController()) : nullptr;
+	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(OwnerPawn);
+	if (IsValid(GuardCharacter) && !GuardCharacter->IsHearingEnabled())
+	{
+		return;
+	}
+	const UAlertComponent* Alert = UAlertComponent::Get(this);
+	const bool bImmediateInvestigate = IsValid(GuardController) && IsValid(Alert) && Alert->GetAlertLevel() >= EAlertLevel::Suspicious;
+	if (bImmediateInvestigate)
+	{
+		const UBlackboardComponent* BlackboardComp = GuardController->GetBlackboardComponent();
+		const bool bVisibleChaseTarget = IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)) && GuardController->GetDetectionGaugePercent() >= 100.f;
+		// 추격을 소음 조사로 덮어쓰지 않는다. 청각 감지 범위·감쇠 판정은 NoiseSubsystem이 수행한다.
+		if (GuardController->GetAIState() == EGuardAIState::Chase || bVisibleChaseTarget || Stimulus.Strength <= 0.f)
+		{
+			return;
+		}
+	}
+
 	//+ 0910 디버그용 
 	//UE_LOG(LogTemp, Warning, TEXT("[Perception] Noise Heard | Strength=%.2f | Before=%.2f | Gain=%.2f | Add=%.2f"),
 	//	Stimulus.Strength, Perception01, GainPerStimulus, Stimulus.Strength * GainPerStimulus);
@@ -130,6 +154,15 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 	// 감소 판정을 돌리려면 틱이 필요하다. SetPerception 보다 먼저 켜야
 	// 래치되는 경우에 SetPerception 이 도로 꺼줄 수 있다
 	SetComponentTickEnabled(true);
+
+	if (bImmediateInvestigate)
+	{
+		bHoldingAlertInvestigationGauge = true;
+		UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][소음 즉시 조사] 경보=%s 청각=100 위치=%s"), *GetNameSafe(GetOwner()), *UEnum::GetValueAsString(Alert->GetAlertLevel()), *LastNoiseLocation.ToCompactString());
+		// 통합 UI는 FullThreshold를 100%로 표시한다. 기존 Full 콜백으로 조사에 진입한다.
+		SetPerception(PerceptionFullThreshold);
+		return;
+	}
 
 	// Stimulus.Strength : 실제 발생한 소리 세기 
 	// GainPerStimulus : 소리 세기를 인지 게이지에 얼마나 반영할지
@@ -214,6 +247,7 @@ void UPerceptionMeterComponent::ResetPerception()
 	}
 
 	bLatched              = false;
+	bHoldingAlertInvestigationGauge = false;
 	TimeSinceLastStimulus = 0.f;
 
 	SetPerception(0.f);

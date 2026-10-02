@@ -51,6 +51,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Noise|Perception")
 	bool IsLatched() const { return bLatched; }
 
+	// 의심 이상에서 소음을 즉시 조사하는 동안 청각 게이지를 100%로 유지한다.
+	bool IsHoldingAlertInvestigationGauge() const { return bHoldingAlertInvestigationGauge; }
+
 	/** 마지막으로 들은 소음 지점. 조사 목적지로 쓴다 (서버 권위) */
 	UFUNCTION(BlueprintPure, Category = "Noise|Perception")
 	FVector GetLastNoiseLocation() const { return LastNoiseLocation; }
@@ -132,4 +135,5 @@ private:
 
 	/** 100% 도달 후 재발화 방지. ResetPerception() 만이 푼다 */
 	bool bLatched = false;
+	bool bHoldingAlertInvestigationGauge = false;
 };

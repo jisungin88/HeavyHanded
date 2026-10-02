@@ -112,23 +112,23 @@ void UGuardSightAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIPer
 	}
 
 	PerceptionComp->ConfigureSense(*SightConfig);
-	SetComponentTickEnabled(!GetOwner()->HasAuthority());
+	// 생성 시 확정된 옵션으로 디버그 라인만 관리한다. 스킬 호출로는 바꾸지 않는다.
+	bDrawSightDebug = GuardCharacter->IsDrawSightDebugEnabled();
+	SetComponentTickEnabled(bDrawSightDebug);
 	if (GetOwner()->HasAuthority())
 	{
 		GuardCharacter->SetReplicatedSightDebugState(
-			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bDrawSightDebug);
+			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees);
 	}
 	else
 	{
 		SightConfig->SightRadius = GuardCharacter->GetReplicatedSightRadius();
 		SightConfig->PeripheralVisionAngleDegrees = GuardCharacter->GetReplicatedSightHalfAngle();
-		bDrawSightDebug = GuardCharacter->GetReplicatedDrawSightDebug();
 	}
 
 	SetSightEnabled(GuardCharacter->IsSightEnabled());
-	SetSightDebugEnabled(GetOwner()->HasAuthority()
-		? GuardCharacter->IsDrawSightDebugEnabled()
-		: GuardCharacter->GetReplicatedDrawSightDebug());
+	DrawSightDebugMesh();
+	UpdateSightDebugTimer();
 
 }
 
@@ -153,7 +153,8 @@ void UGuardSightAComponent::UpdateSightDebugTimer()
 	}
 
 	World->GetTimerManager().ClearTimer(SightDebugTimerHandle);
-	if (bDrawSightDebug)
+	// 서버는 클라이언트의 스킬 표시를 위해 작은 시야 설정값을 계속 제공한다.
+	if (IsValid(GetOwner()) && GetOwner()->HasAuthority())
 	{
 		const float UpdateInterval = IsValid(GuardCharacter)
 			? FMath::Max(GuardCharacter->GetSightDebugUpdateInterval(), 0.05f)
@@ -172,11 +173,6 @@ void UGuardSightAComponent::UpdateSightDebugTimer()
 
 void UGuardSightAComponent::UpdateSightDebug()
 {
-	if (!bDrawSightDebug)
-	{
-		return;
-	}
-
 	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight debug timer fired. Interval=%.2f AIState=%s"),
 	//	*GetNameSafe(GuardCharacter),
 	//	IsValid(GuardCharacter) ? GuardCharacter->GetSightDebugUpdateInterval() : 0.0f,
@@ -188,7 +184,6 @@ void UGuardSightAComponent::UpdateSightDebug()
 		{
 			SightConfig->SightRadius = GuardCharacter->GetReplicatedSightRadius();
 			SightConfig->PeripheralVisionAngleDegrees = GuardCharacter->GetReplicatedSightHalfAngle();
-			bDrawSightDebug = GuardCharacter->GetReplicatedDrawSightDebug();
 		}
 
 		DrawSightDebugMesh();
@@ -262,11 +257,8 @@ void UGuardSightAComponent::SetSightConfig (float InSightRadius, float InLoseSig
 	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
 	{
 		GuardCharacter->SetReplicatedSightDebugState(
-			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bDrawSightDebug);
-		if (bDrawSightDebug)
-		{
-			DrawSightDebugMesh();
-		}
+			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees);
+		DrawSightDebugMesh();
 	}
 
 }
@@ -331,30 +323,11 @@ float UGuardSightAComponent::GetBinocularVisionRate(AActor* TargetActor) const
 
 void UGuardSightAComponent::SetSightDebugEnabled(bool bInEnabled)
 {
-	bDrawSightDebug = bInEnabled;
-	if (IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
+	// 기존 Controller·스킬 호출 경로는 유지하되 시야 메시만 켜고 끈다.
+	if (IsValid(GuardCharacter))
 	{
-		GuardCharacter->SetReplicatedSightDebugState(
-			SightConfig->SightRadius, SightConfig->PeripheralVisionAngleDegrees, bInEnabled);
+		GuardCharacter->SetDrawSightDebugEnabled(bInEnabled);
 	}
-	if (IsValid(SightDebugMesh))
-	{
-		SightDebugMesh->SetVisibility(bInEnabled);
-	}
-	SetComponentTickEnabled(bInEnabled);
-	if (bInEnabled && GetOwner()->HasAuthority())
-	{
-		UpdateSightDebug();
-	}
-	UpdateSightDebugTimer();
-
-	//if (!bInEnabled)
-	//{
-	//	SightDebugMesh->ClearAllMeshSections();
-	//}
-
-
-
 }
 
 

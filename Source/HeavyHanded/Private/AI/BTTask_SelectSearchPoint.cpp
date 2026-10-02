@@ -41,9 +41,10 @@ EBTNodeResult::Type UBTTask_SelectSearchPoint::ExecuteTask(UBehaviorTreeComponen
 		return EBTNodeResult::Failed;
 	}
 	// 후보가 없어도 바로 순찰로 넘어가지 않고 남은 시간 안에서 다시 탐색한다.
+	const float RetryDelay = GuardController->IsWorldAlarmActive() ? 1.f : 0.25f;
 	GuardController->GuardPatrolComp->BeginSearchAttempt();
-	GuardController->GuardPatrolComp->ReportSearchAttempt(false, 0.25f, FAISystem::InvalidLocation);
-	NextRetryTime = GuardController->GetWorld()->GetTimeSeconds() + 0.25f;
+	GuardController->GuardPatrolComp->ReportSearchAttempt(false, RetryDelay, FAISystem::InvalidLocation);
+	NextRetryTime = GuardController->GetWorld()->GetTimeSeconds() + RetryDelay;
 	return EBTNodeResult::InProgress;
 }
 

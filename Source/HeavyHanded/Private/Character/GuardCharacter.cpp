@@ -1,6 +1,7 @@
 #include "Character/GuardCharacter.h"
 #include "AI/GuardAnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimInstance.h"
 #include "AI/GuardTypes.h"
 
 //#include "Noise/PerceptionMeterComponent.h"
@@ -84,6 +85,8 @@ AGuardCharacter::AGuardCharacter()
 	SightDebugMesh->SetupAttachment(GetRootComponent());
 	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SightDebugMesh->SetCastShadow(false);
+	SightDebugMesh->SetVisibility(false);
+	SightDebugMesh->SetHiddenInGame(true);
 
 }
 
@@ -166,7 +169,7 @@ void AGuardCharacter::UpdateLocalSightDebugTimer()
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(LocalSightDebugTimerHandle);
-	if (GetNetMode() == NM_DedicatedServer || !bReplicatedDrawSightDebug)
+	if (GetNetMode() == NM_DedicatedServer || !IsSightMeshVisible())
 	{
 		return;
 	}
@@ -248,7 +251,7 @@ void AGuardCharacter::Multicast_SetAggravationMontage_Implementation(UAnimMontag
 	{
 		return;
 	}
-	UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GetMesh()->GetAnimInstance());
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (!IsValid(AnimInstance))
 	{
 		return;
@@ -267,7 +270,8 @@ void AGuardCharacter::OnRep_SightDebugState()
 {
 	if (IsValid(SightDebugMesh))
 	{
-		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
+		SightDebugMesh->SetVisibility(IsSightMeshVisible());
+		SightDebugMesh->SetHiddenInGame(!IsSightMeshVisible());
 	}
 	UpdateLocalSightDebugTimer();
 
@@ -281,16 +285,16 @@ void AGuardCharacter::OnRep_SightDebugRotation()
 	}
 }
 
-void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled)
+void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle)
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 
+	InitializeSightDebugDisplay();
 	ReplicatedSightRadius = InSightRadius;
 	ReplicatedSightHalfAngle = InSightHalfAngle;
-	bReplicatedDrawSightDebug = bInEnabled;
 	OnRep_SightDebugState();
 	ForceNetUpdate();
 }
@@ -322,7 +326,7 @@ void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
 void AGuardCharacter::DrawLocalSightDebugMesh()
 {
 	UWorld* World = GetWorld();
-	if (!IsValid(World) || !IsValid(SightDebugMesh) || !IsValid(GetCapsuleComponent()) || !bReplicatedDrawSightDebug || GetNetMode() == NM_DedicatedServer)
+	if (!IsValid(World) || !IsValid(SightDebugMesh) || !IsValid(GetCapsuleComponent()) || !IsSightMeshVisible() || GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
@@ -694,6 +698,9 @@ void AGuardCharacter::DrawLocalSightDebugMesh()
 void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	// 기존 BP에 저장된 진단 활성화 값도 시작 시 해제한다.
+	bDrawPerceptionWidgetDebug = false;
+	InitializeSightDebugDisplay();
 	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
 	{
 		// 파생 블루프린트의 Mesh 기본값이 생성자 설정을 덮을 수 있어 런타임에도 강제한다.
@@ -839,24 +846,34 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 //
 void AGuardCharacter::SetDrawSightDebugEnabled(bool bInEnabled)
 {
-	bDrawSightDebug = bInEnabled;
+	InitializeSightDebugDisplay();
+	// 외부 호출은 메시만 제어한다. 생성 시 저장한 디버그 라인 옵션은 변경하지 않는다.
+	if (HasAuthority())
+	{
+		bReplicatedDrawSightDebug = bInEnabled;
+		ForceNetUpdate();
+	}
+	else
+	{
+		// 스킬을 사용한 클라이언트만 표시할 때는 AIController 없이 로컬 메시를 제어한다.
+		bLocalSightMeshVisibilityOverride = true;
+		bLocalSightMeshVisible = bInEnabled;
+	}
+	OnRep_SightDebugState();
+}
 
-	//if (AGuardAIController* GuardController = Cast<AGuardAIController>(GetController()))
-	//{
-	//	if (GuardController->GuardSightComp)
-	//	{
-	//		GuardController->GuardSightComp->SetSightDebugEnabled(bInEnabled);
-	//	}
-	//}
-
-	AGuardAIController* GuardController = Cast<AGuardAIController>(GetController());
-	if (!GuardController)
+void AGuardCharacter::InitializeSightDebugDisplay()
+{
+	if (bSightDebugDisplayInitialized)
 	{
 		return;
 	}
-
-	GuardController->SetSightDebugEnabled(bInEnabled);
-
+	bSightDebugDisplayInitialized = true;
+	bInitialDrawSightDebug = bDrawSightDebug;
+	if (HasAuthority())
+	{
+		bReplicatedDrawSightDebug = bInitialDrawSightDebug;
+	}
 }
 
 void AGuardCharacter::SetGuardMoveSpeed(float NewMoveSpeed)
