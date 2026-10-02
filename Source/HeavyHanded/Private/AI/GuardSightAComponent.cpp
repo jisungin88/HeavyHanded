@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "AI/GuardSightAComponent.h"
@@ -450,133 +450,38 @@ void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardC
 
 
 
-void UGuardSightAComponent::OnTargetPerceptionUpdatedSight
-		(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
+void UGuardSightAComponent::OnTargetPerceptionUpdatedSight(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
-	if (!HasServerAuthority(this))
+	if (!HasServerAuthority(this) || !IsValid(Actor) || !IsValid(BlackboardComp) || !IsValid(GuardAIController))
 	{
 		return;
 	}
 
-	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
-
-	if (TargetASC && TargetASC->HasMatchingGameplayTag(HHTags::Ability_Mimic_GuardDisguise))
+	if (Stimulus.Type != UAISense::GetSenseID<UAISense_Sight>())
 	{
 		return;
 	}
 
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight 콜백: Actor=%s Sensed=%d AIState=%d"), *GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed(), static_cast<int32>(GuardAIController->GetAIState()));
 
-	if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
+	const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+
+	// 개별 플레이어의 콜백 값으로 현재 타겟을 덮어쓰지 않는다.
+	// 현재 타겟이 실제 시야에 남아 있으면 유지하고, 놓쳤을 때만 다른 감지 대상을 선택한다.
+	RefreshSightTarget(BlackboardComp);
+
+	if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
 	{
-
-		UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight 콜백: Actor=%s Sensed=%d AIState=%d"),
-			*GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed(), static_cast<int32>(GuardAIController->GetAIState()));
-
-
-		// 시야 획득/상실이 초당 여러 번 뒤집히면 추격 브랜치가 그만큼 abort/restart 된다.
-		// 눈으로 세기 어려우므로 상실이 실제로 몇 초 지속됐는지를 같이 찍는다.
-		// 1초 미만이 반복되면 깜빡임, 수 초 단위면 정상적으로 놓친 것이다.
-		const float NowSeconds = GetWorld()->GetTimeSeconds();
-
-
-		if (Stimulus.WasSuccessfullySensed())
-		{
-			if (SightLostAtTime >= 0.f)
-			{
-				// GetPawn = 상위 가져오기
-				//UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (직전 상실이 %.2f초 지속)"),
-				//	*GetNameSafe(GetPawn()), *GetNameSafe(Actor), NowSeconds - SightLostAtTime);
-			}
-			else
-			{
-				//UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 획득: %s (최초)"),
-				//	*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
-			}
-
-			SightLostAtTime = -1.f;
-		}
-		else
-		{
-			SightLostAtTime = NowSeconds;
-
-			// 추격 속도 설정
-			if (GuardAIController)
-			{
-				GuardAIController->SetChasing(false);
-			}
-
-			//UE_LOG(LogGuardAI, Log, TEXT("[%s] 시야 상실: %s"),
-			//	*GetNameSafe(GetPawn()), *GetNameSafe(Actor));
-		}
-
-		// 브로드캐스트는 false->true 전환 1회로 제한한다 - 덮어쓰기 전에 이전 값을 봐둔다.
-		const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
-
-		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, Stimulus.WasSuccessfullySensed());
-
-		if (Stimulus.WasSuccessfullySensed())
-		{
-
-			// Sight에서 플레이어를 발견했을 때 Hearing에서 걸어둔 FocalPoint를 해제
-			//AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetOwner());
-			if (GuardAIController)
-			{
-				GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
-
-
-				if (GuardAIController->GuardHearingComp)
-				{
-					GuardAIController->GuardHearingComp->ClearHearingDebug();
-				}
-			}
-
-			// 경비의 실제 눈높이에서 플레이어 머리까지의 수직 시야각을 검사
-			if (!IsWithinVerticalVisionAngle(Actor))
-			{
-				BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, false);
-			}
-
-			else
-			{
-				if (!bWasSeeing)
-				{
-					// 필요한지 확인 한번 더하고 주석 풀 것
-					/// OnPlayerSpotted.Broadcast(Actor);
-				}
-
-
-
-				BlackboardComp->SetValueAsObject(GuardAIKeys::TargetActor, Actor);
-				BlackboardComp->SetValueAsVector(GuardAIKeys::LastKnownLocation, Stimulus.StimulusLocation);
-
-				// 시야 경계에서 감지가 프레임 단위로 깜빡여도 추격을 바로 이탈하지 않도록,
-				// 실제로 "본" 순간마다 시각을 갱신한다. BT 추격 브랜치의
-				// Check Search Timeout(TimeKeyName=LastSeenTime, TimeoutSeconds=1.5)이 이 값을 읽는다.
-				// 이 write 가 없으면 OnPossess 의 초기값(-100000)이 그대로 남아
-				// 추격 조건이 영구히 거짓이 된다.
-				BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, GetWorld()->GetTimeSeconds());
-			}
-		}
-		// 시야를 잃었다고 해서 여기서 SearchStartTime 을 쓰지 않는다.
-		//
-		// 쓰면 스쳐 지나가듯 한 번 보이기만 해도 조사가 켜진다. Guard.ini 는
-		// Guard.State.Investigate 를 "인지 게이지가 가득 차" 진입하는 상태로 정의한다.
-		// 그 조건은 BTService_UpdateDetectionGauge 가 게이지 100 인 동안 매 틱
-		// SearchStartTime 을 밀어주는 것으로 이미 만족된다 - 시야를 잃는 순간
-		// 그 값이 얼어붙어 자연스럽게 "수색 시작 시각"이 된다.
+		SightLostAtTime = -1.f;
+	}
+	else if (bWasSeeing)
+	{
+		SightLostAtTime = GetWorld()->GetTimeSeconds();
+		GuardAIController->SetChasing(false);
 	}
 
+	// SearchStartTime은 기존대로 게이지 서비스에서 확정 목격 시각을 갱신한다.
 }
-
-
-
-
-
-
-
-
-
-
 
 //경비의 눈 위치 → 플레이어 머리 위치를 기준으로 계산
 bool UGuardSightAComponent::IsWithinVerticalVisionAngle(AActor* TargetActor) const

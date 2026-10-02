@@ -79,21 +79,8 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 		// 주변 시야의 기존 보정: 양안 비율 1.0이면 1.0배, 주변 비율 0.5이면 0.625배다.
 		const float BinocularMultiplier = FMath::Lerp(0.25f, 1.0f, BinocularRate);
-		// 기존 규칙대로 기본 상승량에 거리와 양안/주변 시야 배율을 곱한다.
-		const float ExistingIncreaseRate = GaugeIncreaseRate * DistanceRate * BinocularMultiplier;
-		if (BinocularRate >= 1.0f)
-		{
-			// 양안 시야에서는 거리와 상관없이 설정한 시간 안에 포착되도록 최소 속도를 계산한다.
-			// 예: 0.2초이면 초당 500 게이지이며, 현재 게이지가 0일 때 약 0.2초 만에 100이 된다.
-			const float NearSightIncreaseRate = 100.0f / FMath::Max(BinocularDetectionTimeSeconds, 0.01f);
-			// 가까워서 기존 거리 보정 속도가 더 빠르면 그 속도를 보존하고, 아니면 목표 속도를 쓴다.
-			Delta = FMath::Max(ExistingIncreaseRate, NearSightIncreaseRate) * DeltaSeconds;
-		}
-		else
-		{
-			// 주변 시야에서는 목표 포착 시간을 강제하지 않아, 거리/각도에 따른 느린 인지가 유지된다.
-			Delta = ExistingIncreaseRate * DeltaSeconds;
-		}
+		// 같은 거리에서는 양안 시야가 주변 시야보다 1.6배 빠르게 차며, 거리 보정도 유지한다.
+		Delta = GaugeIncreaseRate * DistanceRate * BinocularMultiplier * DeltaSeconds;
 
 
 		// -------------------------------------------------------------------------
