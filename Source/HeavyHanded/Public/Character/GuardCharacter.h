@@ -8,6 +8,8 @@
 
 class UPerceptionMeterComponent;
 class UWidgetComponent;
+class UAnimMontage;
+class UMaterialInterface;
 
 class UProceduralMeshComponent;
 
@@ -22,6 +24,17 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const override;
 	FTransform GetEyeSocketTransform() const;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	void SetSightDebugAppearance(bool bInChasing, FLinearColor InColor, UMaterialInterface* InMaterial);
+
+	void SetLookAroundType(EGuardLookAroundType NewType);
+	void SetArresting(bool bNewArresting);
+	bool IsArresting() const { return bReplicatedIsArresting; }
+	EGuardLookAroundType GetLookAroundType() const { return ReplicatedLookAroundType; }
+	void SetAggravationMontage(UAnimMontage* Montage, bool bPlay, float BlendOutTime);
+
+	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Animation")
+	void Multicast_SetAggravationMontage(UAnimMontage* Montage, bool bPlay, float BlendOutTime);
 
 
 	// Guard Info (경비 정보)
@@ -32,6 +45,17 @@ public:
 
 
 private:
+	UPROPERTY(ReplicatedUsing = OnRep_LookAroundType, VisibleAnywhere, Category = "Guard|Animation")
+	EGuardLookAroundType ReplicatedLookAroundType = EGuardLookAroundType::None;
+
+	UFUNCTION(Category = "Guard|Animation")
+	void OnRep_LookAroundType();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Arresting, VisibleAnywhere, Category = "Guard|Animation")
+	bool bReplicatedIsArresting = false;
+
+	UFUNCTION(Category = "Guard|Animation")
+	void OnRep_Arresting();
 
 	// AllowPrivateAccess
 	// 경비의 시야 감지 기능을 활성화할지 여부
@@ -47,7 +71,7 @@ private:
 	bool bDrawSightDebug = true;
 
 	// 켜면 EyeSocket의 위치와 회전을 경비 시야 판정 및 시야 메시 방향에 사용한다.
-	// 끄면 EyeSocket을 무시하고 캐릭터 위치와 회전 기준으로 동작한다.
+	// 끄면 캐릭터 위치와 EyeHeight, 기본 화살표 방향을 사용한다. 패키징에서는 캡슐 방향을 사용한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Perception", meta = (DisplayPriority = 2, AllowPrivateAccess = "true"))
 	bool bUseEyeSocketForSight = true;
 
@@ -70,6 +94,10 @@ private:
 	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
 	float ReplicatedDetectionGaugePercent = 0.0f;
 
+	// 서버의 현재 어그로 대상을 클라이언트 UI에 전달한다.
+	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AActor> ReplicatedAggroTarget;
+
 	UFUNCTION()
 	void OnRep_SightDebugState();
 
@@ -78,8 +106,12 @@ private:
 
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
 	float SightDebugUpdateInterval = 0.25f;
+
+	// 서버에서 현재 행동의 목표와 별도의 어그로 대상까지 디버그 선을 표시한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (DisplayName = "Draw Move Target Debug"))
+	bool bDrawMoveTargetDebug = false;
 
 	bool IsSightEnabled() const { return bEnableSight; }
 	bool IsHearingEnabled() const { return bEnableHearing; }
@@ -95,10 +127,6 @@ public:
 	void SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled);
 	void SetReplicatedSightDebugRotation(FRotator InRotation);
 	void SetReplicatedDetectionGauge(float InGaugePercent);
-	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Perception")
-	void Multicast_UpdateSightDebugMesh(const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
-		const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
-		FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial);
 	float GetReplicatedSightRadius() const { return ReplicatedSightRadius; }
 	float GetReplicatedSightHalfAngle() const { return ReplicatedSightHalfAngle; }
 	bool GetReplicatedDrawSightDebug() const { return bReplicatedDrawSightDebug; }
@@ -189,17 +217,34 @@ public:
 
 	void SetHeadGaugeUpdateInterval(float NewInterval);
 	void StopHeadGaugeUpdate();
+
+	UPROPERTY(EditAnywhere, Category = "Guard|Debug", meta = (DisplayName = "통합 게이지 화면 진단"))
+	bool bDrawPerceptionWidgetDebug = true;
 //private:
 
 
 protected:
 
 	void UpdateHeadGaugeWidget();
+	void UpdateLocalSightDebugTimer();
+	void DrawLocalSightDebugMesh();
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	bool bSightDebugChasing = false;
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	FLinearColor SightDebugFanColor = FLinearColor::White;
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	TObjectPtr<UMaterialInterface> SightDebugMaterial;
+
+	FTimerHandle LocalSightDebugTimerHandle;
 
 	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))
 	float HeadGaugeUpdateInterval = 0.1f;
 
 	FTimerHandle HeadGaugeUpdateTimerHandle;
+	float LastPerceptionWidgetDebugLogTime = -1000.f;
 
 };

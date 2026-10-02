@@ -31,6 +31,10 @@ bool UBTDecorator_CheckArrestRange::CalculateRawConditionValue(UBehaviorTreeComp
 	}
 
 	const float Distance = FVector::Dist(GuardPawn->GetActorLocation(), TargetActor->GetActorLocation());
+	if (const AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+	{
+		GuardController->LogArrestRangeDebug(ArrestRange);
+	}
 
 	return Distance <= ArrestRange;
 }

@@ -32,11 +32,15 @@ public:
 	// 다음 순찰 지점을 골라 Blackboard의 PatrolLocation에 써넣는다.
 	// Patrol 브랜치 진입 시 BTTask_SelectNextPatrolPoint가 호출한다.
 	//
-	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않고 그대로 유지한다.
+	// 아직 현재 목표에 도착하지 않았다면 도달 가능한 경우에만 그대로 유지한다.
+	// 도달 불가능하거나 이동 실패한 지점은 건너뛰며, 후보가 없으면 false를 반환한다.
 	// 이 함수는 브랜치에 진입할 때마다 불리는데, 시야 획득/상실로 순찰이
 	// abort 됐다 재개될 때마다 지점을 건너뛰면 순찰 경로가 망가진다.
 	UFUNCTION(BlueprintCallable, Category = "Guard|Patrol")
-	void SelectNextPatrolPoint2();
+	bool SelectNextPatrolPoint2();
+
+	// 이동 실패한 지점은 다음 순찰 선택에서 건너뛴다.
+	void SkipCurrentPatrolPoint();
 
 
 	// 이 거리(2D) 안이면 현재 순찰 지점에 도착한 것으로 본다.
@@ -89,6 +93,17 @@ public:
 	// 가득 찼거나 새 소음을 들었으면) 새 조사로 보고 훑기 횟수를 초기화한다.
 	UFUNCTION(BlueprintCallable, Category = "Guard|Investigate")
 	bool SelectNextSearchPoint2();
+	int32 GetCurrentSearchStep() const { return CurrentSearchStep; }
+
+	// 경비의 NavMesh와 이동 필터로 완전한 경로를 검사하고, 필요하면 주변 대체 지점을 찾는다.
+	bool FindReachableSearchLocation(const FVector& DesiredLocation, FVector& OutLocation, bool bPreferExactLocation = true);
+	void UpdateLastChaseDirection(const FVector& TargetLocation);
+	void ConfigureSearchRetryPolicy(float SessionStart, float Timeout, float QuickThreshold, float Extension);
+	bool IsSearchTimeRemaining(float SessionStart, float FallbackTimeout);
+	void ReportSearchAttempt(bool bSucceeded, float AttemptDuration, const FVector& Goal);
+	void ObserveSearchAttemptDuration(float AttemptDuration);
+	void BeginSearchAttempt();
+	bool IsSearchSweepExhausted() const { return CurrentSearchStep > SearchSweepCount; }
 
 
 	// 마지막 목격 지점을 확인한 뒤 주변을 몇 번 더 훑을지.
@@ -114,9 +129,25 @@ protected:
 
 
 private:
+	void DisplayPatrolFailure(const FString& Message) const;
+
+	// 순찰 회전이 끼어들어도 마지막 추격 방향을 수색 후보의 기준으로 유지한다.
+	FVector LastChaseDirection = FVector::ZeroVector;
+	void ResetSearchSession(float SessionStart);
+	TArray<FVector> FailedSearchLocations;
+	float SearchTimeout = 12.f;
+	float QuickRetryThreshold = 1.f;
+	float QuickRetryExtension = 3.f;
+	float RetryPolicySessionStart = -100000.f;
+	int32 ConsecutiveQuickFailures = 0;
+	bool bSearchExtensionGranted = false;
+	bool bPendingSearchCompletion = false;
+	float LastSearchAttemptTime = -1.f;
+	float LastSearchAttemptInterval = TNumericLimits<float>::Max();
 
 		// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
 		int32 CurrentPatrolIndex = -1;
+		bool bSkipCurrentPatrolPoint = false;
 
 		// PingPong 패턴에서 현재 진행 방향 (true=정방향/증가, false=역방향/감소)
 		bool bPatrolMovingForward = true;
@@ -126,7 +157,8 @@ private:
 		float LastPatrolSelectTime = -1.f;
 
 
-		// 이번 조사에서 지금까지 고른 지점 수. 0 = 마지막 목격 지점 자체.
+		// 현재 진행 단계. 도착 후 BT Wait를 마치고 다음 선택에 들어올 때만 증가한다.
+		// 0 = 마지막 목격 지점 자체. 실패한 후보 선택과 이동은 단계를 소모하지 않는다.
 		// -1 은 "이번 조사에서 아직 아무것도 고르지 않음".
 		int32 CurrentSearchStep = -1;
 

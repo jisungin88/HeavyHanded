@@ -16,6 +16,7 @@ class HEAVYHANDED_API UGuardAnimInstance : public UAnimInstance
 	GENERATED_BODY()
 
 public:
+	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
 	//-----------------------------------------------------
 	//0929 수정

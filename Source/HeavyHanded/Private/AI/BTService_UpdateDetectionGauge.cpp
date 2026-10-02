@@ -7,6 +7,7 @@
 #include "AI/GuardTypes.h"
 #include "AI/GuardSightAComponent.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardPatrolAComponent.h"
 
 #include "Alert/AlertComponent.h"
 
@@ -34,7 +35,14 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		return;
 	}
 
-	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
+	// 순찰의 대상 해제나 수직 시야 변화는 엔진 Sight 상태 변경 콜백을 발생시키지 않을 수 있다.
+	UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>();
+	if (IsValid(GuardSightComp))
+	{
+		GuardSightComp->RefreshSightTarget(BlackboardComp);
+	}
+
+	const bool bCanSeeTarget = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)));
 	const float CurrentGauge = BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge);
 	const float Now = AIController->GetWorld()->GetTimeSeconds();
 
@@ -60,7 +68,7 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 		if (IsValid(Target))
 		{
-			if (const UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>())
+			if (IsValid(GuardSightComp))
 			{
 				BinocularRate = GuardSightComp->GetBinocularVisionRate(Target);
 
@@ -71,21 +79,8 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 		// 주변 시야의 기존 보정: 양안 비율 1.0이면 1.0배, 주변 비율 0.5이면 0.625배다.
 		const float BinocularMultiplier = FMath::Lerp(0.25f, 1.0f, BinocularRate);
-		// 기존 규칙대로 기본 상승량에 거리와 양안/주변 시야 배율을 곱한다.
-		const float ExistingIncreaseRate = GaugeIncreaseRate * DistanceRate * BinocularMultiplier;
-		if (BinocularRate >= 1.0f)
-		{
-			// 양안 시야에서는 거리와 상관없이 설정한 시간 안에 포착되도록 최소 속도를 계산한다.
-			// 예: 0.2초이면 초당 500 게이지이며, 현재 게이지가 0일 때 약 0.2초 만에 100이 된다.
-			const float NearSightIncreaseRate = 100.0f / FMath::Max(BinocularDetectionTimeSeconds, 0.01f);
-			// 가까워서 기존 거리 보정 속도가 더 빠르면 그 속도를 보존하고, 아니면 목표 속도를 쓴다.
-			Delta = FMath::Max(ExistingIncreaseRate, NearSightIncreaseRate) * DeltaSeconds;
-		}
-		else
-		{
-			// 주변 시야에서는 목표 포착 시간을 강제하지 않아, 거리/각도에 따른 느린 인지가 유지된다.
-			Delta = ExistingIncreaseRate * DeltaSeconds;
-		}
+		// 같은 거리에서는 양안 시야가 주변 시야보다 1.6배 빠르게 차며, 거리 보정도 유지한다.
+		Delta = GaugeIncreaseRate * DistanceRate * BinocularMultiplier * DeltaSeconds;
 
 
 		// -------------------------------------------------------------------------
@@ -132,17 +127,16 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 
 
 
+	// 게이지가 100으로 유지된 유예 중 재발견도 추격 속도를 다시 적용한다.
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+	{
+		GuardController->SetChasing(bCanSeeTarget && NewGauge >= 100.f);
+	}
+
 	// 시야를 든 채로(=실제 추격) 게이지가 막 가득 찬 순간만 "추격 시작"으로 센다.
 	// 세계 경계도(UAlertComponent)는 이 신호가 일정 횟수 쌓이면 병력을 증원한다.
 	if (bJustCrossedFull && bCanSeeTarget)
 	{
-
-		// 속도 조정 0928
-		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
-		{
-			// 인지 게이지가 100에 도달했으므로 추격 속도를 적용한다.
-			GuardController->SetChasing(true);
-		}
 
 		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
 		{
@@ -164,6 +158,11 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
 		{
 			GuardController->SetAIState(EGuardAIState::Chase);
+			const AActor* Target = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+			if (IsValid(Target) && IsValid(GuardController->GuardPatrolComp))
+			{
+				GuardController->GuardPatrolComp->UpdateLastChaseDirection(Target->GetActorLocation());
+			}
 		}
 
 		const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
@@ -175,6 +174,14 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	}
 
 	// 0929 변경점
+	if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+	{
+		if (GuardController->GetAIState() != EGuardAIState::Patrol || IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)))
+		{
+			GuardController->LogSearchTransitionDebug(TEXT("SightGaugeSnapshot"), TEXT("게이지 서비스 갱신 후 상태"));
+		}
+	}
+
 	// 상태 전환은 더 이상 여기서 하지 않는다.
 	// Pursue 브랜치는 CanSeeTarget == true 인 동안 게이지가 100에서 유지되므로 그대로 게이지 판정 사용.
 	// Investigate 브랜치는 위에서 기록한 SearchStartTime을 BTDecorator_CheckSearchTimeout이 판정한다.

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "AITypes.h"                  // FAIStimulus — UFUNCTION 값 인자
+#include "AI/Navigation/NavigationTypes.h"
 #include "AI/GuardTypes.h"
 #include "GameplayTagContainer.h"        // FGameplayTag — 델리게이트 시그니처라 전방 선언 불가
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — 같은 이유
@@ -44,6 +45,10 @@ class AGuardAIController : public AAIController
 
 public:
 	AGuardAIController();
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
+	virtual FPathFollowingRequestResult MoveTo(const FAIMoveRequest& MoveRequest, FNavPathSharedPtr* OutPath = nullptr) override;
+	virtual void FindPathForMoveRequest(const FAIMoveRequest& MoveRequest, FPathFindingQuery& Query, FNavPathSharedPtr& OutPath) const override;
 
 
 
@@ -73,6 +78,10 @@ public:
 	UGuardSightAComponent* GetGuardSightComponent() const { return GuardSightComp; }
 	void SetSightDebugEnabled(bool bInEnabled);
 
+	// 기본은 한글 요약 로그이며, 활성화하면 주기 상태와 전체 진단 정보를 출력한다.
+	UPROPERTY(EditAnywhere, Category = "Guard|Debug", meta = (DisplayName = "시야·수색 상세 로그"))
+	bool bDetailedSightSearchLogs = false;
+
 
 
 	// AI State 상태 관리
@@ -83,11 +92,23 @@ private:
 	//UPROPERTY()
 	EGuardAIState AIState = EGuardAIState::Patrol;
 
+	// const 경로 계산에서도 진단 출력 간격을 기록한다. AI/Blackboard 상태는 변경하지 않는다.
+	mutable TMap<FName, float> SearchDebugLastLogTimes;
+	FString LastChaseMoveRequestDebug;
+	mutable FString LastChasePathDebug;
+	mutable float LastArrestRangeDebug = -1.f;
+	bool IsVisibleChaseMove(const FAIMoveRequest& MoveRequest) const;
+	void HandleChasePathUpdated(FNavigationPath* UpdatedPath, ENavPathEvent::Type Event) const;
+
 public:
 	void SetAIState(EGuardAIState NewState);
 	EGuardAIState GetAIState() const { return AIState; }
 
 	bool SelectNextAction(EGuardAIState State);
+
+	// 수색 전환 진단용. 동일 이벤트는 경비별 초당 한 번만 출력한다.
+	void LogSearchTransitionDebug(FName Event, const FString& Detail) const;
+	void LogArrestRangeDebug(float ArrestRange, bool bMoveCompleted = false) const;
 
 
 	// AC (액터컴포넌트)

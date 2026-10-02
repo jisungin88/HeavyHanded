@@ -74,6 +74,9 @@ public:
 
 	void SetSightEnabled(bool bEnabled);
 
+	// 현재 엔진 시야와 추가 감지 조건을 다시 확인해 순찰 복귀 후 대상을 복구한다.
+	void RefreshSightTarget(UBlackboardComponent* BlackboardComp);
+
 	// 경비의 전체 시야 설정을 적용한다.
 	// 전체 수평 시야각은 AI Perception의 실제 시야 범위에 사용하고,
 	// 양안 시야각은 이후 인지 게이지 상승 속도 보정에 사용한다.

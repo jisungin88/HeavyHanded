@@ -31,6 +31,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Condition", meta = (ClampMin = "0.0", Units = "s"))
 	float TimeoutSeconds = 12.f;
 
+	// SearchStartTime 수색에만 적용한다. 간격과 실패 소요가 모두 이 값보다 짧아야 한다. 0이면 비활성화.
+	UPROPERTY(EditAnywhere, Category = "Condition|Retry", meta = (ClampMin = "0.0", Units = "s", DisplayName = "빠른 재시도 판단 시간"))
+	float QuickRetryThresholdSeconds = 1.f;
+
+	// 빠른 실패가 2회 연속일 때 원래 제한시간에 한 번만 더한다. 0이면 연장하지 않는다.
+	UPROPERTY(EditAnywhere, Category = "Condition|Retry", meta = (ClampMin = "0.0", Units = "s", DisplayName = "추가 탐색 시간"))
+	float QuickRetryExtensionSeconds = 3.f;
+
 protected:
 	virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
 };

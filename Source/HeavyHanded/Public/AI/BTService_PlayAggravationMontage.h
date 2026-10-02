@@ -8,7 +8,7 @@
 
 class UAnimMontage;
 class UBehaviorTreeComponent;
-class UGuardAnimInstance;
+class AGuardCharacter;
 
 UCLASS()
 class HEAVYHANDED_API UBTService_PlayAggravationMontage : public UBTService
@@ -29,5 +29,5 @@ protected:
 	virtual void OnCeaseRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
 private:
-	UGuardAnimInstance* GetGuardAnimInstance(UBehaviorTreeComponent& OwnerComp) const;
+	AGuardCharacter* GetGuardCharacter(UBehaviorTreeComponent& OwnerComp) const;
 };
