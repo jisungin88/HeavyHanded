@@ -193,6 +193,9 @@ public:
 
 	void SetHeadGaugeUpdateInterval(float NewInterval);
 	void StopHeadGaugeUpdate();
+
+	UPROPERTY(EditAnywhere, Category = "Guard|Debug", meta = (DisplayName = "통합 게이지 화면 진단"))
+	bool bDrawPerceptionWidgetDebug = true;
 //private:
 
 
@@ -205,5 +208,6 @@ protected:
 	float HeadGaugeUpdateInterval = 0.1f;
 
 	FTimerHandle HeadGaugeUpdateTimerHandle;
+	float LastPerceptionWidgetDebugLogTime = -1000.f;
 
 };

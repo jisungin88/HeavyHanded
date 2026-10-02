@@ -78,6 +78,10 @@ public:
 	UGuardSightAComponent* GetGuardSightComponent() const { return GuardSightComp; }
 	void SetSightDebugEnabled(bool bInEnabled);
 
+	// 기본은 한글 요약 로그이며, 활성화하면 주기 상태와 전체 진단 정보를 출력한다.
+	UPROPERTY(EditAnywhere, Category = "Guard|Debug", meta = (DisplayName = "시야·수색 상세 로그"))
+	bool bDetailedSightSearchLogs = false;
+
 
 
 	// AI State 상태 관리
@@ -90,6 +94,9 @@ private:
 
 	// const 경로 계산에서도 진단 출력 간격을 기록한다. AI/Blackboard 상태는 변경하지 않는다.
 	mutable TMap<FName, float> SearchDebugLastLogTimes;
+	FString LastChaseMoveRequestDebug;
+	mutable FString LastChasePathDebug;
+	mutable float LastArrestRangeDebug = -1.f;
 	bool IsVisibleChaseMove(const FAIMoveRequest& MoveRequest) const;
 	void HandleChasePathUpdated(FNavigationPath* UpdatedPath, ENavPathEvent::Type Event) const;
 
@@ -101,6 +108,7 @@ public:
 
 	// 수색 전환 진단용. 동일 이벤트는 경비별 초당 한 번만 출력한다.
 	void LogSearchTransitionDebug(FName Event, const FString& Detail) const;
+	void LogArrestRangeDebug(float ArrestRange, bool bMoveCompleted = false) const;
 
 
 	// AC (액터컴포넌트)

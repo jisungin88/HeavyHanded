@@ -1,4 +1,4 @@
-﻿#include "Character/GuardCharacter.h"
+#include "Character/GuardCharacter.h"
 #include "AI/GuardTypes.h"
 
 //#include "Noise/PerceptionMeterComponent.h"
@@ -11,7 +11,10 @@
 #include "Noise/PerceptionMeterComponent.h"
 
 #include "UI/DetectionGaugeWidget.h"
-#include "UI/PerceptionMeterWidget.h"
+#include "Engine/Engine.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
@@ -59,16 +62,17 @@ AGuardCharacter::AGuardCharacter()
 	DetectionGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("DetectionGaugeWidgetComponent"));
 	DetectionGaugeWidgetComponent->SetupAttachment(GetCapsuleComponent());
 	DetectionGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // 나중에 다시 고칠 것
-	DetectionGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
+	DetectionGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 40.f));
 	DetectionGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
 	
 
-	// 소리 디버그용 위젯
+	// 기존 BP 컴포넌트 참조를 유지한다. 청각 게이지 표시는 통합 위젯이 담당한다.
 	HearingGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NoiseGaugeWidgetComponent"));
 	HearingGaugeWidgetComponent->SetupAttachment(GetCapsuleComponent());
 	HearingGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // 나중에 다시 고칠 것
 	HearingGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 16.f));
 	HearingGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 135.f));
+	HearingGaugeWidgetComponent->SetVisibility(false);
 	// HearingGaugeWidgetComponent->SetDrawAtDesiredSize(false);
 
 
@@ -259,33 +263,6 @@ void AGuardCharacter::BeginPlay()
 	}
 	SetHeadGaugeUpdateInterval(0.1f);
 
-	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
-
-	UPerceptionMeterWidget* PerceptionWidget = Cast<UPerceptionMeterWidget>(HearingGaugeWidgetComponent->GetUserWidgetObject());
-	if (!PerceptionWidget)
-	{
-		UE_LOG(LogGuardAI, Warning,
-			TEXT("[%s] HearingGaugeWidgetComponent에서 PerceptionMeterWidget을 가져오지 못했습니다."), *GetName());
-		return;
-	}
-
-	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterWidget 연결 성공."), *GetName());
-	PerceptionWidget->BindToGuard(this);
-
-
-
-	if (HearingGaugeWidgetComponent)
-	{
-		UUserWidget* Widget = HearingGaugeWidgetComponent->GetUserWidgetObject();
-
-		//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DrawSize = %s"), *GetName(), *HearingGaugeWidgetComponent->GetDrawSize().ToString());
-
-		if (Widget)
-		{
-			//UE_LOG(LogGuardAI, Warning, TEXT("[%s] Hearing DesiredSize = %s"), *GetName(), *Widget->GetDesiredSize().ToString());
-		}
-	}
-
 	UpdatePerceptionWidgets();
 
 
@@ -294,16 +271,17 @@ void AGuardCharacter::BeginPlay()
 void AGuardCharacter::UpdatePerceptionWidgets()
 {
 
-	if (DetectionGaugeWidgetComponent)
+	if (IsValid(DetectionGaugeWidgetComponent))
 	{
-		DetectionGaugeWidgetComponent->SetVisibility(bEnableSight);
-		bEnableSight ? DetectionGaugeWidgetComponent->Activate() : DetectionGaugeWidgetComponent->Deactivate();
+		const bool bEnablePerception = bEnableSight || bEnableHearing;
+		DetectionGaugeWidgetComponent->SetVisibility(bEnablePerception);
+		bEnablePerception ? DetectionGaugeWidgetComponent->Activate() : DetectionGaugeWidgetComponent->Deactivate();
 	}
 
-	if (HearingGaugeWidgetComponent)
+	if (IsValid(HearingGaugeWidgetComponent))
 	{
-		HearingGaugeWidgetComponent->SetVisibility(bEnableHearing);
-		bEnableHearing ? HearingGaugeWidgetComponent->Activate() : HearingGaugeWidgetComponent->Deactivate();
+		HearingGaugeWidgetComponent->SetVisibility(false);
+		HearingGaugeWidgetComponent->Deactivate();
 	}
 
 }
@@ -324,6 +302,29 @@ void AGuardCharacter::StopHeadGaugeUpdate()
 
 void AGuardCharacter::UpdateHeadGaugeWidget()
 {
+	const auto DrawWidgetDebug = [this](const FString& Message, const FColor& Color)
+	{
+		if (!bDrawPerceptionWidgetDebug)
+		{
+			return;
+		}
+		const FString FullMessage = FString::Printf(TEXT("[통합 게이지][%s] %s"), *GetName(), *Message);
+		if (IsValid(GetWorld()))
+		{
+			const float Now = GetWorld()->GetTimeSeconds();
+			if (Now - LastPerceptionWidgetDebugLogTime >= 1.f)
+			{
+				LastPerceptionWidgetDebugLogTime = Now;
+				UE_LOG(LogGuardAI, Warning, TEXT("%s"), *FullMessage);
+			}
+		}
+		if (bDrawPerceptionWidgetDebug && IsValid(GEngine) && GetNetMode() != NM_DedicatedServer)
+		{
+			// 경비별 고정 키로 같은 진단을 갱신한다. 순찰 실패 메시지와는 다른 키를 사용한다.
+			const uint64 MessageKey = (static_cast<uint64>(GetUniqueID()) << 32) | 1;
+			GEngine->AddOnScreenDebugMessage(MessageKey, FMath::Max(HeadGaugeUpdateInterval * 2.f, 1.f), Color, FullMessage);
+		}
+	};
 	if (HasAuthority())
 	{
 		AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
@@ -344,18 +345,46 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 
 	if (!IsValid(DetectionGaugeWidgetComponent))
 	{
+		DrawWidgetDebug(TEXT("실패: 시야 위젯 컴포넌트 없음"), FColor::Red);
 		return;
 	}
 
 	UDetectionGaugeWidget* GaugeWidget = Cast<UDetectionGaugeWidget>(DetectionGaugeWidgetComponent->GetUserWidgetObject());
 	if (!GaugeWidget)
 	{
+		DrawWidgetDebug(FString::Printf(TEXT("연결 실패: 지정클래스=%s 실제위젯=%s / DetectionGaugeWidget 상속 및 지정 컴포넌트 확인"), *GetNameSafe(DetectionGaugeWidgetComponent->GetWidgetClass()), *GetNameSafe(DetectionGaugeWidgetComponent->GetUserWidgetObject())), FColor::Red);
 		// Widget Class 가 아직 지정 안 됐거나(파생 BP에서 WBP_DetectionGauge 미설정),
 		// 컴포넌트가 아직 위젯 인스턴스를 만들기 전(BeginPlay 타이밍)일 수 있다.
 		return;
 	}
 
-	GaugeWidget->SetGaugePercent(ReplicatedDetectionGaugePercent);
+	float HearingPercent = 0.f;
+	if (IsValid(PerceptionMeterComponent))
+	{
+		// 기존 청각 위젯처럼 실제 인지 값을 조사 진입 임계값 기준으로 정규화한다.
+		const float FullThreshold = PerceptionMeterComponent->GetPerceptionFullThreshold();
+		HearingPercent = FullThreshold > 0.f ? FMath::Clamp(PerceptionMeterComponent->GetPerception01() / FullThreshold, 0.f, 1.f) * 100.f : 0.f;
+	}
+	GaugeWidget->SetPerceptionGaugePercents(ReplicatedDetectionGaugePercent, HearingPercent, bEnableSight, bEnableHearing);
+	if (!bDrawPerceptionWidgetDebug)
+	{
+		return;
+	}
+	const FVector2D DrawSize = DetectionGaugeWidgetComponent->GetDrawSize();
+	ULocalPlayer* LocalPlayer = DetectionGaugeWidgetComponent->GetOwnerPlayer();
+	APlayerController* PlayerController = IsValid(LocalPlayer) ? LocalPlayer->GetPlayerController(GetWorld()) : nullptr;
+	FVector2D ScreenPosition = FVector2D::ZeroVector;
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	bool bProjected = false;
+	if (IsValid(PlayerController))
+	{
+		bProjected = PlayerController->ProjectWorldLocationToScreen(DetectionGaugeWidgetComponent->GetComponentLocation(), ScreenPosition);
+		PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
+	}
+	const bool bInsideViewport = bProjected && ScreenPosition.X >= 0.f && ScreenPosition.Y >= 0.f && ScreenPosition.X < ViewportWidth && ScreenPosition.Y < ViewportHeight;
+	const FString RegistrationInfo = FString::Printf(TEXT("공간=%s 로컬플레이어=%s 화면컨트롤러=%s 경비숨김=%s 컴포넌트틱=%s 투영=%s 화면내=%s 좌표=(%.0f,%.0f) 화면=%dx%d 위치=%s"), DetectionGaugeWidgetComponent->GetWidgetSpace() == EWidgetSpace::Screen ? TEXT("Screen") : TEXT("World"), *GetNameSafe(LocalPlayer), *GetNameSafe(PlayerController), IsHidden() ? TEXT("예") : TEXT("아니오"), DetectionGaugeWidgetComponent->IsComponentTickEnabled() ? TEXT("켜짐") : TEXT("꺼짐"), bProjected ? TEXT("성공") : TEXT("실패"), bInsideViewport ? TEXT("예") : TEXT("아니오"), ScreenPosition.X, ScreenPosition.Y, ViewportWidth, ViewportHeight, *DetectionGaugeWidgetComponent->GetComponentLocation().ToCompactString());
+	DrawWidgetDebug(FString::Printf(TEXT("%s | 시야=%.0f 청각=%.0f 감각=%s/%s 컴포넌트표시=%s 게임중숨김=%s 출력크기=%.0fx%.0f | %s | %s"), *GetNameSafe(GaugeWidget->GetClass()), ReplicatedDetectionGaugePercent, HearingPercent, bEnableSight ? TEXT("켜짐") : TEXT("꺼짐"), bEnableHearing ? TEXT("켜짐") : TEXT("꺼짐"), DetectionGaugeWidgetComponent->IsVisible() ? TEXT("켜짐") : TEXT("숨김"), DetectionGaugeWidgetComponent->bHiddenInGame ? TEXT("켜짐") : TEXT("꺼짐"), DrawSize.X, DrawSize.Y, *GaugeWidget->GetGaugeBindingDebugInfo(), *RegistrationInfo), FColor::Yellow);
 }
 
 //

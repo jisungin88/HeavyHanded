@@ -440,12 +440,16 @@ void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardC
 				GuardAIController->GuardHearingComp->ClearHearingDebug();
 			}
 
-			UE_LOG(LogGuardAI, Log, TEXT("[%s] 현재 시야 대상 복구: %s"), *GetNameSafe(GuardCharacter), *GetNameSafe(VisibleTarget));
+			UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][%s] 대상=%s"), *GetNameSafe(GuardCharacter), IsValid(CurrentTarget) && CurrentTarget != VisibleTarget ? TEXT("타겟 변경") : TEXT("시야 획득"), *GetNameSafe(VisibleTarget));
 		}
 	}
 
 	// 시야 상실 중에는 마지막 대상을 유지해 기존 추격 유예와 수색 흐름을 보존한다.
 	BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, bCanSeeTarget);
+	if (bWasSeeing && !bCanSeeTarget)
+	{
+		UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][시야 상실] 대상=%s 게이지=%.0f"), *GetNameSafe(GuardCharacter), *GetNameSafe(CurrentTarget), BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge));
+	}
 }
 
 
@@ -462,7 +466,10 @@ void UGuardSightAComponent::OnTargetPerceptionUpdatedSight(AActor* Actor, FAISti
 		return;
 	}
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] Sight 콜백: Actor=%s Sensed=%d AIState=%d"), *GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed(), static_cast<int32>(GuardAIController->GetAIState()));
+	if (GuardAIController->bDetailedSightSearchLogs)
+	{
+		UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][시야 콜백] 대상=%s 감지=%s"), *GetNameSafe(GuardAIController->GetPossessGuardPawn()), *GetNameSafe(Actor), Stimulus.WasSuccessfullySensed() ? TEXT("획득") : TEXT("상실"));
+	}
 
 	const bool bWasSeeing = BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 
@@ -1660,4 +1667,3 @@ void UGuardSightAComponent::DrawPerceivedActorsDebug() const
 		DrawDebugSphere(World, TargetLocation, 25.0f, 12, FColor::Yellow, false, 0.0f);
 	}
 }
-
