@@ -1,8 +1,10 @@
-﻿#include "AI/BTTask_MoveToInvestigate.h"
+#include "AI/BTTask_MoveToInvestigate.h"
 #include "AIController.h"
 #include "AI/GuardAIController.h"
 #include "AI/GuardPatrolAComponent.h"
+#include "AI/GuardBlackboardKeys.h"
 #include "AITypes.h"
+#include "Engine/World.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/PathFollowingComponent.h"
 
@@ -16,6 +18,7 @@ UBTTask_MoveToInvestigate::UBTTask_MoveToInvestigate()
 
 	// 도착까지 기다려야 하므로 틱을 받는다.
 	bNotifyTick = true;
+	bCreateNodeInstance = true;
 }
 
 EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
@@ -29,6 +32,9 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 	}
 
 	const FVector InvestigateLocation = BlackboardComp->GetValueAsVector(BlackboardKey.SelectedKeyName);
+	ActiveSessionStart = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
+	MoveAttemptStartTime = AIController->GetWorld()->GetTimeSeconds();
+	bWaitingForRetry = false;
 	if (!FAISystem::IsValidLocation(InvestigateLocation))
 	{
 		AIController->LogSearchTransitionDebug(TEXT("InvestigateInvalidGoal"), TEXT("수색 이동 Failed: 목표 위치 무효"));
@@ -37,17 +43,20 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 	}
 
 	EPathFollowingRequestResult::Type RequestResult = EPathFollowingRequestResult::Failed;
+	AIController->GuardPatrolComp->BeginSearchAttempt();
 	constexpr int32 MaxMoveAttempts = 3;
 	for (int32 Attempt = 0; Attempt < MaxMoveAttempts; ++Attempt)
 	{
 		FVector ReachableLocation;
 		if (!AIController->GuardPatrolComp->FindReachableSearchLocation(InvestigateLocation, ReachableLocation, Attempt == 0))
 		{
+			AIController->GuardPatrolComp->ReportSearchAttempt(false, AIController->GetWorld()->GetTimeSeconds() - MoveAttemptStartTime, FAISystem::InvalidLocation);
 			break;
 		}
 
 		// 블랙보드에는 실제 이동 목적지만 기록하고 목격 위치와 세션 시각은 유지한다.
 		BlackboardComp->SetValueAsVector(BlackboardKey.SelectedKeyName, ReachableLocation);
+		ActiveGoal = ReachableLocation;
 		RequestResult = AIController->MoveToLocation(ReachableLocation, AcceptanceRadius, true, true, true, true, nullptr, false);
 		AIController->LogSearchTransitionDebug(TEXT("InvestigateMoveRequest"), FString::Printf(TEXT("MoveRequest=%d Goal=%s Attempt=%d"), static_cast<int32>(RequestResult), *ReachableLocation.ToCompactString(), Attempt + 1));
 		if (RequestResult != EPathFollowingRequestResult::Failed)
@@ -55,6 +64,7 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 			break;
 		}
 		AIController->LogSearchTransitionDebug(TEXT("InvestigateMoveRetry"), FString::Printf(TEXT("이동 요청 실패: 다른 주변 후보 재시도 Attempt=%d"), Attempt + 1));
+		AIController->GuardPatrolComp->ReportSearchAttempt(false, AIController->GetWorld()->GetTimeSeconds() - MoveAttemptStartTime, ReachableLocation);
 	}
 
 	switch (RequestResult)
@@ -63,40 +73,73 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 		return EBTNodeResult::InProgress;
 
 	case EPathFollowingRequestResult::AlreadyAtGoal:
+		AIController->GuardPatrolComp->ReportSearchAttempt(true, 0.f, ActiveGoal);
 		return EBTNodeResult::Succeeded;
 
 	default:
 		// 경로를 못 냈다 - NavMesh 밖이거나 도달 불가능한 지점.
 		UE_LOG(LogTemp, Warning, TEXT("[%s] 조사 지점 %s 로 경로를 내지 못했다 (NavMesh 밖?)."),
 			*GetNameSafe(AIController->GetPawn()), *InvestigateLocation.ToCompactString());
-		return EBTNodeResult::Failed;
+		bWaitingForRetry = true;
+		NextRetryTime = AIController->GetWorld()->GetTimeSeconds() + 0.25f;
+		return EBTNodeResult::InProgress;
 	}
 }
 
 void UBTTask_MoveToInvestigate::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
 	Super::TickTask(OwnerComp, NodeMemory, DeltaSeconds);
-
-	const AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!IsValid(AIController))
+	AGuardAIController* Controller = Cast<AGuardAIController>(OwnerComp.GetAIOwner());
+	const UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(BlackboardComp) || !IsValid(Controller->GuardPatrolComp))
 	{
 		FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 		return;
 	}
-
-	//-----------------------------------------------------
-	//0929 수정
-	// 도착이든 이동 중단이든 이동이 끝나면 조사 브랜치로 제어를 넘긴다.
-	// 조사 지속 여부와 순찰 복귀는 Check Search Timeout이 판정한다.
-	if (AIController->GetMoveStatus() == EPathFollowingStatus::Idle)
+	if (!FMath::IsNearlyEqual(ActiveSessionStart, BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime)))
 	{
-		if (AGuardAIController* GuardController = Cast<AGuardAIController>(OwnerComp.GetAIOwner()))
-		{
-			GuardController->LogSearchTransitionDebug(TEXT("InvestigateIdle"), TEXT("이동 Idle 감지: 수색 이동 태스크 Succeeded"));
-		}
-		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+		Controller->StopMovement();
+		FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+		return;
 	}
-	//-----------------------------------------------------
+	const float Now = Controller->GetWorld()->GetTimeSeconds();
+	bool bReached = false;
+	if (!bWaitingForRetry)
+	{
+		Controller->GuardPatrolComp->ObserveSearchAttemptDuration(Now - MoveAttemptStartTime);
+		if (Controller->GetMoveStatus() == EPathFollowingStatus::Idle)
+		{
+			const UPathFollowingComponent* PathFollowing = Controller->GetPathFollowingComponent();
+			bReached = IsValid(PathFollowing) && PathFollowing->DidMoveReachGoal();
+			Controller->GuardPatrolComp->ReportSearchAttempt(bReached, Now - MoveAttemptStartTime, ActiveGoal);
+			if (!bReached)
+			{
+				bWaitingForRetry = true;
+				NextRetryTime = Now + 0.25f;
+			}
+		}
+	}
+	// 최신 이동 결과를 먼저 반영해 정상 이동 중에는 빠른 실패 연장을 허용하지 않는다.
+	if (!Controller->GuardPatrolComp->IsSearchTimeRemaining(ActiveSessionStart, 12.f))
+	{
+		Controller->StopMovement();
+		FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+		return;
+	}
+	if (bReached)
+	{
+		Controller->LogSearchTransitionDebug(TEXT("InvestigateIdle"), TEXT("수색 목적지 도착: 두리번 대기로 진행"));
+		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+		return;
+	}
+	if (bWaitingForRetry && Now >= NextRetryTime)
+	{
+		const EBTNodeResult::Type Result = ExecuteTask(OwnerComp, NodeMemory);
+		if (Result != EBTNodeResult::InProgress)
+		{
+			FinishLatentTask(OwnerComp, Result);
+		}
+	}
 }
 
 EBTNodeResult::Type UBTTask_MoveToInvestigate::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)

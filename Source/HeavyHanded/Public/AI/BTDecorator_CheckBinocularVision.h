@@ -18,14 +18,14 @@ class HEAVYHANDED_API UBTDecorator_CheckBinocularVision : public UBTDecorator_Bl
 public:
 	UBTDecorator_CheckBinocularVision();
 
-	// 바라보기 분기에만 켠다. 주변 시야에서 재발견해도 게이지가 찰 때까지 대상을 관찰한다.
-	UPROPERTY(EditAnywhere, Category = "Condition")
-	bool bAllowPeripheralObservation = false;
-
 	virtual FString GetStaticDescription() const override;
 
 protected:
 
 	virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
-	
+	virtual void OnBecomeRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+	virtual void TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
+
+private:
+	bool bLastConditionResult = false;
 };

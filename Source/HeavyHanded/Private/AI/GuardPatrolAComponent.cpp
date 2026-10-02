@@ -13,6 +13,7 @@
 #include "NavFilters/NavigationQueryFilter.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "AITypes.h"
 
 
@@ -293,6 +294,99 @@ void UGuardPatrolAComponent::UpdateLastChaseDirection(const FVector& TargetLocat
 	}
 }
 
+void UGuardPatrolAComponent::ResetSearchSession(float SessionStart)
+{
+	if (!FMath::IsNearlyEqual(SessionStart, HandledSearchStartTime))
+	{
+		HandledSearchStartTime = SessionStart;
+		CurrentSearchStep = 0;
+		FailedSearchLocations.Reset();
+		ConsecutiveQuickFailures = 0;
+		bSearchExtensionGranted = false;
+		bPendingSearchCompletion = false;
+		LastSearchAttemptTime = -1.f;
+		LastSearchAttemptInterval = TNumericLimits<float>::Max();
+	}
+}
+
+void UGuardPatrolAComponent::ConfigureSearchRetryPolicy(float SessionStart, float Timeout, float QuickThreshold, float Extension)
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority())
+	{
+		return;
+	}
+	ResetSearchSession(SessionStart);
+	RetryPolicySessionStart = SessionStart;
+	SearchTimeout = FMath::Max(0.f, Timeout);
+	QuickRetryThreshold = FMath::Max(0.f, QuickThreshold);
+	QuickRetryExtension = FMath::Max(0.f, Extension);
+}
+
+bool UGuardPatrolAComponent::IsSearchTimeRemaining(float SessionStart, float FallbackTimeout)
+{
+	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(GetWorld()) || SessionStart < 0.f)
+	{
+		return false;
+	}
+	const float Elapsed = GetWorld()->GetTimeSeconds() - SessionStart;
+	if (!FMath::IsNearlyEqual(SessionStart, RetryPolicySessionStart))
+	{
+		return Elapsed < FallbackTimeout;
+	}
+	if (Elapsed >= SearchTimeout && !bSearchExtensionGranted && ConsecutiveQuickFailures >= 2 && QuickRetryExtension > 0.f)
+	{
+		bSearchExtensionGranted = true;
+		Controller->LogSearchTransitionDebug(TEXT("SearchRetryExtension"), FString::Printf(TEXT("빠른 실패 %d회 연속: 수색 제한에 %.1f초 추가(이번 수색 1회만)"), ConsecutiveQuickFailures, QuickRetryExtension));
+	}
+	return Elapsed < SearchTimeout + (bSearchExtensionGranted ? QuickRetryExtension : 0.f);
+}
+
+void UGuardPatrolAComponent::BeginSearchAttempt()
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(GetWorld()))
+	{
+		return;
+	}
+	const float Now = GetWorld()->GetTimeSeconds();
+	LastSearchAttemptInterval = LastSearchAttemptTime >= 0.f ? Now - LastSearchAttemptTime : TNumericLimits<float>::Max();
+	LastSearchAttemptTime = Now;
+}
+
+void UGuardPatrolAComponent::ObserveSearchAttemptDuration(float AttemptDuration)
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (IsValid(Controller) && Controller->HasAuthority() && AttemptDuration >= QuickRetryThreshold)
+	{
+		ConsecutiveQuickFailures = 0;
+	}
+}
+
+void UGuardPatrolAComponent::ReportSearchAttempt(bool bSucceeded, float AttemptDuration, const FVector& Goal)
+{
+	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority())
+	{
+		return;
+	}
+	if (bSucceeded)
+	{
+		ConsecutiveQuickFailures = 0;
+		// 다음 선택은 BT의 도착 후 Wait가 끝난 뒤 호출된다. 그때 횟수를 확정한다.
+		bPendingSearchCompletion = true;
+		return;
+	}
+	bPendingSearchCompletion = false;
+	ConsecutiveQuickFailures = AttemptDuration < QuickRetryThreshold && LastSearchAttemptInterval < QuickRetryThreshold ? ConsecutiveQuickFailures + 1 : 0;
+	if (FAISystem::IsValidLocation(Goal))
+	{
+		FailedSearchLocations.Add(Goal);
+	}
+	Controller->LogSearchTransitionDebug(TEXT("SearchRetryFailed"), FString::Printf(TEXT("수색 실패: 소요=%.2f초 재시도간격=%.2f초 빠른실패=%d회 완료횟수 유지"), AttemptDuration, LastSearchAttemptInterval == TNumericLimits<float>::Max() ? -1.f : LastSearchAttemptInterval, ConsecutiveQuickFailures));
+}
+
 bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredLocation, FVector& OutLocation, bool bPreferExactLocation)
 {
 	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
@@ -319,6 +413,10 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 	const FSharedConstNavQueryFilter Filter = UNavigationQueryFilter::GetQueryFilter(*NavData, Controller, Controller->GetDefaultNavigationFilterClass());
 	const auto HasCompletePath = [&](const FVector& Location)
 	{
+		if (FailedSearchLocations.ContainsByPredicate([&](const FVector& Failed) { return FVector::DistSquared2D(Failed, Location) < FMath::Square(120.f); }))
+		{
+			return false;
+		}
 		FPathFindingQuery Query(Controller, *NavData, Controller->GetNavAgentLocation(), Location, Filter);
 		Query.SetAllowPartialPaths(false);
 		const FPathFindingResult Result = NavSys->FindPathSync(Controller->GetNavAgentPropertiesRef(), Query);
@@ -360,6 +458,10 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 	TArray<FVector> Candidates;
 	const auto AddCandidate = [&](const FVector& Location)
 	{
+		if (FVector::DistSquared2D(GuardLocation, Location) < FMath::Square(100.f))
+		{
+			return;
+		}
 		if (!Candidates.ContainsByPredicate([&](const FVector& Existing) { return Existing.Equals(Location, 10.0f); }))
 		{
 			Candidates.Add(Location);
@@ -456,13 +558,12 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 
 	// SearchStartTime 이 바뀌었으면 새 조사다. 훑기 진행도를 초기화한다.
 	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
-	if (!FMath::IsNearlyEqual(SearchStartTime, HandledSearchStartTime))
+	ResetSearchSession(SearchStartTime);
+	if (bPendingSearchCompletion)
 	{
-		HandledSearchStartTime = SearchStartTime;
-		CurrentSearchStep = -1;
+		++CurrentSearchStep;
+		bPendingSearchCompletion = false;
 	}
-
-	++CurrentSearchStep;
 
 	// 0번째는 조사 지점 자체(마지막 목격 지점 또는 소리 지점). 여기부터 확인하는 게 자연스럽다.
 	if (CurrentSearchStep == 0)

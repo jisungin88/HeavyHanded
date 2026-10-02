@@ -98,6 +98,12 @@ public:
 	// 경비의 NavMesh와 이동 필터로 완전한 경로를 검사하고, 필요하면 주변 대체 지점을 찾는다.
 	bool FindReachableSearchLocation(const FVector& DesiredLocation, FVector& OutLocation, bool bPreferExactLocation = true);
 	void UpdateLastChaseDirection(const FVector& TargetLocation);
+	void ConfigureSearchRetryPolicy(float SessionStart, float Timeout, float QuickThreshold, float Extension);
+	bool IsSearchTimeRemaining(float SessionStart, float FallbackTimeout);
+	void ReportSearchAttempt(bool bSucceeded, float AttemptDuration, const FVector& Goal);
+	void ObserveSearchAttemptDuration(float AttemptDuration);
+	void BeginSearchAttempt();
+	bool IsSearchSweepExhausted() const { return CurrentSearchStep > SearchSweepCount; }
 
 
 	// 마지막 목격 지점을 확인한 뒤 주변을 몇 번 더 훑을지.
@@ -127,6 +133,17 @@ private:
 
 	// 순찰 회전이 끼어들어도 마지막 추격 방향을 수색 후보의 기준으로 유지한다.
 	FVector LastChaseDirection = FVector::ZeroVector;
+	void ResetSearchSession(float SessionStart);
+	TArray<FVector> FailedSearchLocations;
+	float SearchTimeout = 12.f;
+	float QuickRetryThreshold = 1.f;
+	float QuickRetryExtension = 3.f;
+	float RetryPolicySessionStart = -100000.f;
+	int32 ConsecutiveQuickFailures = 0;
+	bool bSearchExtensionGranted = false;
+	bool bPendingSearchCompletion = false;
+	float LastSearchAttemptTime = -1.f;
+	float LastSearchAttemptInterval = TNumericLimits<float>::Max();
 
 		// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
 		int32 CurrentPatrolIndex = -1;
@@ -140,7 +157,8 @@ private:
 		float LastPatrolSelectTime = -1.f;
 
 
-		// 이번 조사에서 지금까지 고른 지점 수. 0 = 마지막 목격 지점 자체.
+		// 현재 진행 단계. 도착 후 BT Wait를 마치고 다음 선택에 들어올 때만 증가한다.
+		// 0 = 마지막 목격 지점 자체. 실패한 후보 선택과 이동은 단계를 소모하지 않는다.
 		// -1 은 "이번 조사에서 아직 아무것도 고르지 않음".
 		int32 CurrentSearchStep = -1;
 

@@ -24,9 +24,10 @@ EBTNodeResult::Type UBTTask_FinishSearch::ExecuteTask(UBehaviorTreeComponent& Ow
 
 	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
 	const float Now = Controller->GetWorld()->GetTimeSeconds();
-	if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || SearchStartTime < 0.0f || FMath::IsNearlyEqual(SearchStartTime, CompletedSearchStartTime) || Now - SearchStartTime < SearchTimeoutSeconds)
+	const bool bTimeRemaining = IsValid(Controller->GuardPatrolComp) ? Controller->GuardPatrolComp->IsSearchTimeRemaining(SearchStartTime, SearchTimeoutSeconds) : Now - SearchStartTime < SearchTimeoutSeconds;
+	if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || SearchStartTime < 0.0f || FMath::IsNearlyEqual(SearchStartTime, CompletedSearchStartTime) || bTimeRemaining)
 	{
-		Controller->LogSearchTransitionDebug(TEXT("FinishRejected"), FString::Printf(TEXT("Failed: See=%d NoSession=%d AlreadyCompleted=%d TimeRemaining=%d Timeout=%.2f CompletedStart=%.3f"), BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget), SearchStartTime < 0.0f, FMath::IsNearlyEqual(SearchStartTime, CompletedSearchStartTime), Now - SearchStartTime < SearchTimeoutSeconds, SearchTimeoutSeconds, CompletedSearchStartTime));
+		Controller->LogSearchTransitionDebug(TEXT("FinishRejected"), FString::Printf(TEXT("Failed: See=%d NoSession=%d AlreadyCompleted=%d TimeRemaining=%d Timeout=%.2f CompletedStart=%.3f"), BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget), SearchStartTime < 0.0f, FMath::IsNearlyEqual(SearchStartTime, CompletedSearchStartTime), bTimeRemaining, SearchTimeoutSeconds, CompletedSearchStartTime));
 		return EBTNodeResult::Failed;
 	}
 

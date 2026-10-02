@@ -10,11 +10,33 @@ UBTDecorator_CheckBinocularVision::UBTDecorator_CheckBinocularVision()
 	NodeName = TEXT("Check Binocular Vision");
 	BlackboardKey.AddBoolFilter(this, GET_MEMBER_NAME_CHECKED(UBTDecorator_CheckBinocularVision, BlackboardKey));
 	BlackboardKey.SelectedKeyName = GuardAIKeys::CanSeeTarget;
+	// 각도는 CanSeeTarget이 바뀌지 않아도 변한다. 경비별로 현재 각도 조건을 계속 관찰한다.
+	bCreateNodeInstance = true;
+	bNotifyBecomeRelevant = true;
+	bNotifyTick = true;
+	FlowAbortMode = EBTFlowAbortMode::Both;
 }
 
 FString UBTDecorator_CheckBinocularVision::GetStaticDescription() const
 {
-	return FString::Printf(TEXT("%s\n%s\nObserver Key: %s"), *Super::GetStaticDescription(), bAllowPeripheralObservation ? TEXT("Observe visible target (including peripheral vision)") : TEXT("Binocular vision only"), *BlackboardKey.SelectedKeyName.ToString());
+	return FString::Printf(TEXT("%s\n보이는 대상이 양안각 안에 있을 때만 바라보기\n각도 변화 지속 감시 / 관찰 키: %s"), *Super::GetStaticDescription(), *BlackboardKey.SelectedKeyName.ToString());
+}
+
+void UBTDecorator_CheckBinocularVision::OnBecomeRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
+{
+	Super::OnBecomeRelevant(OwnerComp, NodeMemory);
+	bLastConditionResult = CalculateRawConditionValue(OwnerComp, NodeMemory);
+}
+
+void UBTDecorator_CheckBinocularVision::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
+{
+	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
+	const bool bConditionResult = CalculateRawConditionValue(OwnerComp, NodeMemory);
+	if (bConditionResult != bLastConditionResult)
+	{
+		bLastConditionResult = bConditionResult;
+		OwnerComp.RequestExecution(this);
+	}
 }
 
 bool UBTDecorator_CheckBinocularVision::CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const
@@ -28,15 +50,9 @@ bool UBTDecorator_CheckBinocularVision::CalculateRawConditionValue(UBehaviorTree
 	}
 
 	AActor* Target = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
-	if (!IsValid(Target))
+	if (!IsValid(Target) || !BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
 	{
 		return false;
-	}
-
-	if (bAllowPeripheralObservation)
-	{
-		// 수색 시간이나 게이지 임계값과 독립적이다. 이동 실패 후에도 보이는 대상을 계속 바라볼 수 있다.
-		return BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget);
 	}
 
 	const UGuardSightAComponent* GuardSightComp = AIController->FindComponentByClass<UGuardSightAComponent>();
