@@ -6,6 +6,7 @@
 #include "EngineUtils.h"            // TActorIterator
 #include "Hazards/SecurityCamera.h"
 #include "Loot/LootLog.h"
+#include "NiagaraComponent.h"      // SetFloatParameter — 펄스 반경을 이펙트에 넘긴다
 
 AEMPDevice::AEMPDevice()
 {
@@ -30,6 +31,20 @@ AEMPDevice::AEMPDevice()
 
 	// DeployNoiseTag / ActiveNoiseTag 는 비워 둔다 — 소음 시스템에 아무것도 발행하지 않는다.
 	// 폭발음은 BP 의 SpentEffect 로 내는 연출이고, 경비 청각에는 걸리지 않는다 (헤더 주석 참고).
+}
+
+void AEMPDevice::ConfigureEffect(UNiagaraComponent* Effect, EEquipmentState ForState)
+{
+	// 펄스는 터지는 순간(Spent)에만 나온다. 다른 상태의 이펙트까지 반경을 받을 이유는 없다.
+	if (ForState != EEquipmentState::Spent || !IsValid(Effect))
+	{
+		return;
+	}
+
+	// 나이아가라 쪽 이름은 User.Radius 지만, C++ 에서는 접두사를 떼고 넘긴다.
+	// 이펙트에 이 파라미터가 없으면 조용히 무시된다 — 그래서 구가 엉뚱한 크기로 나오면
+	// 먼저 나이아가라에 User.Radius(float) 가 있는지부터 볼 것.
+	Effect->SetFloatParameter(TEXT("Radius"), PulseRadius);
 }
 
 void AEMPDevice::OnActivated()

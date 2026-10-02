@@ -47,6 +47,15 @@ protected:
 	virtual void OnActivated() override;
 
 	/**
+	 * 펄스 이펙트에 반경을 넘긴다 (나이아가라 User 파라미터 `Radius`). 모든 머신에서 불린다.
+	 *
+	 * 나이아가라에 크기를 숫자로 박지 않는 이유는 베이스 주석에 적어 두었다 —
+	 * **보이는 구와 실제로 꺼지는 범위가 어긋나면 안 된다.** 이펙트 쪽은 이 값을 받아
+	 * 구의 반지름으로 쓰기만 하면 된다.
+	 */
+	virtual void ConfigureEffect(class UNiagaraComponent* Effect, EEquipmentState ForState) override;
+
+	/**
 	 * 펄스가 닿는 거리. 이 안의 감시 카메라가 전부 멈춘다.
 	 *
 	 * ⚠ 임시값이다. 카메라를 레벨에 배치해 보고 정할 것 — 카메라 감지 반경이 1500 이라
