@@ -7,6 +7,7 @@
 #include "AI/GuardTypes.h"
 #include "GameplayTagContainer.h"        // FGameplayTag — 델리게이트 시그니처라 전방 선언 불가
 #include "Core/HeistPhase.h"             // EHeistPhaseReason — 같은 이유
+#include "Noise/NoiseTypes.h"
 #include "GuardAIController.generated.h"
 
 
@@ -22,6 +23,7 @@ class AHeistGameState;
 class UGuardPatrolAComponent;
 class UGuardSightAComponent;
 class UGuardHearingAComponent;
+class UAlertComponent;
 
 
 // 시야를 놓쳤다가 (혹은 최초로) 플레이어를 다시 포착한 순간에만 발화한다.
@@ -185,11 +187,25 @@ public:
 private:
 	// 현재 추격 및 월드 경계도 상태를 기준으로 최종 이동 속도를 적용한다.
 	void ApplyCurrentMoveSpeed();
+	void BindToWorldAlert();
+	void EnsureAlarmSearchSession();
+
+	UFUNCTION(Category = "Guard|Alert")
+	void HandleWorldAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel OldLevel);
+
+	UPROPERTY(Transient, VisibleInstanceOnly, Category = "Guard|Alert")
+	TObjectPtr<UAlertComponent> BoundAlertComponent;
+
+	bool bWorldAlarmBehaviorActive = false;
+	bool bMatchEnded = false;
 
 public:
 	// 월드 경계도를 0~100 퍼센트로 읽어온다 (GameState에 붙는 UAlertComponent 게이지 기반)
 	// BTDecorator_CheckWorldAlert 등이 참조.
 	float GetWorldAlertLevel() const;					// 1
+	bool IsWorldAlarmActive() const;
+	// 기존 게이지 서비스에서도 확인해 GameState 초기화 순서가 늦어져도 경보를 놓치지 않는다.
+	void UpdateWorldAlarmBehavior();
 
 
 

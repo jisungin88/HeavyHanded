@@ -7,6 +7,7 @@
 UBTService_PlayAggravationMontage::UBTService_PlayAggravationMontage()
 {
 	NodeName = TEXT("Play Aggravation Montage");
+	bCreateNodeInstance = true;
 	bNotifyBecomeRelevant = true;
 	bNotifyCeaseRelevant = true;
 }
@@ -14,19 +15,29 @@ UBTService_PlayAggravationMontage::UBTService_PlayAggravationMontage()
 void UBTService_PlayAggravationMontage::OnBecomeRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
 	Super::OnBecomeRelevant(OwnerComp, NodeMemory);
-	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter))
+	ActiveMontage = nullptr;
+	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
 	{
-		GuardCharacter->SetAggravationMontage(AggravationMontage, true, MontageBlendOutTime);
+		ActiveMontage = GuardCharacter->GetAggravationMontage();
+		if (!IsValid(ActiveMontage) && GuardCharacter->GuardType != EGuardType::Dog)
+		{
+			ActiveMontage = AggravationMontage;
+		}
+		if (IsValid(ActiveMontage))
+		{
+			GuardCharacter->SetAggravationMontage(ActiveMontage, true, MontageBlendOutTime);
+		}
 	}
 }
 
 void UBTService_PlayAggravationMontage::OnCeaseRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
 	Super::OnCeaseRelevant(OwnerComp, NodeMemory);
-	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter))
+	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter) && GuardCharacter->HasAuthority() && IsValid(ActiveMontage))
 	{
-		GuardCharacter->SetAggravationMontage(AggravationMontage, false, MontageBlendOutTime);
+		GuardCharacter->SetAggravationMontage(ActiveMontage, false, MontageBlendOutTime);
 	}
+	ActiveMontage = nullptr;
 }
 
 AGuardCharacter* UBTService_PlayAggravationMontage::GetGuardCharacter(UBehaviorTreeComponent& OwnerComp) const

@@ -87,7 +87,7 @@ public:
 	//
 	// 한 번의 조사는 [마지막 목격 지점] -> [주변 무작위 지점 x SearchSweepCount] 순서로
 	// 진행된다. 더 훑을 지점이 없으면 false를 돌려주고, 호출한 태스크가 Failed 로
-	// 브랜치를 끝내 순찰로 돌려보낸다.
+	// 브랜치를 끝내 순찰로 돌려보낸다. 경보 중에는 횟수와 제한시간 없이 주변을 계속 훑는다.
 	//
 	// 조사 세션은 SearchStartTime 값으로 구분한다. 그 값이 바뀌면(= 게이지가 다시
 	// 가득 찼거나 새 소음을 들었으면) 새 조사로 보고 훑기 횟수를 초기화한다.
@@ -103,11 +103,11 @@ public:
 	void ReportSearchAttempt(bool bSucceeded, float AttemptDuration, const FVector& Goal);
 	void ObserveSearchAttemptDuration(float AttemptDuration);
 	void BeginSearchAttempt();
-	bool IsSearchSweepExhausted() const { return CurrentSearchStep > SearchSweepCount; }
+	bool IsSearchSweepExhausted() const;
 
 
 	// 마지막 목격 지점을 확인한 뒤 주변을 몇 번 더 훑을지.
-	// 0 이면 목격 지점만 확인하고 순찰로 돌아간다.
+	// 0 이면 목격 지점만 확인하고 순찰로 돌아간다. 경보 중에는 최소 1회씩 계속 반복한다.
 	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0"))
 	int32 SearchSweepCount = 3;
@@ -117,6 +117,10 @@ public:
 	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Investigate", meta = (ClampMin = "0.0", Units = "cm"))
 	float SearchSweepRadius = 600.f;
+
+	// 경보 중에는 데이터 테이블의 기본 수색 반경에 이 배율을 적용한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Investigate", meta = (ClampMin = "1.0", DisplayName = "경보 수색 반경 배율"))
+	float AlarmSearchRadiusMultiplier = 2.f;
 
 
 	
@@ -130,6 +134,7 @@ protected:
 
 private:
 	void DisplayPatrolFailure(const FString& Message) const;
+	float GetEffectiveSearchSweepRadius() const;
 
 	// 순찰 회전이 끼어들어도 마지막 추격 방향을 수색 후보의 기준으로 유지한다.
 	FVector LastChaseDirection = FVector::ZeroVector;
@@ -144,6 +149,7 @@ private:
 	bool bPendingSearchCompletion = false;
 	float LastSearchAttemptTime = -1.f;
 	float LastSearchAttemptInterval = TNumericLimits<float>::Max();
+	float LastAlarmSearchRecoveryTime = -1.f;
 
 		// 마지막으로 선택된 순찰 지점 인덱스. 다음 호출 시 패턴에 따라 갱신.
 		int32 CurrentPatrolIndex = -1;

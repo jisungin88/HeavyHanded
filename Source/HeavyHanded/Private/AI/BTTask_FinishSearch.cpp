@@ -23,6 +23,10 @@ EBTNodeResult::Type UBTTask_FinishSearch::ExecuteTask(UBehaviorTreeComponent& Ow
 	}
 
 	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
+	if (Controller->IsWorldAlarmActive())
+	{
+		return EBTNodeResult::Failed;
+	}
 	const float Now = Controller->GetWorld()->GetTimeSeconds();
 	const bool bTimeRemaining = IsValid(Controller->GuardPatrolComp) ? Controller->GuardPatrolComp->IsSearchTimeRemaining(SearchStartTime, SearchTimeoutSeconds) : Now - SearchStartTime < SearchTimeoutSeconds;
 	if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || SearchStartTime < 0.0f || FMath::IsNearlyEqual(SearchStartTime, CompletedSearchStartTime) || bTimeRemaining)
@@ -85,8 +89,8 @@ void UBTTask_FinishSearch::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* No
 		return;
 	}
 
-	// 재발견 또는 새 조사 요청은 기존 마무리를 중단하고 BT가 다시 판단하게 한다.
-	if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || !FMath::IsNearlyEqual(ActiveSearchStartTime, BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime)))
+	// 경보 진입, 재발견 또는 새 조사 요청은 마무리를 중단하고 BT가 다시 판단하게 한다.
+	if (Controller->IsWorldAlarmActive() || BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || !FMath::IsNearlyEqual(ActiveSearchStartTime, BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime)))
 	{
 		Controller->LogSearchTransitionDebug(TEXT("FinishInterrupted"), FString::Printf(TEXT("재발견 또는 새 세션: ActiveStart=%.3f"), ActiveSearchStartTime));
 		Controller->StopMovement();

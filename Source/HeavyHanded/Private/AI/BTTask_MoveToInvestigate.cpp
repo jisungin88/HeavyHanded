@@ -81,7 +81,7 @@ EBTNodeResult::Type UBTTask_MoveToInvestigate::ExecuteTask(UBehaviorTreeComponen
 		UE_LOG(LogTemp, Warning, TEXT("[%s] 조사 지점 %s 로 경로를 내지 못했다 (NavMesh 밖?)."),
 			*GetNameSafe(AIController->GetPawn()), *InvestigateLocation.ToCompactString());
 		bWaitingForRetry = true;
-		NextRetryTime = AIController->GetWorld()->GetTimeSeconds() + 0.25f;
+		NextRetryTime = AIController->GetWorld()->GetTimeSeconds() + (AIController->IsWorldAlarmActive() ? 1.f : 0.25f);
 		return EBTNodeResult::InProgress;
 	}
 }
@@ -115,7 +115,7 @@ void UBTTask_MoveToInvestigate::TickTask(UBehaviorTreeComponent& OwnerComp, uint
 			if (!bReached)
 			{
 				bWaitingForRetry = true;
-				NextRetryTime = Now + 0.25f;
+				NextRetryTime = Now + (Controller->IsWorldAlarmActive() ? 1.f : 0.25f);
 			}
 		}
 	}
