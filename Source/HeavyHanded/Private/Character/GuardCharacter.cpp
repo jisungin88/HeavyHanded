@@ -1,4 +1,6 @@
 #include "Character/GuardCharacter.h"
+#include "AI/GuardAnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "AI/GuardTypes.h"
 
 //#include "Noise/PerceptionMeterComponent.h"
@@ -135,6 +137,89 @@ void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AGuardCharacter, bReplicatedDrawSightDebug);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedSightDebugRotation);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedDetectionGaugePercent);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedAggroTarget);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedLookAroundType);
+	DOREPLIFETIME(AGuardCharacter, bReplicatedIsArresting);
+}
+
+void AGuardCharacter::SetArresting(bool bNewArresting)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (bReplicatedIsArresting != bNewArresting)
+	{
+		bReplicatedIsArresting = bNewArresting;
+		ForceNetUpdate();
+	}
+	OnRep_Arresting();
+}
+
+void AGuardCharacter::OnRep_Arresting()
+{
+	if (IsValid(GetMesh()))
+	{
+		if (UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GetMesh()->GetAnimInstance()); IsValid(AnimInstance))
+		{
+			AnimInstance->SetArresting(bReplicatedIsArresting);
+		}
+	}
+}
+
+void AGuardCharacter::SetLookAroundType(EGuardLookAroundType NewType)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (ReplicatedLookAroundType != NewType)
+	{
+		ReplicatedLookAroundType = NewType;
+		ForceNetUpdate();
+	}
+	OnRep_LookAroundType();
+}
+
+void AGuardCharacter::OnRep_LookAroundType()
+{
+	if (IsValid(GetMesh()))
+	{
+		if (UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GetMesh()->GetAnimInstance()); IsValid(AnimInstance))
+		{
+			AnimInstance->SetLookAroundType(ReplicatedLookAroundType);
+		}
+	}
+}
+
+void AGuardCharacter::SetAggravationMontage(UAnimMontage* Montage, bool bPlay, float BlendOutTime)
+{
+	if (!HasAuthority() || !IsValid(Montage))
+	{
+		return;
+	}
+	Multicast_SetAggravationMontage(Montage, bPlay, BlendOutTime);
+}
+
+void AGuardCharacter::Multicast_SetAggravationMontage_Implementation(UAnimMontage* Montage, bool bPlay, float BlendOutTime)
+{
+	if (!IsValid(Montage) || !IsValid(GetMesh()))
+	{
+		return;
+	}
+	UGuardAnimInstance* AnimInstance = Cast<UGuardAnimInstance>(GetMesh()->GetAnimInstance());
+	if (!IsValid(AnimInstance))
+	{
+		return;
+	}
+	if (bPlay)
+	{
+		AnimInstance->Montage_Play(Montage);
+	}
+	else if (AnimInstance->Montage_IsPlaying(Montage))
+	{
+		AnimInstance->Montage_Stop(FMath::Max(0.f, BlendOutTime), Montage);
+	}
 }
 
 void AGuardCharacter::OnRep_SightDebugState()
@@ -327,6 +412,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 	};
 	if (HasAuthority())
 	{
+		ReplicatedAggroTarget = nullptr;
 		AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
 		if (!IsValid(GuardAIController))
 		{
@@ -340,6 +426,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 				: nullptr;
 			const float GaugePercent = IsValid(TargetActor) ? GuardAIController->GetDetectionGaugePercent() : 0.0f;
 			SetReplicatedDetectionGauge(GaugePercent);
+			ReplicatedAggroTarget = IsValid(TargetActor) ? TargetActor : nullptr;
 		}
 	}
 
@@ -366,6 +453,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 		HearingPercent = FullThreshold > 0.f ? FMath::Clamp(PerceptionMeterComponent->GetPerception01() / FullThreshold, 0.f, 1.f) * 100.f : 0.f;
 	}
 	GaugeWidget->SetPerceptionGaugePercents(ReplicatedDetectionGaugePercent, HearingPercent, bEnableSight, bEnableHearing);
+	GaugeWidget->SetAggroTarget(ReplicatedAggroTarget);
 	if (!bDrawPerceptionWidgetDebug)
 	{
 		return;

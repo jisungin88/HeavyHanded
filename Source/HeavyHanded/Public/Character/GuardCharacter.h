@@ -8,6 +8,7 @@
 
 class UPerceptionMeterComponent;
 class UWidgetComponent;
+class UAnimMontage;
 
 class UProceduralMeshComponent;
 
@@ -23,6 +24,15 @@ public:
 	virtual void GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const override;
 	FTransform GetEyeSocketTransform() const;
 
+	void SetLookAroundType(EGuardLookAroundType NewType);
+	void SetArresting(bool bNewArresting);
+	bool IsArresting() const { return bReplicatedIsArresting; }
+	EGuardLookAroundType GetLookAroundType() const { return ReplicatedLookAroundType; }
+	void SetAggravationMontage(UAnimMontage* Montage, bool bPlay, float BlendOutTime);
+
+	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Animation")
+	void Multicast_SetAggravationMontage(UAnimMontage* Montage, bool bPlay, float BlendOutTime);
+
 
 	// Guard Info (경비 정보)
 	// ========================================================
@@ -32,6 +42,17 @@ public:
 
 
 private:
+	UPROPERTY(ReplicatedUsing = OnRep_LookAroundType, VisibleAnywhere, Category = "Guard|Animation")
+	EGuardLookAroundType ReplicatedLookAroundType = EGuardLookAroundType::None;
+
+	UFUNCTION(Category = "Guard|Animation")
+	void OnRep_LookAroundType();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Arresting, VisibleAnywhere, Category = "Guard|Animation")
+	bool bReplicatedIsArresting = false;
+
+	UFUNCTION(Category = "Guard|Animation")
+	void OnRep_Arresting();
 
 	// AllowPrivateAccess
 	// 경비의 시야 감지 기능을 활성화할지 여부
@@ -69,6 +90,10 @@ private:
 
 	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
 	float ReplicatedDetectionGaugePercent = 0.0f;
+
+	// 서버의 현재 어그로 대상을 클라이언트 UI에 전달한다.
+	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AActor> ReplicatedAggroTarget;
 
 	UFUNCTION()
 	void OnRep_SightDebugState();
