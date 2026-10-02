@@ -4,6 +4,7 @@
 //#include "Noise/PerceptionMeterComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 #include "Noise/PerceptionMeterComponent.h"
@@ -13,13 +14,17 @@
 
 #include "Kismet/GameplayStatics.h"
 #include "AI/GuardAIController.h"
+#include "AI/GuardBlackboardKeys.h"
+#include "BehaviorTree/BlackboardComponent.h"
 //#include "AI/GuardSightAComponent.h"
 
 #include "ProceduralMeshComponent.h"
+#include "Net/UnrealNetwork.h"
 
 
 AGuardCharacter::AGuardCharacter()
 {
+	bReplicates = true;
 	//???? < AI 컨트롤러에도 있음 > 다시 이쪽으로 옮김
 	PerceptionMeterComponent = CreateDefaultSubobject<UPerceptionMeterComponent>(TEXT("PerceptionMeter"));
 
@@ -39,6 +44,8 @@ AGuardCharacter::AGuardCharacter()
 
 	// AIController가 원하는 회전 방향을 캐릭터가 따라감
 	GetCharacterMovement()->bUseControllerDesiredRotation = true;
+	// 서버 AI Perception과 EyeSocket 읽기가 두리번 애니메이션의 최신 본 포즈를 보게 한다.
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
 
 
@@ -71,10 +78,169 @@ AGuardCharacter::AGuardCharacter()
 
 }
 
+FTransform AGuardCharacter::GetEyeSocketTransform() const
+{
+	static const FName EyeSocketName(TEXT("EyeSocket"));
+	const USkeletalMeshComponent* CharacterMesh = GetMesh();
+	if (bUseEyeSocketForSight && IsValid(CharacterMesh) && CharacterMesh->DoesSocketExist(EyeSocketName))
+	{
+		return CharacterMesh->GetSocketTransform(EyeSocketName, RTS_World);
+	}
+
+	return FTransform(GetActorRotation(), GetActorLocation() + FVector(0.0f, 0.0f, EyeHeight));
+}
+
+FRotator AGuardCharacter::GetSightSocketRotation() const
+{
+	// EyeSocket의 로컬 정면 축이 경비 시야 정면에서 왼쪽으로 90도 돌아 있어
+	// 소켓 회전을 그대로 쓰면 메시와 AI Perception이 함께 옆을 향한다.
+	FRotator SightRotation = GetEyeSocketTransform().Rotator();
+	SightRotation.Yaw += 90.0f;
+	return SightRotation;
+}
+
+void AGuardCharacter::GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const
+{
+	const FTransform EyeTransform = GetEyeSocketTransform();
+	OutLocation = EyeTransform.GetLocation();
+	OutRotation = GetSightSocketRotation();
+}
+
+void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightRadius);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightHalfAngle);
+	DOREPLIFETIME(AGuardCharacter, bReplicatedDrawSightDebug);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedSightDebugRotation);
+	DOREPLIFETIME(AGuardCharacter, ReplicatedDetectionGaugePercent);
+}
+
+void AGuardCharacter::OnRep_SightDebugState()
+{
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
+	}
+
+}
+
+void AGuardCharacter::OnRep_SightDebugRotation()
+{
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetWorldRotation(ReplicatedSightDebugRotation);
+	}
+}
+
+void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedSightRadius = InSightRadius;
+	ReplicatedSightHalfAngle = InSightHalfAngle;
+	bReplicatedDrawSightDebug = bInEnabled;
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
+	}
+	ForceNetUpdate();
+}
+
+void AGuardCharacter::SetReplicatedSightDebugRotation(FRotator InRotation)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedSightDebugRotation = InRotation;
+	if (IsValid(SightDebugMesh))
+	{
+		SightDebugMesh->SetWorldRotation(ReplicatedSightDebugRotation);
+	}
+}
+
+void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ReplicatedDetectionGaugePercent = FMath::Clamp(InGaugePercent, 0.0f, 100.0f);
+}
+
+void AGuardCharacter::Multicast_UpdateSightDebugMesh_Implementation(
+	const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
+	const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
+	FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial)
+{
+	if (!IsValid(SightDebugMesh) || !bReplicatedDrawSightDebug || FlatVertices.IsEmpty() || FlatTriangles.IsEmpty())
+	{
+		return;
+	}
+
+	SightDebugMesh->SetWorldRotation(InSightRotation);
+	TArray<FVector> FlatNormals;
+	TArray<FVector2D> FlatUV0;
+	TArray<FLinearColor> FlatVertexColors;
+	FlatNormals.Init(FVector::UpVector, FlatVertices.Num());
+	FlatUV0.Init(FVector2D::ZeroVector, FlatVertices.Num());
+	FlatVertexColors.Init(InFanColor, FlatVertices.Num());
+	TArray<FProcMeshTangent> FlatTangents;
+
+	SightDebugMesh->ClearAllMeshSections();
+	SightDebugMesh->CreateMeshSection_LinearColor(
+		0, FlatVertices, FlatTriangles, FlatNormals, FlatUV0, FlatVertexColors, FlatTangents, false);
+
+	if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+	{
+		TArray<FVector> GroundNormals;
+		TArray<FVector2D> GroundUV0;
+		TArray<FLinearColor> GroundVertexColors;
+		GroundNormals.Init(FVector::UpVector, GroundVertices.Num());
+		GroundUV0.Init(FVector2D::ZeroVector, GroundVertices.Num());
+		GroundVertexColors.Init(InFanColor, GroundVertices.Num());
+		TArray<FProcMeshTangent> GroundTangents;
+		SightDebugMesh->CreateMeshSection_LinearColor(
+			1, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, false);
+	}
+
+	if (IsValid(InMaterial))
+	{
+		SightDebugMesh->SetMaterial(0, InMaterial);
+		if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+		{
+			SightDebugMesh->SetMaterial(1, InMaterial);
+		}
+	}
+
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+}
+
 
 void AGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+	{
+		// 파생 블루프린트의 Mesh 기본값이 생성자 설정을 덮을 수 있어 런타임에도 강제한다.
+		CharacterMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		CharacterMesh->bEnableUpdateRateOptimizations = false;
+
+		if (bUseEyeSocketForSight && !CharacterMesh->DoesSocketExist(TEXT("EyeSocket")))
+		{
+			UE_LOG(LogGuardAI, Warning, TEXT("[%s] EyeSocket을 찾지 못해 액터 방향을 시야 기준으로 사용합니다. Mesh=%s"),
+				*GetNameSafe(this), *GetNameSafe(CharacterMesh->GetSkeletalMeshAsset()));
+		}
+	}
+	SetHeadGaugeUpdateInterval(0.1f);
 
 	//UE_LOG(LogGuardAI, Warning, TEXT("[%s] PerceptionMeterComponent=%s"), *GetNameSafe(this), *GetNameSafe(PerceptionMeterComponent));
 
@@ -141,6 +307,23 @@ void AGuardCharacter::StopHeadGaugeUpdate()
 
 void AGuardCharacter::UpdateHeadGaugeWidget()
 {
+	if (HasAuthority())
+	{
+		AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
+		if (!IsValid(GuardAIController))
+		{
+			SetReplicatedDetectionGauge(0.0f);
+		}
+		else
+		{
+			const UBlackboardComponent* BlackboardComp = GuardAIController->GetBlackboardComponent();
+			AActor* TargetActor = IsValid(BlackboardComp)
+				? Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor))
+				: nullptr;
+			const float GaugePercent = IsValid(TargetActor) ? GuardAIController->GetDetectionGaugePercent() : 0.0f;
+			SetReplicatedDetectionGauge(GaugePercent);
+		}
+	}
 
 	if (!IsValid(DetectionGaugeWidgetComponent))
 	{
@@ -155,19 +338,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 		return;
 	}
 
-	AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
-	if (!GuardAIController)
-	{
-		GaugeWidget->SetGaugePercent(0.f);
-		return;
-	}
-
-	// 인덱스 0 로컬 플레이어 기준. 이 프로토타입은 단일 플레이어 대상 테스트 씬이라
-	// 화면 하나에 여러 로컬 플레이어가 동시에 있는 상황(스플릿스크린)은 다루지 않는다.
-	const APawn* LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	const float GaugePercent = GuardAIController->IsTargeting(LocalPlayerPawn) ? GuardAIController->GetDetectionGaugePercent() : 0.f;
-
-	GaugeWidget->SetGaugePercent(GaugePercent);
+	GaugeWidget->SetGaugePercent(ReplicatedDetectionGaugePercent);
 }
 
 //
@@ -229,5 +400,3 @@ bool AGuardCharacter::GetPatrolLocation(int32 Index, FVector& OutLocation) const
 	OutLocation = Point->GetActorLocation();
 	return true;
 }
-
-

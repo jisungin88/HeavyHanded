@@ -23,6 +23,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Detection")
 	float GaugeDecreaseRate = 15.f; // 초당 감소량 (반경 이탈 시). 거리 무관.
 
+	// 경비 정면의 양안 시야 안에서 인지 게이지가 100%에 도달하는 목표 시간이다.
+	// 기본값 0.2초는 BT 서비스가 0.1초 간격으로 갱신될 때 약 두 번의 갱신 안에 포착한다.
+	// 주변 시야에는 이 시간이 적용되지 않고, 기존 거리·각도 보정 속도를 사용한다.
+	UPROPERTY(EditAnywhere, Category = "Detection|Vision", meta = (ClampMin = "0.01", Units = "s"))
+	float BinocularDetectionTimeSeconds = 0.2f;
+
 	// 시야를 잃어도 이 시간 동안은 게이지를 유지한다(감소 시작을 미룬다).
 	//
 	// 없으면 시야가 끊기는 즉시 게이지가 임계값 아래로 떨어져 Check Detection Gauge 가

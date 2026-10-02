@@ -46,11 +46,11 @@ void UBTService_SetLookAround::OnBecomeRelevant(UBehaviorTreeComponent& OwnerCom
 		return;
 	}
 
-	// Wait 노드가 실행되기 시작했으므로 주변을 두리번거리는 애니메이션을 활성화한다.
-	AnimInstance->SetLookAround(true);
+	// Wait 서비스 인스턴스에 설정된 두리번 애니메이션 종류를 적용한다.
+	AnimInstance->SetLookAroundType(LookAroundType);
 
-	UE_LOG(LogTemp, Warning, TEXT("[LookAround] TRUE | Pawn=%s"),
-		*GetNameSafe(GuardCharacter));
+	UE_LOG(LogTemp, Warning, TEXT("[LookAround] Type=%d | Pawn=%s"),
+		static_cast<int32>(LookAroundType), *GetNameSafe(GuardCharacter));
 
 }
 
@@ -81,10 +81,10 @@ void UBTService_SetLookAround::OnCeaseRelevant(UBehaviorTreeComponent& OwnerComp
 		return;
 	}
 
-	// Wait 노드가 종료되거나 Abort되었으므로 주변을 두리번거리는 애니메이션을 비활성화한다.
-	AnimInstance->SetLookAround(false);
+	// Wait 서비스가 종료되거나 Abort되었으므로 두리번 애니메이션 상태를 초기화한다.
+	AnimInstance->SetLookAroundType(EGuardLookAroundType::None);
 
-	UE_LOG(LogTemp, Warning, TEXT("[LookAround] FALSE | Pawn=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("[LookAround] Type=None | Pawn=%s"),
 		*GetNameSafe(GuardCharacter));
 
 }

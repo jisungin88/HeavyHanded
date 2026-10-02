@@ -1,4 +1,4 @@
-﻿#include "AI/BTService_UpdateDetectionGauge.h"
+#include "AI/BTService_UpdateDetectionGauge.h"
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AITypes.h"
@@ -54,7 +54,9 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		const float DistanceRate = GetDistanceRateMultiplier(*AIController, *BlackboardComp);
 		AActor* Target = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
 
-		float BinocularRate = 1.f;
+		// GetBinocularVisionRate()는 양안 시야 안에서 1.0, 주변 시야에서 0.5를 반환한다.
+		// 컴포넌트나 타겟을 얻지 못한 경우는 양안 판정으로 간주하지 않도록 0.5로 시작한다.
+		float BinocularRate = 0.5f;
 
 		if (IsValid(Target))
 		{
@@ -67,15 +69,23 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 			}
 		}
 
-		/// Delta = GaugeIncreaseRate * DistanceRate * BinocularRate * DeltaSeconds;
-
-
-		// 양안각 안에서는 1.0배, 양안각 밖에서는 0.25배로 인지 게이지 증가 속도를 조절한다.
-		// BinocularRate: 양안각 내 위치 비율 (0.0 ~ 1.0)
+		// 주변 시야의 기존 보정: 양안 비율 1.0이면 1.0배, 주변 비율 0.5이면 0.625배다.
 		const float BinocularMultiplier = FMath::Lerp(0.25f, 1.0f, BinocularRate);
-
-		// 기본 증가 속도에 거리 보정과 양안각 보정값을 적용해 최종 게이지 증가량을 계산한다.
-		Delta = GaugeIncreaseRate * DistanceRate * BinocularMultiplier * DeltaSeconds;
+		// 기존 규칙대로 기본 상승량에 거리와 양안/주변 시야 배율을 곱한다.
+		const float ExistingIncreaseRate = GaugeIncreaseRate * DistanceRate * BinocularMultiplier;
+		if (BinocularRate >= 1.0f)
+		{
+			// 양안 시야에서는 거리와 상관없이 설정한 시간 안에 포착되도록 최소 속도를 계산한다.
+			// 예: 0.2초이면 초당 500 게이지이며, 현재 게이지가 0일 때 약 0.2초 만에 100이 된다.
+			const float NearSightIncreaseRate = 100.0f / FMath::Max(BinocularDetectionTimeSeconds, 0.01f);
+			// 가까워서 기존 거리 보정 속도가 더 빠르면 그 속도를 보존하고, 아니면 목표 속도를 쓴다.
+			Delta = FMath::Max(ExistingIncreaseRate, NearSightIncreaseRate) * DeltaSeconds;
+		}
+		else
+		{
+			// 주변 시야에서는 목표 포착 시간을 강제하지 않아, 거리/각도에 따른 느린 인지가 유지된다.
+			Delta = ExistingIncreaseRate * DeltaSeconds;
+		}
 
 
 		// -------------------------------------------------------------------------
@@ -128,10 +138,10 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	{
 
 		// 속도 조정 0928
-		if (AGuardAIController* GuardAIController = Cast<AGuardAIController>(AIController))
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
 		{
 			// 인지 게이지가 100에 도달했으므로 추격 속도를 적용한다.
-			GuardAIController->SetChasing(true);
+			GuardController->SetChasing(true);
 		}
 
 		if (UAlertComponent* Alert = UAlertComponent::Get(AIController))
@@ -151,6 +161,11 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	// "마지막으로 확실히 본 시점/위치"로 남는다.
 	if (bCanSeeTarget && NewGauge >= 100.f)
 	{
+		if (AGuardAIController* GuardController = Cast<AGuardAIController>(AIController))
+		{
+			GuardController->SetAIState(EGuardAIState::Chase);
+		}
+
 		const FVector LastKnown = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
 		if (FAISystem::IsValidLocation(LastKnown))
 		{
@@ -159,6 +174,7 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 		}
 	}
 
+	// 0929 변경점
 	// 상태 전환은 더 이상 여기서 하지 않는다.
 	// Pursue 브랜치는 CanSeeTarget == true 인 동안 게이지가 100에서 유지되므로 그대로 게이지 판정 사용.
 	// Investigate 브랜치는 위에서 기록한 SearchStartTime을 BTDecorator_CheckSearchTimeout이 판정한다.
@@ -187,5 +203,3 @@ float UBTService_UpdateDetectionGauge::GetDistanceRateMultiplier(
 
 	return FMath::Lerp(NearRateMultiplier, FarRateMultiplier, Alpha);
 }
-
-

@@ -291,4 +291,10 @@ private:
 	  * 앞에 부르면 이번 판의 통과가 반영되기 전 값이 나간다.
 	  */
 	void PublishNextSite();
+
+
+	// --- 보이스
+public:
+	/** 관전자 음성을 음소거 처리 */
+	void MuteSpectatorVoices();
 };

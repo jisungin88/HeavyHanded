@@ -7,6 +7,7 @@
 
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Core/HeistSettings.h"            // PrepSeconds — "작전 준비 45초" 의 45
 #include "UI/HeavyUILog.h"
 #include "UI/UISettings.h"
 
@@ -117,6 +118,14 @@ namespace
 	}
 }
 
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** 치트가 찾아갈 위젯 목록. StaminaVignetteWidget 의 GLiveStaminaVignettes 와 같은 방식이다 */
+	TArray<TWeakObjectPtr<UHeistHUDWidget>> GLiveHeistHUDs;
+}
+#endif
+
 void UHeistHUDWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
@@ -133,6 +142,28 @@ void UHeistHUDWidget::NativePreConstruct()
 	{
 		Txt_Phase->SetFont(UUISettings::GetUIFont(EUIFontToken::Label));
 		Txt_Phase->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
+	}
+
+	if (Txt_PrepCenterValue)
+	{
+		// 숫자 폰트(Oswald)다. "45초" · "시작!" 의 한글은 폰트 에셋의 Noto 폴백이 받는다
+		FSlateFontInfo BigFont = UUISettings::GetUIFont(EUIFontToken::Timer);
+		BigFont.Size *= PrepCenterFontScale;
+
+		Txt_PrepCenterValue->SetFont(BigFont);
+		Txt_PrepCenterValue->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+	}
+
+	if (Txt_PrepCenterLabel)
+	{
+		Txt_PrepCenterLabel->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
+		Txt_PrepCenterLabel->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+	}
+
+	if (Txt_PrepMini)
+	{
+		Txt_PrepMini->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
+		Txt_PrepMini->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_Objective)
@@ -187,6 +218,15 @@ void UHeistHUDWidget::NativeConstruct()
 			   TEXT("%s: WBP 에 Txt_Objective 가 없어 목표 금액을 표시하지 않는다"), *GetName());
 	}
 
+#if !UE_BUILD_SHIPPING
+	GLiveHeistHUDs.RemoveAll([](const TWeakObjectPtr<UHeistHUDWidget>& Weak) { return !Weak.IsValid(); });
+	GLiveHeistHUDs.AddUnique(this);
+#endif
+
+	// 위급이 풀릴 때 되돌아갈 색. SetUrgent 가 한 번이라도 돌기 전에 읽어야 한다
+	if (Img_Plate)       { PlateNormalColor       = Img_Plate->GetColorAndOpacity(); }
+	if (Img_PlateShadow) { PlateShadowNormalColor = Img_PlateShadow->GetColorAndOpacity(); }
+
 	// 붙기 전까지는 숨겨 둔다. 빈 "텍스트 블록" 이 화면에 남는 것보다 낫다
 	SetHeistWidgetsVisible(false);
 
@@ -214,7 +254,12 @@ void UHeistHUDWidget::NativeDestruct()
 		World->GetTimerManager().ClearTimer(TimerTickHandle);
 		World->GetTimerManager().ClearTimer(HeldTickHandle);
 		World->GetTimerManager().ClearTimer(MoneyInterpHandle);
+		World->GetTimerManager().ClearTimer(DebugPrepHandle);
 	}
+
+#if !UE_BUILD_SHIPPING
+	GLiveHeistHUDs.Remove(this);
+#endif
 
 	// 구독을 안 풀면 위젯이 사라진 뒤에도 델리게이트에 남는다
 	if (AHeistGameState* GS = BoundState.Get())
@@ -311,6 +356,19 @@ void UHeistHUDWidget::HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag Old
 		   *Label.ToString(),
 		   Txt_Phase ? TEXT("") : TEXT(" (Txt_Phase 없음 — 표시되지 않음)"));
 
+	// 준비에서 본 작업으로 넘어온 순간에만 "시작!" 을 띄운다.
+	// 늦게 들어와 최초 바인딩으로 불린 경우(OldPhase 가 비어 있다)는 이미 시작한 판이다
+	StartBannerUntil = -1.f;
+	if (StartBannerSeconds > 0.f
+		&& NewPhase.MatchesTagExact(HHTags::Phase_Heist)
+		&& OldPhase.MatchesTagExact(HHTags::Phase_Prep))
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			StartBannerUntil = World->GetTimeSeconds() + StartBannerSeconds;
+		}
+	}
+
 	// 페이즈가 바뀌면 카운트다운 유무도 바뀐다. 다음 주기를 기다리지 않고 바로 반영한다
 	LastShownSeconds = INDEX_NONE;
 	RefreshTimer();
@@ -331,6 +389,24 @@ void UHeistHUDWidget::HandleLoadedValueChanged(int32 LoadedValue, int32 TargetVa
 // 표시
 // ──────────────────────────────────────────────────────────────
 
+namespace
+{
+	/**
+	 * "6:05" 형식. 초는 항상 두 자리다 — "6:5" 가 아니라 "6:05".
+	 * 자릿수가 오갈 때마다 글자 폭이 흔들리면 시선이 그쪽으로 끌린다
+	 */
+	FText FormatClock(int32 TotalSeconds)
+	{
+		FNumberFormattingOptions SecondsFormat;
+		SecondsFormat.MinimumIntegralDigits = 2;
+
+		return FText::Format(
+				LOCTEXT("TimerFormat", "{0}:{1}"),
+				FText::AsNumber(TotalSeconds / 60),
+				FText::AsNumber(TotalSeconds % 60, &SecondsFormat));
+	}
+}
+
 void UHeistHUDWidget::RefreshTimer()
 {
 	if (!Txt_Timer)
@@ -346,18 +422,31 @@ void UHeistHUDWidget::RefreshTimer()
 	// 미션 타이머 자리가 0:30 으로 되살아난다
 	const bool bResultPhase = GS && GS->IsPhase(HHTags::Phase_Result);
 
-	float Remaining = 0.f;
-	if (bResultPhase || !TryGetRemainingSeconds(Remaining))
+	// 준비 시간(45초)에도 카운트다운은 있지만 미션 타이머 자리에는 띄우지 않는다.
+	// 타이머는 본 작업 시작부터 나온다
+	// 흉내 준비(치트) 중에는 진짜 페이즈가 무엇이든 준비 화면으로 둔다 — 판이 떠 있으면 확인이 안 된다
+	const bool bPrepPhase = bDebugPrepCounting || (GS && GS->IsPhase(HHTags::Phase_Prep));
+
+	// 준비 시간은 판 대신 가운데 카운트다운이 맡는다. 흉내 중이면 StepDebugPrep 이 대신 그린다
+	if (!DebugPrepHandle.IsValid())
 	{
-		// 보여줄 카운트다운이 없는 구간(결과 · 접속 대기)이다. -1 이나 0:00 을 찍지 않는다 —
+		float PrepRemaining = 0.f;
+		const bool bPrepCountdown = bPrepPhase && TryGetRemainingSeconds(PrepRemaining);
+		RefreshPrepCountdown(bPrepCountdown, PrepRemaining);
+	}
+
+	float Remaining = 0.f;
+	if (bResultPhase || bPrepPhase || !TryGetRemainingSeconds(Remaining))
+	{
+		// 보여줄 카운트다운이 없는 구간(준비 · 결과 · 접속 대기)이다. -1 이나 0:00 을 찍지 않는다 —
 		// 반환 타입이 그 구분을 강제하는 이유가 이것이다
-		Txt_Timer->SetVisibility(ESlateVisibility::Collapsed);
+		SetTimerVisible(false);
 		LastShownSeconds = INDEX_NONE;
 		SetUrgent(false, TEXT("카운트다운 없는 구간"));
 		return;
 	}
 
-	Txt_Timer->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	SetTimerVisible(true);
 
 	// 올림이라 마지막 1초가 0:00 으로 먼저 넘어가지 않는다.
 	// 내림으로 하면 아직 0.9초 남았는데 화면이 0:00 이 된다
@@ -366,16 +455,7 @@ void UHeistHUDWidget::RefreshTimer()
 	if (TotalSeconds != LastShownSeconds)
 	{
 		LastShownSeconds = TotalSeconds;
-
-		// 초는 항상 두 자리다 — "6:5" 가 아니라 "6:05".
-		// 자릿수가 오갈 때마다 글자 폭이 흔들리면 시선이 그쪽으로 끌린다
-		FNumberFormattingOptions SecondsFormat;
-		SecondsFormat.MinimumIntegralDigits = 2;
-
-		Txt_Timer->SetText(FText::Format(
-				LOCTEXT("TimerFormat", "{0}:{1}"),
-				FText::AsNumber(TotalSeconds / 60),
-				FText::AsNumber(TotalSeconds % 60, &SecondsFormat)));
+		Txt_Timer->SetText(FormatClock(TotalSeconds));
 	}
 
 	// 도주는 진입한 순간부터 위급하다. 남은 시간으로만 판단하면 90초 도주의 앞 60초가
@@ -508,15 +588,28 @@ void UHeistHUDWidget::SetUrgent(bool bNewUrgent, const TCHAR* Cause)
 	UE_LOG(LogHeavyUI, Log, TEXT("%s: 타이머 경고 %s (%s)"),
 		   *GetName(), bUrgent ? TEXT("켬") : TEXT("끔"), Cause);
 
-	if (Txt_Timer)
-	{
-		// 경보 색을 그대로 쓴다. "시간이 없다" 와 "들켰다" 는 다른 사건이지만
-		// 플레이어에게는 둘 다 같은 종류의 위급함이고, 색을 새로 만들면 팔레트만 늘어난다
-		const FLinearColor Color = bUrgent
-			? UUISettings::Get()->AlarmColor
-			: UUISettings::GetUIColor(EUIColorToken::TextPrimary);
+	// 경보 색을 그대로 쓴다. "시간이 없다" 와 "들켰다" 는 다른 사건이지만
+	// 플레이어에게는 둘 다 같은 종류의 위급함이고, 색을 새로 만들면 팔레트만 늘어난다
+	const FLinearColor AlarmColor = UUISettings::Get()->AlarmColor;
 
-		Txt_Timer->SetColorAndOpacity(FSlateColor(Color));
+	if (Img_Plate)
+	{
+		// 판이 있으면 판이 빨개지고 글자는 흰색으로 남는다
+		Img_Plate->SetColorAndOpacity(bUrgent ? AlarmColor : PlateNormalColor);
+
+		if (Img_PlateShadow)
+		{
+			FLinearColor ShadowColor = AlarmColor * UrgentShadowScale;
+			ShadowColor.A = AlarmColor.A;
+			Img_PlateShadow->SetColorAndOpacity(bUrgent ? ShadowColor : PlateShadowNormalColor);
+		}
+	}
+	else if (Txt_Timer)
+	{
+		// 판 없이 글자만 쓰는 WBP — 글자 색으로만 알린다
+		Txt_Timer->SetColorAndOpacity(FSlateColor(bUrgent
+			? AlarmColor
+			: UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (UrgentPulse && !IsDesignTime())
@@ -542,9 +635,140 @@ void UHeistHUDWidget::SetHeistWidgetsVisible(bool bVisible)
 	const ESlateVisibility Vis = bVisible ? ESlateVisibility::SelfHitTestInvisible
 										  : ESlateVisibility::Collapsed;
 
-	if (Txt_Timer)     { Txt_Timer->SetVisibility(Vis); }
+	SetTimerVisible(bVisible);
 	if (Txt_Phase)     { Txt_Phase->SetVisibility(Vis); }
 	if (Txt_Objective) { Txt_Objective->SetVisibility(Vis); }
+
+	// 준비 카운트다운은 켜는 쪽을 RefreshTimer 가 정한다. 여기서는 끄기만 한다
+	if (!bVisible)
+	{
+		HidePrepCenter();
+		SetPrepMini(INDEX_NONE);
+	}
+}
+
+void UHeistHUDWidget::SetTimerVisible(bool bVisible)
+{
+	const ESlateVisibility Vis = bVisible ? ESlateVisibility::SelfHitTestInvisible
+										  : ESlateVisibility::Collapsed;
+
+	// 판이 있으면 판째로 숨긴다. 글자도 같이 맞춰 두는 것은 판 없이 쓰는 WBP 때문이다
+	if (Panel_Timer) { Panel_Timer->SetVisibility(Vis); }
+	if (Txt_Timer)   { Txt_Timer->SetVisibility(Vis); }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 준비 카운트다운
+// ──────────────────────────────────────────────────────────────
+
+void UHeistHUDWidget::RefreshPrepCountdown(bool bPrep, float Remaining)
+{
+	if (bPrep)
+	{
+		// 0 은 찍지 않는다. 남은 시간이 0 이 된 뒤 페이즈가 넘어오기까지 한두 틱이 비는데,
+		// 그 사이 "0" 이 보였다가 "시작!" 으로 바뀌면 한 박자 늘어진다
+		const int32 Seconds = FMath::Max(1, FMath::CeilToInt(Remaining));
+		const float Total   = UHeistSettings::Get()->PrepSeconds;
+
+		// ① 알림 — 준비가 시작되고 PrepAnnounceSeconds 동안.
+		//    이벤트가 아니라 경과 시간으로 판단한다. 알림 도중에 들어온 사람도 같은 화면을 봐야 한다
+		if (Total - Remaining < PrepAnnounceSeconds)
+		{
+			// 남은 시간이 아니라 전체 길이를 쓴다. "이번 준비는 45초" 를 알리는 자리라
+			// 44 · 43 으로 줄어들면 카운트다운으로 읽힌다
+			ShowPrepCenter(LOCTEXT("PrepAnnounceLabel", "작전 준비"),
+						   FText::Format(LOCTEXT("PrepAnnounceValue", "{0}초"), FText::AsNumber(FMath::CeilToInt(Total))),
+						   PrepKeyAnnounce);
+			SetPrepMini(INDEX_NONE);
+			return;
+		}
+
+		// ③ 마지막 몇 초 — 다시 가운데 크게
+		if (Seconds <= PrepFinalSeconds)
+		{
+			ShowPrepCenter(LOCTEXT("PrepFinalLabel", "작업 시작까지"), FText::AsNumber(Seconds), Seconds);
+			SetPrepMini(INDEX_NONE);
+			return;
+		}
+
+		// ② 그 사이 — 위쪽에 작게. 준비하는 동안 화면 가운데를 가리지 않는다
+		HidePrepCenter();
+		SetPrepMini(Seconds);
+		return;
+	}
+
+	SetPrepMini(INDEX_NONE);
+
+	// ④ 시작 — 본 작업 진입 직후 잠깐
+	const UWorld* World = GetWorld();
+	if (World && World->GetTimeSeconds() < StartBannerUntil)
+	{
+		ShowPrepCenter(FText::GetEmpty(), LOCTEXT("PrepStart", "시작!"), PrepKeyStart);
+		return;
+	}
+
+	HidePrepCenter();
+}
+
+void UHeistHUDWidget::ShowPrepCenter(const FText& Label, const FText& Value, int32 Key)
+{
+	if (Key == LastPrepCenterKey)
+	{
+		return;
+	}
+	LastPrepCenterKey = Key;
+
+	constexpr ESlateVisibility Shown = ESlateVisibility::SelfHitTestInvisible;
+
+	if (Panel_PrepCenter) { Panel_PrepCenter->SetVisibility(Shown); }
+
+	if (Txt_PrepCenterLabel)
+	{
+		// "시작!" 은 윗줄이 없다. 빈 글자를 남겨 두면 그 높이만큼 "시작!" 이 아래로 밀린다
+		Txt_PrepCenterLabel->SetText(Label);
+		Txt_PrepCenterLabel->SetVisibility(Label.IsEmpty() ? ESlateVisibility::Collapsed : Shown);
+	}
+
+	if (Txt_PrepCenterValue)
+	{
+		Txt_PrepCenterValue->SetText(Value);
+		Txt_PrepCenterValue->SetVisibility(Shown);
+	}
+
+	if (PrepPop && !IsDesignTime())
+	{
+		PlayAnimation(PrepPop);
+	}
+}
+
+void UHeistHUDWidget::HidePrepCenter()
+{
+	LastPrepCenterKey = INDEX_NONE;
+
+	if (Panel_PrepCenter)    { Panel_PrepCenter->SetVisibility(ESlateVisibility::Collapsed); }
+	if (Txt_PrepCenterLabel) { Txt_PrepCenterLabel->SetVisibility(ESlateVisibility::Collapsed); }
+	if (Txt_PrepCenterValue) { Txt_PrepCenterValue->SetVisibility(ESlateVisibility::Collapsed); }
+}
+
+void UHeistHUDWidget::SetPrepMini(int32 Seconds)
+{
+	const ESlateVisibility Vis = (Seconds == INDEX_NONE) ? ESlateVisibility::Collapsed
+														 : ESlateVisibility::SelfHitTestInvisible;
+	if (Panel_PrepMini) { Panel_PrepMini->SetVisibility(Vis); }
+	if (Txt_PrepMini)   { Txt_PrepMini->SetVisibility(Vis); }
+
+	if (Seconds == INDEX_NONE)
+	{
+		LastPrepMiniSeconds = INDEX_NONE;
+		return;
+	}
+
+	// 글자는 초가 바뀔 때만 새로 만든다. 이 함수는 0.1초마다 불린다
+	if (Seconds != LastPrepMiniSeconds && Txt_PrepMini)
+	{
+		Txt_PrepMini->SetText(FormatClock(Seconds));
+	}
+	LastPrepMiniSeconds = Seconds;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -728,5 +952,145 @@ int32 UHeistHUDWidget::GetTargetValue() const
 	const AHeistGameState* GS = BoundState.Get();
 	return GS ? GS->GetTargetValue() : 0;
 }
+
+// ──────────────────────────────────────────────────────────────
+// 준비 카운트다운 흉내
+//
+// 쉬핑에서도 함수는 남는다(헤더에 선언돼 있다). 부르는 치트만 빠진다.
+// ──────────────────────────────────────────────────────────────
+
+void UHeistHUDWidget::StartDebugPrep(bool bFromStart)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Remaining = bFromStart ? UHeistSettings::Get()->PrepSeconds
+									   : static_cast<float>(PrepFinalSeconds);
+
+	DebugPrepEndTime   = World->GetTimeSeconds() + Remaining;
+	bDebugPrepCounting = true;
+	StartBannerUntil   = -1.f;
+
+	// 같은 단계를 다시 틀어도 PrepPop 이 재생되도록 기록을 비운다
+	HidePrepCenter();
+
+	// 작업 레벨이 아니어도 돌아야 한다(L_UITest 같은 맵). 그래서 RefreshTimer 에 얹지 않고 따로 돈다
+	World->GetTimerManager().SetTimer(
+			DebugPrepHandle, this, &UHeistHUDWidget::StepDebugPrep, TimerTickInterval, true);
+
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 준비 카운트다운 흉내 시작 — %.0f초 남음부터"), *GetName(), Remaining);
+
+	StepDebugPrep();
+}
+
+void UHeistHUDWidget::StepDebugPrep()
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		StopDebugPrep();
+		return;
+	}
+
+	const float Now       = World->GetTimeSeconds();
+	const float Remaining = DebugPrepEndTime - Now;
+
+	if (Remaining > 0.f)
+	{
+		SetTimerVisible(false);
+		RefreshPrepCountdown(/*bPrep=*/true, Remaining);
+		return;
+	}
+
+	// 0 에 닿았다 — 진짜 페이즈 전환처럼 "시작!" 을 띄운다
+	if (bDebugPrepCounting)
+	{
+		bDebugPrepCounting = false;
+		StartBannerUntil   = DebugPrepEndTime + StartBannerSeconds;
+
+		// 작업 레벨이면 원래 판을 되살린다. 아니면 판이 원래 숨어 있던 맵이다
+		if (BoundState.Get())
+		{
+			LastShownSeconds = INDEX_NONE;
+			RefreshTimer();
+		}
+	}
+
+	RefreshPrepCountdown(/*bPrep=*/false, 0.f);
+
+	if (Now >= StartBannerUntil)
+	{
+		StopDebugPrep();
+	}
+}
+
+void UHeistHUDWidget::StopDebugPrep()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DebugPrepHandle);
+	}
+	DebugPrepHandle.Invalidate();
+
+	DebugPrepEndTime   = -1.f;
+	bDebugPrepCounting = false;
+	StartBannerUntil   = -1.f;
+
+	HidePrepCenter();
+	SetPrepMini(INDEX_NONE);
+}
+
+// ──────────────────────────────────────────────────────────────
+// [디버그 전용] 치트
+//
+// 알림은 준비 시작 2초에만, 큰 숫자는 마지막 5초에만 나온다. 눈으로 맞추려면 매번 판을
+// 새로 열고 기다려야 한다. hh.UI.Stamina 와 규칙을 맞춘다 — 쉬핑에서는 코드째 빠진다.
+// ──────────────────────────────────────────────────────────────
+#if !UE_BUILD_SHIPPING
+
+static void DebugPrepCommand(UWorld* World, bool bFromStart)
+{
+	int32 Applied = 0;
+	for (int32 Index = GLiveHeistHUDs.Num() - 1; Index >= 0; --Index)
+	{
+		UHeistHUDWidget* Widget = GLiveHeistHUDs[Index].Get();
+		if (!Widget)
+		{
+			GLiveHeistHUDs.RemoveAt(Index);
+			continue;
+		}
+
+		// PIE 다중 창에서 남의 창 HUD 까지 건드리지 않도록 월드를 맞춘다
+		if (World && Widget->GetWorld() != World)
+		{
+			continue;
+		}
+
+		Widget->StartDebugPrep(bFromStart);
+		++Applied;
+	}
+
+	if (Applied == 0)
+	{
+		UE_LOG(LogHeavyUI, Warning, TEXT("화면에 떠 있는 HeistHUD 위젯이 없습니다. WBP_HUD 가 떠 있는지 확인할 것."));
+	}
+}
+
+static FAutoConsoleCommandWithWorld GDebugPrepStartCommand(
+	  TEXT("hh.UI.PrepStart"),
+	  TEXT("hh.UI.PrepStart — 준비 카운트다운을 처음(작전 준비 45초)부터 화면에서만 흉내 낸다"),
+	  FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) { DebugPrepCommand(World, /*bFromStart=*/true); }),
+	  ECVF_Cheat);
+
+static FAutoConsoleCommandWithWorld GDebugPrepFinalCommand(
+	  TEXT("hh.UI.PrepFinal"),
+	  TEXT("hh.UI.PrepFinal — 준비 카운트다운의 마지막 5초(5 · 4 · 3 · 2 · 1 · 시작!)를 화면에서만 흉내 낸다"),
+	  FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) { DebugPrepCommand(World, /*bFromStart=*/false); }),
+	  ECVF_Cheat);
+
+#endif // !UE_BUILD_SHIPPING
 
 #undef LOCTEXT_NAMESPACE

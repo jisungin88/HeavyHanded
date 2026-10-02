@@ -64,6 +64,19 @@ public:
 	bool IsAlarmed() const;
 
 	/**
+	 * 단계가 바뀌는 지점(0~1). 막대 위에 단계 경계선을 그릴 때 쓴다.
+	 *
+	 * 0 = 의심 진입, 1 = 경계 진입. 그 밖의 인덱스는 -1 이다.
+	 *
+	 * 눈금 위치를 WBP 에 숫자로 찍지 말 것 — UAlertSettings 의 임계값을 기획자가
+	 * 조정하면 선만 제자리에 남아 "색은 바뀌었는데 선은 안 넘은" 화면이 된다.
+	 *
+	 * static 인 것은 의도다 — 위젯 인스턴스 없이 Automation Test 에서 직접 부른다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "UI|Alert")
+	static float LevelThreshold01(int32 Index);
+
+	/**
 	 * 지금 페이즈에서 경계도가 의미 있는가. 작업 레벨이 아니면 항상 참이다.
 	 *
 	 * 본 작업과 도주에서만 참이다 — 준비 시간의 경계도는 본 작업에 들어가는 순간
@@ -81,11 +94,15 @@ protected:
 
 	// ── WBP 가 배치해야 하는 위젯 ──
 	//
-	// 이름은 WBP_AlertGauge 에 이미 있는 것을 그대로 쓴다. 컨벤션과 어긋나 보이지만
-	// (Bar_Alert 가 아니라 AlertBar 여야 자연스럽다) 이름을 바꾸면 기존 WBP 의
-	// 위젯을 전부 개명해야 하고, 그 사이 BP 가 컴파일되지 않는다. 얻는 것보다 잃는 것이 크다.
+	// Txt_Level · Txt_Percent 는 WBP_AlertGauge 에 원래 있던 이름을 그대로 쓴다.
+	// 컨벤션과 어긋나 보여도 개명하면 그 사이 BP 가 컴파일되지 않아 얻는 것보다 잃는 것이 크다.
 
-	/** 경계도 막대. 채우기와 색을 C++ 이 지정한다 */
+	/**
+	 * 경계도 막대. 채우기와 색을 C++ 이 지정한다.
+	 *
+	 * Fill 브러시는 흰색이어야 한다 — 단계 색을 여기에 곱해서 4단계를 한 장으로 낸다.
+	 * 색이 구워진 텍스처를 쓰면 두 색이 섞여 그라데이션도 단계 색도 둘 다 죽는다.
+	 */
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Alert", meta = (BindWidget))
 	TObjectPtr<UProgressBar> Bar_Alert;
 

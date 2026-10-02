@@ -56,6 +56,27 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|MedKit")
 	bool bShowRescueDebug = false;
 
+	/**
+	 * 일어난 사람에게 붙는 회복 연출.
+	 *
+	 * 키트가 떨어진 자리가 아니라 **사람에게** 붙인다. 누가 살아났는지가 보여야 하고,
+	 * 빗나간 키트가 반경으로 살렸을 때는 둘이 최대 2m 떨어져 있어서 자리에 띄우면
+	 * 엉뚱한 바닥이 빛난다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|MedKit")
+	TObjectPtr<class UNiagaraSystem> RescueEffect;
+
+	/**
+	 * 회복 연출을 전원에게 내려보낸다. 일으킨 사람에게 붙는다.
+	 *
+	 * [여기는 위치가 아니라 대상을 보낸다]
+	 *   Multicast_SpentEffect 는 곧 사라지는 장비라 위치를 실어 보냈지만, 이쪽 대상은
+	 *   플레이어 캐릭터다 — 항상 복제돼 있고 계속 갱신되므로 붙여도 어긋나지 않는다.
+	 *   붙이는 편이 낫다: 일어나는 동안 캐릭터가 움직이는데, 자리에 띄우면 연출만 바닥에 남는다.
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_RescueEffect(class ABaseCharacter* Rescued);
+
 private:
 	/** 이 캐릭터가 다운돼 있으면 일으킨다. 성공하면 true */
 	bool TryRescue(ABaseCharacter* Target);

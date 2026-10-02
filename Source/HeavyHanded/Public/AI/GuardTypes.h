@@ -28,6 +28,15 @@ enum class EPatrolPattern : uint8
 	Random   UMETA(DisplayName = "무작위 (직전 지점 제외 랜덤)")
 };
 
+// 두리번 Wait 서비스에서 재생할 애니메이션 종류.
+UENUM(BlueprintType)
+enum class EGuardLookAroundType : uint8
+{
+	None,
+	PatrolWait,
+	InvestigateWait
+};
+
 // 현재 안쓰는 중
 /*
 USTRUCT(BlueprintType)
