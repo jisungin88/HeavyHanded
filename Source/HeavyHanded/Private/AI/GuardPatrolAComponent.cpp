@@ -31,6 +31,12 @@ void UGuardPatrolAComponent::SetPatrolStats(float InArrivalRadius, int32 InSweep
 	SearchSweepRadius = InSweepRadius;
 }
 
+float UGuardPatrolAComponent::GetEffectiveSearchSweepRadius() const
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	return IsValid(Controller) && Controller->IsWorldAlarmActive() ? SearchSweepRadius * FMath::Max(1.f, AlarmSearchRadiusMultiplier) : SearchSweepRadius;
+}
+
 
 bool UGuardPatrolAComponent::SelectNextPatrolPoint2()
 {
@@ -306,6 +312,7 @@ void UGuardPatrolAComponent::ResetSearchSession(float SessionStart)
 		bPendingSearchCompletion = false;
 		LastSearchAttemptTime = -1.f;
 		LastSearchAttemptInterval = TNumericLimits<float>::Max();
+		LastAlarmSearchRecoveryTime = -1.f;
 	}
 }
 
@@ -330,6 +337,11 @@ bool UGuardPatrolAComponent::IsSearchTimeRemaining(float SessionStart, float Fal
 	{
 		return false;
 	}
+	// 경보의 무제한 수색만 허용한다. LastSeenTime 추격 유예 판정은 이 함수를 사용하지 않는다.
+	if (Controller->IsWorldAlarmActive())
+	{
+		return true;
+	}
 	const float Elapsed = GetWorld()->GetTimeSeconds() - SessionStart;
 	if (!FMath::IsNearlyEqual(SessionStart, RetryPolicySessionStart))
 	{
@@ -341,6 +353,12 @@ bool UGuardPatrolAComponent::IsSearchTimeRemaining(float SessionStart, float Fal
 		Controller->LogSearchTransitionDebug(TEXT("SearchRetryExtension"), FString::Printf(TEXT("빠른 실패 %d회 연속: 수색 제한에 %.1f초 추가(이번 수색 1회만)"), ConsecutiveQuickFailures, QuickRetryExtension));
 	}
 	return Elapsed < SearchTimeout + (bSearchExtensionGranted ? QuickRetryExtension : 0.f);
+}
+
+bool UGuardPatrolAComponent::IsSearchSweepExhausted() const
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	return CurrentSearchStep > SearchSweepCount && !(IsValid(Controller) && Controller->IsWorldAlarmActive());
 }
 
 void UGuardPatrolAComponent::BeginSearchAttempt()
@@ -379,9 +397,16 @@ void UGuardPatrolAComponent::ReportSearchAttempt(bool bSucceeded, float AttemptD
 		return;
 	}
 	bPendingSearchCompletion = false;
-	ConsecutiveQuickFailures = AttemptDuration < QuickRetryThreshold && LastSearchAttemptInterval < QuickRetryThreshold ? ConsecutiveQuickFailures + 1 : 0;
+	const bool bAlarm = Controller->IsWorldAlarmActive();
+	ConsecutiveQuickFailures = !bAlarm && AttemptDuration < QuickRetryThreshold && LastSearchAttemptInterval < QuickRetryThreshold ? ConsecutiveQuickFailures + 1 : 0;
 	if (FAISystem::IsValidLocation(Goal))
 	{
+		// 경보 수색은 끝나지 않으므로 실패 이력을 무한히 쌓지 않는다.
+		constexpr int32 MaxAlarmFailedLocations = 32;
+		if (bAlarm && FailedSearchLocations.Num() >= MaxAlarmFailedLocations)
+		{
+			FailedSearchLocations.RemoveAt(0, FailedSearchLocations.Num() - MaxAlarmFailedLocations + 1);
+		}
 		FailedSearchLocations.Add(Goal);
 	}
 	Controller->LogSearchTransitionDebug(TEXT("SearchRetryFailed"), FString::Printf(TEXT("수색 실패: 소요=%.2f초 재시도간격=%.2f초 빠른실패=%d회 완료횟수 유지"), AttemptDuration, LastSearchAttemptInterval == TNumericLimits<float>::Max() ? -1.f : LastSearchAttemptInterval, ConsecutiveQuickFailures));
@@ -411,6 +436,7 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 	}
 
 	const FSharedConstNavQueryFilter Filter = UNavigationQueryFilter::GetQueryFilter(*NavData, Controller, Controller->GetDefaultNavigationFilterClass());
+	const float EffectiveSearchRadius = GetEffectiveSearchSweepRadius();
 	const auto HasCompletePath = [&](const FVector& Location)
 	{
 		if (FailedSearchLocations.ContainsByPredicate([&](const FVector& Failed) { return FVector::DistSquared2D(Failed, Location) < FMath::Square(120.f); }))
@@ -474,9 +500,9 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 	{
 		for (float Angle : Angles)
 		{
-			const FVector Seed = Anchor + SearchDirection.RotateAngleAxis(Angle, FVector::UpVector) * SearchSweepRadius * RadiusScale;
+			const FVector Seed = Anchor + SearchDirection.RotateAngleAxis(Angle, FVector::UpVector) * EffectiveSearchRadius * RadiusScale;
 			FNavLocation Candidate;
-			if (NavSys->ProjectPointToNavigation(Seed, Candidate, ProjectionExtent, NavData, Filter) && FVector::Dist2D(Anchor, Candidate.Location) <= SearchSweepRadius)
+			if (NavSys->ProjectPointToNavigation(Seed, Candidate, ProjectionExtent, NavData, Filter) && FVector::Dist2D(Anchor, Candidate.Location) <= EffectiveSearchRadius)
 			{
 				AddCandidate(Candidate.Location);
 			}
@@ -486,7 +512,7 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 	for (int32 Attempt = 0; Attempt < MaxCandidateAttempts; ++Attempt)
 	{
 		FNavLocation Candidate;
-		if (NavSys->GetRandomPointInNavigableRadius(Anchor, SearchSweepRadius, Candidate, NavData, Filter))
+		if (NavSys->GetRandomPointInNavigableRadius(Anchor, EffectiveSearchRadius, Candidate, NavData, Filter))
 		{
 			AddCandidate(Candidate.Location);
 		}
@@ -514,7 +540,28 @@ bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredL
 		}
 	}
 
-	Controller->LogSearchTransitionDebug(TEXT("SearchNoReachableGoal"), FString::Printf(TEXT("원래 지점과 주변 후보 %d개에서 완전한 경로를 찾지 못함: Original=%s Radius=%.1f"), Candidates.Num(), *DesiredLocation.ToCompactString(), SearchSweepRadius));
+	if (Controller->IsWorldAlarmActive())
+	{
+		// 마지막 단서가 다른 NavMesh 섬에 있어도 자기 주변에서 수색을 계속한다.
+		for (int32 Attempt = 0; Attempt < MaxCandidateAttempts; ++Attempt)
+		{
+			FNavLocation Candidate;
+			if (NavSys->GetRandomReachablePointInRadius(GuardLocation, EffectiveSearchRadius, Candidate, NavData, Filter) && FVector::DistSquared2D(GuardLocation, Candidate.Location) >= FMath::Square(100.f) && HasCompletePath(Candidate.Location))
+			{
+				OutLocation = Candidate.Location;
+				Controller->LogSearchTransitionDebug(TEXT("AlarmSearchNearbyGoal"), TEXT("단서 지점 접근 불가: 경비 주변의 도달 가능한 지점으로 수색 계속"));
+				return true;
+			}
+		}
+		const float Now = GetWorld()->GetTimeSeconds();
+		if (LastAlarmSearchRecoveryTime < 0.f || Now - LastAlarmSearchRecoveryTime >= 2.f)
+		{
+			// 주변이 모두 제외된 경우 일정 간격을 두고 다시 검사한다.
+			FailedSearchLocations.Reset();
+			LastAlarmSearchRecoveryTime = Now;
+		}
+	}
+	Controller->LogSearchTransitionDebug(TEXT("SearchNoReachableGoal"), FString::Printf(TEXT("원래 지점과 주변 후보 %d개에서 완전한 경로를 찾지 못함: Original=%s Radius=%.1f"), Candidates.Num(), *DesiredLocation.ToCompactString(), EffectiveSearchRadius));
 	return false;
 }
 
@@ -564,6 +611,14 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 		++CurrentSearchStep;
 		bPendingSearchCompletion = false;
 	}
+	const bool bAlarm = Controller->IsWorldAlarmActive();
+	if (bAlarm && CurrentSearchStep > FMath::Max(1, SearchSweepCount))
+	{
+		// 세션 시각을 다시 쓰지 않고 현재 지점 주변에서 다음 훑기 묶음을 시작한다.
+		CurrentSearchStep = 1;
+		FailedSearchLocations.Reset();
+		Controller->LogSearchTransitionDebug(TEXT("AlarmSearchRepeat"), TEXT("경보 중 훑기 완료: 주변 수색 반복"));
+	}
 
 	// 0번째는 조사 지점 자체(마지막 목격 지점 또는 소리 지점). 여기부터 확인하는 게 자연스럽다.
 	if (CurrentSearchStep == 0)
@@ -580,7 +635,7 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 		return true;
 	}
 
-	if (CurrentSearchStep > SearchSweepCount)
+	if (!bAlarm && CurrentSearchStep > SearchSweepCount)
 	{
 		Controller->LogSearchTransitionDebug(TEXT("SearchExhausted"), TEXT("수색 횟수 소진: 선택 태스크 Failed"));
 		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 종료 - %d개 지점을 훑었다. 순찰로 복귀."),
@@ -605,7 +660,7 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 	Controller->LogSearchTransitionDebug(TEXT("SearchPointFailed"), TEXT("주변 도달 가능한 수색 지점 추출 실패"));
 	UE_LOG(LogGuardAI, Warning,
 		TEXT("[%s] 조사 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
-		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), SearchSweepRadius);
+		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), GetEffectiveSearchSweepRadius());
 	return false;
 }
 

@@ -3,6 +3,7 @@
 #include "Components/SceneComponent.h"
 #include "Core/GameStates/HeistGameState.h"
 #include "Core/HeavyHandedGameplayTags.h"
+#include "Core/HeistEntryPoint.h"        // FindByTag — 고른 진입점이 이 레벨에 있는지 본다
 #include "Core/RunProgressSubsystem.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
@@ -102,9 +103,64 @@ void AEquipmentSpawnZone::HandlePhaseChanged(FGameplayTag NewPhase, FGameplayTag
 	}
 }
 
+bool AEquipmentSpawnZone::IsEntryMatched() const
+{
+	// 담당 진입점을 안 정했으면 항상 맡는다 (진입점이 없는 레벨 · 구역 하나만 두던 배치)
+	if (!EntryTag.IsValid())
+	{
+		return true;
+	}
+
+	const URunProgressSubsystem* Run = URunProgressSubsystem::Get(this);
+	const FGameplayTag Selected = Run ? Run->GetSelectedEntry() : FGameplayTag();
+
+	// 고른 것과 같으면 내 차례다. 부모 매칭이 아니라 정확히 일치해야 한다 —
+	// HasTag 로 느슨하게 보면 Entry 루트 하나로 세 구역이 전부 켜진다.
+	if (Selected.IsValid() && Selected.MatchesTagExact(EntryTag))
+	{
+		return true;
+	}
+
+	// 고른 진입점이 **이 레벨에 실제로 있으면** 그쪽 구역이 맡는다. 내 차례가 아니다.
+	if (Selected.IsValid() && AHeistEntryPoint::FindByTag(this, Selected))
+	{
+		return false;
+	}
+
+	// 여기부터는 폴백이다 — 고른 것이 없거나(은신처를 안 거침) 이 레벨에 없는 경우.
+	// 게임모드도 같은 상황에서 기본/첫 번째 진입점으로 떨어뜨린다. 구역도 같은 기준을 쓴다.
+	TArray<AHeistEntryPoint*> Entries;
+	AHeistEntryPoint::CollectEntryPoints(this, Entries);
+
+	const int32 DefaultIndex = AHeistEntryPoint::FindDefaultIndex(Entries);
+	const int32 FallbackIndex = Entries.IsValidIndex(DefaultIndex) ? DefaultIndex : 0;
+
+	const bool bIsFallbackEntry = Entries.IsValidIndex(FallbackIndex)
+		&& Entries[FallbackIndex]->GetEntryTag().MatchesTagExact(EntryTag);
+
+	if (bIsFallbackEntry)
+	{
+		UE_LOG(LogLoot, Warning,
+			TEXT("%s: 고른 진입점이 %s — 폴백으로 이 구역(%s)이 맡는다."),
+			*GetName(),
+			Selected.IsValid() ? TEXT("이 레벨에 없다") : TEXT("없다"),
+			*EntryTag.ToString());
+	}
+
+	return bIsFallbackEntry;
+}
+
 void AEquipmentSpawnZone::SpawnPurchasedEquipment()
 {
 	if (!HasAuthority() || bHasSpawned)
+	{
+		return;
+	}
+
+	// 이번 판의 진입점이 아니면 가만히 있는다. 다른 구역이 맡는다.
+	// bHasSpawned 를 세우지 않는 것은 hh.Equip.SpawnNow 로 진입점을 바꿔 가며
+	// 시험할 때 이 구역이 다시 판정받을 수 있어야 하기 때문이다.
+	if (!IsEntryMatched())
 	{
 		return;
 	}
