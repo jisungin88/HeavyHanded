@@ -9,6 +9,7 @@
 class UPerceptionMeterComponent;
 class UWidgetComponent;
 class UAnimMontage;
+class UMaterialInterface;
 
 class UProceduralMeshComponent;
 
@@ -23,6 +24,8 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void GetActorEyesViewPoint(FVector& OutLocation, FRotator& OutRotation) const override;
 	FTransform GetEyeSocketTransform() const;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	void SetSightDebugAppearance(bool bInChasing, FLinearColor InColor, UMaterialInterface* InMaterial);
 
 	void SetLookAroundType(EGuardLookAroundType NewType);
 	void SetArresting(bool bNewArresting);
@@ -103,7 +106,7 @@ private:
 
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
+	UPROPERTY(ReplicatedUsing = OnRep_SightDebugState, EditAnywhere, BlueprintReadWrite, Category = "Guard|Debug", meta = (ClampMin = "0.05", UIMin = "0.05", Units = "s"))
 	float SightDebugUpdateInterval = 0.25f;
 
 	// 서버에서 현재 행동의 목표와 별도의 어그로 대상까지 디버그 선을 표시한다.
@@ -124,10 +127,6 @@ public:
 	void SetReplicatedSightDebugState(float InSightRadius, float InSightHalfAngle, bool bInEnabled);
 	void SetReplicatedSightDebugRotation(FRotator InRotation);
 	void SetReplicatedDetectionGauge(float InGaugePercent);
-	UFUNCTION(NetMulticast, Unreliable, Category = "Guard|Perception")
-	void Multicast_UpdateSightDebugMesh(const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
-		const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
-		FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial);
 	float GetReplicatedSightRadius() const { return ReplicatedSightRadius; }
 	float GetReplicatedSightHalfAngle() const { return ReplicatedSightHalfAngle; }
 	bool GetReplicatedDrawSightDebug() const { return bReplicatedDrawSightDebug; }
@@ -227,6 +226,19 @@ public:
 protected:
 
 	void UpdateHeadGaugeWidget();
+	void UpdateLocalSightDebugTimer();
+	void DrawLocalSightDebugMesh();
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	bool bSightDebugChasing = false;
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	FLinearColor SightDebugFanColor = FLinearColor::White;
+
+	UPROPERTY(Replicated, VisibleAnywhere, Category = "Guard|Debug")
+	TObjectPtr<UMaterialInterface> SightDebugMaterial;
+
+	FTimerHandle LocalSightDebugTimerHandle;
 
 	// DT_GuardStats 폴백값. 실제 값은 OnPossess 때 테이블에서 덮어쓴다.
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (ClampMin = "0.01", Units = "s"))

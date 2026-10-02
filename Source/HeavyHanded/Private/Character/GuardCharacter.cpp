@@ -25,6 +25,8 @@
 //#include "AI/GuardSightAComponent.h"
 
 #include "ProceduralMeshComponent.h"
+#include "TimerManager.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 
 
@@ -66,7 +68,7 @@ AGuardCharacter::AGuardCharacter()
 	DetectionGaugeWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // 나중에 다시 고칠 것
 	DetectionGaugeWidgetComponent->SetDrawSize(FVector2D(120.f, 40.f));
 	DetectionGaugeWidgetComponent->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
-	
+
 
 	// 기존 BP 컴포넌트 참조를 유지한다. 청각 게이지 표시는 통합 위젯이 담당한다.
 	HearingGaugeWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NoiseGaugeWidgetComponent"));
@@ -140,6 +142,45 @@ void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AGuardCharacter, ReplicatedAggroTarget);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedLookAroundType);
 	DOREPLIFETIME(AGuardCharacter, bReplicatedIsArresting);
+	DOREPLIFETIME(AGuardCharacter, SightDebugUpdateInterval);
+	DOREPLIFETIME(AGuardCharacter, bSightDebugChasing);
+	DOREPLIFETIME(AGuardCharacter, SightDebugFanColor);
+	DOREPLIFETIME(AGuardCharacter, SightDebugMaterial);
+}
+
+void AGuardCharacter::SetSightDebugAppearance(bool bInChasing, FLinearColor InColor, UMaterialInterface* InMaterial)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bSightDebugChasing = bInChasing;
+	SightDebugFanColor = InColor;
+	SightDebugMaterial = InMaterial;
+}
+
+void AGuardCharacter::UpdateLocalSightDebugTimer()
+{
+	if (!IsValid(GetWorld()))
+	{
+		return;
+	}
+	GetWorldTimerManager().ClearTimer(LocalSightDebugTimerHandle);
+	if (GetNetMode() == NM_DedicatedServer || !bReplicatedDrawSightDebug)
+	{
+		return;
+	}
+	const float Interval = FMath::Max(SightDebugUpdateInterval, 0.05f);
+	// 여러 경비가 같은 프레임에 지면 트레이스를 몰아서 실행하지 않도록 분산한다.
+	const float InitialDelay = Interval * (1.f + static_cast<float>(GetUniqueID() % 32) / 32.f);
+	GetWorldTimerManager().SetTimer(LocalSightDebugTimerHandle, this, &AGuardCharacter::DrawLocalSightDebugMesh, Interval, true, InitialDelay);
+}
+
+void AGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(LocalSightDebugTimerHandle);
+	GetWorldTimerManager().ClearTimer(HeadGaugeUpdateTimerHandle);
+	Super::EndPlay(EndPlayReason);
 }
 
 void AGuardCharacter::SetArresting(bool bNewArresting)
@@ -228,6 +269,7 @@ void AGuardCharacter::OnRep_SightDebugState()
 	{
 		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
 	}
+	UpdateLocalSightDebugTimer();
 
 }
 
@@ -249,10 +291,7 @@ void AGuardCharacter::SetReplicatedSightDebugState(float InSightRadius, float In
 	ReplicatedSightRadius = InSightRadius;
 	ReplicatedSightHalfAngle = InSightHalfAngle;
 	bReplicatedDrawSightDebug = bInEnabled;
-	if (IsValid(SightDebugMesh))
-	{
-		SightDebugMesh->SetVisibility(bReplicatedDrawSightDebug);
-	}
+	OnRep_SightDebugState();
 	ForceNetUpdate();
 }
 
@@ -280,56 +319,377 @@ void AGuardCharacter::SetReplicatedDetectionGauge(float InGaugePercent)
 	ReplicatedDetectionGaugePercent = FMath::Clamp(InGaugePercent, 0.0f, 100.0f);
 }
 
-void AGuardCharacter::Multicast_UpdateSightDebugMesh_Implementation(
-	const TArray<FVector>& FlatVertices, const TArray<int32>& FlatTriangles,
-	const TArray<FVector>& GroundVertices, const TArray<int32>& GroundTriangles,
-	FRotator InSightRotation, FLinearColor InFanColor, UMaterialInterface* InMaterial)
+void AGuardCharacter::DrawLocalSightDebugMesh()
 {
-	if (!IsValid(SightDebugMesh) || !bReplicatedDrawSightDebug || FlatVertices.IsEmpty() || FlatTriangles.IsEmpty())
+	UWorld* World = GetWorld();
+	if (!IsValid(World) || !IsValid(SightDebugMesh) || !IsValid(GetCapsuleComponent()) || !bReplicatedDrawSightDebug || GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
+	const float SightRadius = ReplicatedSightRadius;
+	const float HalfAngle = ReplicatedSightHalfAngle;
+	if (SightRadius <= 0.f || HalfAngle <= 0.f)
+	{
+		SightDebugMesh->ClearAllMeshSections();
+		return;
+	}
+	constexpr int32 ArcSegments = 96;
+	const int32 AngularPointCount = ArcSegments + 1;
+	const float CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const FVector LocalOrigin(0.f, 0.f, -CapsuleHalfHeight + 2.f);
+	const FRotator SightMeshRotation(0.f, ReplicatedSightDebugRotation.Yaw, 0.f);
+	SightDebugMesh->SetWorldRotation(SightMeshRotation);
+	const FTransform MeshTransform = SightDebugMesh->GetComponentTransform();
+	const FVector WorldOrigin = MeshTransform.TransformPosition(LocalOrigin);
+	const FVector UpDirection = FVector::UpVector;
+	constexpr float MinGroundNormalZ = 0.7f;
+	const FVector EyeLocation(WorldOrigin.X, WorldOrigin.Y, GetRootComponent()->GetComponentLocation().Z + GetEyeHeight());
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GuardSightDebug), true, this);
+	const bool bIsChasing = bSightDebugChasing;
+	if (bIsChasing && IsValid(ReplicatedAggroTarget))
+	{
+		Params.AddIgnoredActor(ReplicatedAggroTarget);
+	}
 
-	SightDebugMesh->SetWorldRotation(InSightRotation);
+	// 눈높이보다 낮은 길과 턱은 건너뛰고, 눈높이에 닿는 장애물만 찾는다.
+	TArray<float> VisibleDistances;
+	VisibleDistances.Reserve(AngularPointCount);
+
+	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+	{
+		const float Alpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, Alpha);
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+		const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+		const FVector TraceEnd = WorldOrigin + WorldDirection * SightRadius;
+		FCollisionQueryParams AngleParams = Params;
+		float VisibleDistance = SightRadius;
+
+		// 눈높이보다 낮은 장애물은 건너뛰고, 눈높이에 닿는 장애물에서만 자른다.
+		while (true)
+		{
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(
+				Hit, WorldOrigin, TraceEnd, ECC_Visibility, AngleParams);
+			if (!bBlocked)
+			{
+				break;
+			}
+
+			const float HitDistance = FMath::Clamp(
+				FVector::DotProduct(Hit.Location - WorldOrigin, WorldDirection), 0.0f, SightRadius);
+			UPrimitiveComponent* HitComponent = Hit.GetComponent();
+			if (!IsValid(HitComponent))
+			{
+				VisibleDistance = HitDistance;
+				break;
+			}
+
+			if (Hit.ImpactNormal.Z >= MinGroundNormalZ)
+			{
+				AngleParams.AddIgnoredComponent(HitComponent);
+				continue;
+			}
+
+			const FVector BoundsOrigin = HitComponent->Bounds.Origin;
+			const FVector BoundsExtent = HitComponent->Bounds.BoxExtent;
+			const float ObstacleTopZ = BoundsOrigin.Z + BoundsExtent.Z;
+
+			// 눈높이보다 낮은 길과 턱은 부채꼴을 자르지 않는다.
+			// 눈높이에 닿는 벽과 건물부터 시야 외곽을 자른다.
+			const bool bBlocksSightFan = ObstacleTopZ >= EyeLocation.Z;
+
+			if (bBlocksSightFan)
+			{
+				VisibleDistance = HitDistance;
+				if (Hit.GetActor() && Hit.GetActor()->IsA<ACharacter>())
+				{
+					VisibleDistance = FMath::Min(VisibleDistance + 50.0f, SightRadius);
+				}
+				break;
+			}
+
+			AngleParams.AddIgnoredComponent(HitComponent);
+		}
+
+		VisibleDistances.Add(VisibleDistance);
+	}
+
+
+
+	// 평면 부채꼴은 발밑보다 조금 위에 두어 항상 깔끔한 형태를 유지한다.
+	constexpr float FlatMeshHeightOffset = 10.0f;
+	const FVector FlatMeshOrigin(0.0f, 0.0f, -CapsuleHalfHeight + FlatMeshHeightOffset);
+
+	TArray<FVector> FlatVertices;
+	TArray<int32> FlatTriangles;
 	TArray<FVector> FlatNormals;
 	TArray<FVector2D> FlatUV0;
 	TArray<FLinearColor> FlatVertexColors;
-	FlatNormals.Init(FVector::UpVector, FlatVertices.Num());
-	FlatUV0.Init(FVector2D::ZeroVector, FlatVertices.Num());
-	FlatVertexColors.Init(InFanColor, FlatVertices.Num());
 	TArray<FProcMeshTangent> FlatTangents;
+	FlatVertices.Reserve(AngularPointCount + 1);
+	FlatTriangles.Reserve(ArcSegments * 3);
+	FlatNormals.Reserve(AngularPointCount + 1);
+	FlatUV0.Reserve(AngularPointCount + 1);
+	FlatVertexColors.Reserve(AngularPointCount + 1);
+	const FLinearColor FlatFanColor = SightDebugFanColor;
+
+	FlatVertices.Add(FlatMeshOrigin);
+	FlatNormals.Add(FVector::UpVector);
+	FlatUV0.Add(FVector2D::ZeroVector);
+	FlatVertexColors.Add(FlatFanColor);
+
+	for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+	{
+		const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+		const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+		const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+		FlatVertices.Add(FlatMeshOrigin + LocalDirection * VisibleDistances[AngleIndex]);
+		FlatNormals.Add(FVector::UpVector);
+		FlatUV0.Add(FVector2D::ZeroVector);
+		FlatVertexColors.Add(FlatFanColor);
+	}
+
+	for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+	{
+		FlatTriangles.Add(0);
+		FlatTriangles.Add(AngleIndex + 2);
+		FlatTriangles.Add(AngleIndex + 1);
+	}
+
+	TArray<FVector> GroundVertices;
+	TArray<int32> GroundTriangles;
+	TArray<FVector> GroundNormals;
+	TArray<FVector2D> GroundUV0;
+	TArray<FLinearColor> GroundVertexColors;
+	TArray<FProcMeshTangent> GroundTangents;
+	bool bHasGroundOverlay = false;
+
+	if (!bIsChasing)
+	{
+		// 낮은 길의 윗면은 평면 부채꼴과 별도 메시로 만든다.
+		// 서로 다른 높이의 바닥을 연결하지 않아 경사 삼각형이 생기지 않는다.
+		constexpr float GroundTraceUp = 1000.0f;
+		constexpr float GroundTraceDown = 5000.0f;
+		constexpr float GroundSurfaceOffset = 2.0f;
+		// 길 표면을 더 촘촘히 샘플링해 큰 삼각형 조각을 줄인다.
+		constexpr float GroundSampleSpacing = 100.0f;
+		// 같은 평면에 가까운 정점만 연결한다.
+		// 낮은 길의 경계는 끊기므로 바닥으로 내려가는 경사 삼각형이 생기지 않는다.
+		constexpr float FlatSurfaceNormalZ = 0.98f;
+		constexpr float MaxOverlayHeightDelta = 5.0f;
+		const int32 GroundRadialSegments = FMath::Clamp(FMath::CeilToInt(SightRadius / GroundSampleSpacing), 4, 24);
+		const FVector FlatMeshOriginWorld = MeshTransform.TransformPosition(FlatMeshOrigin);
+
+		struct FGroundOverlaySample
+		{
+			FVector SampleWorldPoint = FVector::ZeroVector;
+			FVector SurfaceWorldPoint = FVector::ZeroVector;
+			FVector SurfaceWorldNormal = FVector::UpVector;
+			float SurfaceHeight = 0.0f;
+			bool bIsValid = false;
+		};
+
+		TArray<FGroundOverlaySample> GroundOverlaySamples;
+		const int32 GroundVertexCount = (GroundRadialSegments + 1) * AngularPointCount;
+		GroundOverlaySamples.Reserve(GroundVertexCount);
+		const int32 GroundCellCount = GroundRadialSegments * ArcSegments;
+		GroundVertices.Reserve(GroundCellCount * 8);
+		GroundNormals.Reserve(GroundCellCount * 8);
+		GroundUV0.Reserve(GroundCellCount * 8);
+		GroundVertexColors.Reserve(GroundCellCount * 8);
+		GroundTriangles.Reserve(GroundCellCount * 12);
+
+		auto QueryGroundOverlaySample = [&](const FVector& SampleWorldPoint)
+		{
+			FGroundOverlaySample Sample;
+			Sample.SampleWorldPoint = SampleWorldPoint;
+			const FVector TraceStart = SampleWorldPoint + UpDirection * GroundTraceUp;
+			const FVector TraceEnd = SampleWorldPoint - UpDirection * GroundTraceDown;
+			FHitResult GroundHit;
+			const bool bGroundTraceHit = World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, Params);
+			const AActor* GroundActor = GroundHit.GetActor();
+			const bool bIsWalkableGround = bGroundTraceHit && GroundHit.ImpactNormal.Z >= MinGroundNormalZ &&
+				(!IsValid(GroundActor) || !GroundActor->IsA<ACharacter>());
+			const bool bIsFlatSurface = bIsWalkableGround && GroundHit.ImpactNormal.Z >= FlatSurfaceNormalZ;
+			const bool bIsAboveFlatMesh = bIsWalkableGround &&
+				GroundHit.ImpactPoint.Z > FlatMeshOriginWorld.Z + GroundSurfaceOffset;
+			const bool bIsBelowEyeHeight = bIsWalkableGround && GroundHit.ImpactPoint.Z < EyeLocation.Z;
+			Sample.bIsValid = bIsFlatSurface && bIsAboveFlatMesh && bIsBelowEyeHeight;
+			if (Sample.bIsValid)
+			{
+				Sample.SurfaceWorldPoint = GroundHit.ImpactPoint + UpDirection * GroundSurfaceOffset;
+				Sample.SurfaceWorldNormal = GroundHit.ImpactNormal;
+				Sample.SurfaceHeight = GroundHit.ImpactPoint.Z;
+			}
+			return Sample;
+		};
+
+		for (int32 RadialIndex = 0; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+		{
+			const float RadialAlpha = static_cast<float>(RadialIndex) / static_cast<float>(GroundRadialSegments);
+			for (int32 AngleIndex = 0; AngleIndex <= ArcSegments; ++AngleIndex)
+			{
+				const float AngleAlpha = static_cast<float>(AngleIndex) / static_cast<float>(ArcSegments);
+				const float AngleDegrees = FMath::Lerp(-HalfAngle, HalfAngle, AngleAlpha);
+				const FVector LocalDirection = FVector::ForwardVector.RotateAngleAxis(AngleDegrees, UpDirection);
+				const FVector WorldDirection = MeshTransform.TransformVectorNoScale(LocalDirection).GetSafeNormal();
+				const float Distance = VisibleDistances[AngleIndex] * RadialAlpha;
+				const FVector SampleWorldPoint = WorldOrigin + WorldDirection * Distance;
+				GroundOverlaySamples.Add(QueryGroundOverlaySample(SampleWorldPoint));
+			}
+		}
+
+		// 삼각형 단위로 유효한 지면 경계를 찾아 잘라낸다.
+		TArray<FGroundOverlaySample> ClippedTriangle;
+		ClippedTriangle.Reserve(4);
+		TMap<uint64, FGroundOverlaySample> BoundarySampleCache;
+		BoundarySampleCache.Reserve(GroundCellCount * 2);
+		auto AddClippedGroundTriangle = [&](int32 FirstIndex, int32 SecondIndex, int32 ThirdIndex)
+		{
+			const int32 TriangleIndices[] = { FirstIndex, SecondIndex, ThirdIndex };
+			ClippedTriangle.Reset();
+			for (int32 EdgeIndex = 0; EdgeIndex < UE_ARRAY_COUNT(TriangleIndices); ++EdgeIndex)
+			{
+				const int32 EdgeStartIndex = TriangleIndices[EdgeIndex];
+				const int32 EdgeEndIndex = TriangleIndices[(EdgeIndex + 1) % UE_ARRAY_COUNT(TriangleIndices)];
+				const FGroundOverlaySample& EdgeStart = GroundOverlaySamples[EdgeStartIndex];
+				const FGroundOverlaySample& EdgeEnd = GroundOverlaySamples[EdgeEndIndex];
+
+				if (EdgeStart.bIsValid)
+				{
+					ClippedTriangle.Add(EdgeStart);
+				}
+
+				if (EdgeStart.bIsValid == EdgeEnd.bIsValid)
+				{
+					continue;
+				}
+
+				const uint64 BoundaryCacheKey =
+					(static_cast<uint64>(FMath::Min(EdgeStartIndex, EdgeEndIndex)) << 32) |
+					static_cast<uint64>(FMath::Max(EdgeStartIndex, EdgeEndIndex));
+				if (const FGroundOverlaySample* CachedSample = BoundarySampleCache.Find(BoundaryCacheKey))
+				{
+					ClippedTriangle.Add(*CachedSample);
+					continue;
+				}
+
+				float ValidAlpha = EdgeStart.bIsValid ? 0.0f : 1.0f;
+				float InvalidAlpha = EdgeStart.bIsValid ? 1.0f : 0.0f;
+				FGroundOverlaySample BoundarySample = EdgeStart.bIsValid ? EdgeStart : EdgeEnd;
+				for (int32 SubdivisionIndex = 0; SubdivisionIndex < 8; ++SubdivisionIndex)
+				{
+					const float TestAlpha = (ValidAlpha + InvalidAlpha) * 0.5f;
+					const FVector TestWorldPoint = FMath::Lerp(
+						EdgeStart.SampleWorldPoint, EdgeEnd.SampleWorldPoint, TestAlpha);
+					const FGroundOverlaySample TestSample = QueryGroundOverlaySample(TestWorldPoint);
+					if (TestSample.bIsValid)
+					{
+						ValidAlpha = TestAlpha;
+						BoundarySample = TestSample;
+					}
+					else
+					{
+						InvalidAlpha = TestAlpha;
+					}
+				}
+				BoundarySampleCache.Add(BoundaryCacheKey, BoundarySample);
+				ClippedTriangle.Add(BoundarySample);
+			}
+
+			if (ClippedTriangle.Num() < 3)
+			{
+				return;
+			}
+
+			float MinHeight = ClippedTriangle[0].SurfaceHeight;
+			float MaxHeight = MinHeight;
+			for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+			{
+				MinHeight = FMath::Min(MinHeight, TriangleSample.SurfaceHeight);
+				MaxHeight = FMath::Max(MaxHeight, TriangleSample.SurfaceHeight);
+			}
+			if (MaxHeight - MinHeight > MaxOverlayHeightDelta)
+			{
+				return;
+			}
+
+			const int32 TriangleVertexStart = GroundVertices.Num();
+			for (const FGroundOverlaySample& TriangleSample : ClippedTriangle)
+			{
+				GroundVertices.Add(MeshTransform.InverseTransformPosition(TriangleSample.SurfaceWorldPoint));
+				GroundNormals.Add(MeshTransform.InverseTransformVectorNoScale(TriangleSample.SurfaceWorldNormal).GetSafeNormal());
+				GroundUV0.Add(FVector2D::ZeroVector);
+				GroundVertexColors.Add(FlatFanColor);
+			}
+
+			for (int32 TriangleIndex = 1; TriangleIndex < ClippedTriangle.Num() - 1; ++TriangleIndex)
+			{
+				GroundTriangles.Add(TriangleVertexStart);
+				GroundTriangles.Add(TriangleVertexStart + TriangleIndex);
+				GroundTriangles.Add(TriangleVertexStart + TriangleIndex + 1);
+			}
+		};
+
+		for (int32 RadialIndex = 1; RadialIndex <= GroundRadialSegments; ++RadialIndex)
+		{
+			const int32 InnerBase = (RadialIndex - 1) * AngularPointCount;
+			const int32 OuterBase = RadialIndex * AngularPointCount;
+			for (int32 AngleIndex = 0; AngleIndex < ArcSegments; ++AngleIndex)
+			{
+				const int32 InnerCurrent = InnerBase + AngleIndex;
+				const int32 InnerNext = InnerCurrent + 1;
+				const int32 OuterCurrent = OuterBase + AngleIndex;
+				const int32 OuterNext = OuterCurrent + 1;
+				AddClippedGroundTriangle(InnerCurrent, InnerNext, OuterNext);
+				AddClippedGroundTriangle(OuterNext, OuterCurrent, InnerCurrent);
+			}
+		}
+
+		bHasGroundOverlay = GroundTriangles.Num() > 0;
+	}
+
+
 
 	SightDebugMesh->ClearAllMeshSections();
 	SightDebugMesh->CreateMeshSection_LinearColor(
-		0, FlatVertices, FlatTriangles, FlatNormals, FlatUV0, FlatVertexColors, FlatTangents, false);
+		0,
+		FlatVertices,
+		FlatTriangles,
+		FlatNormals,
+		FlatUV0,
+		FlatVertexColors,
+		FlatTangents,
+		false);
 
-	if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+	if (bHasGroundOverlay)
 	{
-		TArray<FVector> GroundNormals;
-		TArray<FVector2D> GroundUV0;
-		TArray<FLinearColor> GroundVertexColors;
-		GroundNormals.Init(FVector::UpVector, GroundVertices.Num());
-		GroundUV0.Init(FVector2D::ZeroVector, GroundVertices.Num());
-		GroundVertexColors.Init(InFanColor, GroundVertices.Num());
-		TArray<FProcMeshTangent> GroundTangents;
 		SightDebugMesh->CreateMeshSection_LinearColor(
-			1, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, false);
+			1,
+			GroundVertices,
+			GroundTriangles,
+			GroundNormals,
+			GroundUV0,
+			GroundVertexColors,
+			GroundTangents,
+			false);
 	}
 
-	if (IsValid(InMaterial))
+	SightDebugMesh->SetVisibility(true);
+	SightDebugMesh->SetHiddenInGame(false);
+	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	if (SightDebugMaterial)
 	{
-		SightDebugMesh->SetMaterial(0, InMaterial);
-		if (GroundVertices.Num() > 0 && GroundTriangles.Num() > 0)
+		SightDebugMesh->SetMaterial(0, SightDebugMaterial);
+		if (bHasGroundOverlay)
 		{
-			SightDebugMesh->SetMaterial(1, InMaterial);
+			SightDebugMesh->SetMaterial(1, SightDebugMaterial);
 		}
 	}
 
-	SightDebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	SightDebugMesh->SetVisibility(true);
-	SightDebugMesh->SetHiddenInGame(false);
 }
-
 
 void AGuardCharacter::BeginPlay()
 {
@@ -347,6 +707,7 @@ void AGuardCharacter::BeginPlay()
 		}
 	}
 	SetHeadGaugeUpdateInterval(0.1f);
+	UpdateLocalSightDebugTimer();
 
 	UpdatePerceptionWidgets();
 
