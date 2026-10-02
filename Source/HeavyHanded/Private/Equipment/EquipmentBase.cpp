@@ -73,6 +73,17 @@ void AEquipmentBase::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
+	// ALootBase·AHandCart 가 같은 호출을 하고 있고 **장비만 빠져 있었다** —
+	// UE 5.4 에는 전역 ini 키가 없어서 물리 액터마다 직접 불러야 한다.
+	//
+	// 없으면 이렇게 어긋난다: 던질 때 ApplyCarryState 가 모든 머신에서 물리를 켜는데
+	// 발사 임펄스(HHThrow::Launch)는 서버에서만 돈다. 클라이언트 사본은 추진력 없이
+	// 제자리에 떨어지고, 보정이 없으니 그대로 남는다 — 2026-10-02 측정으로 4.75m 차이였다.
+	//
+	// (토글은 ALootBase 의 hh.Loot.PhysicsRepMode 에 있다. 그쪽은 노획물 전용이다)
+	SetPhysicsReplicationMode(EPhysicsReplicationMode::PredictiveInterpolation);
+
 	if (HasAuthority())
 	{
 		// 태그가 없으면 산 물건과 스폰된 물건을 이을 수 없다. 조용히 두면
