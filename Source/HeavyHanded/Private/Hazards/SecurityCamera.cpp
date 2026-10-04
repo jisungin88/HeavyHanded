@@ -391,7 +391,8 @@ void ASecurityCamera::StartAlarmSound()
 		return;
 	}
 
-	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation());
+	AlarmAudioComponent = UGameplayStatics::SpawnSoundAtLocation(World, AlarmSound, GetActorLocation(),
+		FRotator::ZeroRotator, AlarmVolumeMultiplier);
 }
 
 void ASecurityCamera::StopAlarmSound()

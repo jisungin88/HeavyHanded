@@ -185,6 +185,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
 	TObjectPtr<USoundBase> AlarmSound;
 
+	// 플레이테스트 피드백: 포착 즉시 울리는 경보음이 원본 볼륨 그대로는 너무 크다 — 1/3로 낮춘다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AlarmVolumeMultiplier = 0.333f;
+
 private:
 	/** 현재 서버 시각 기준으로 CameraBase 가 있어야 할 요(Yaw) 오프셋을 계산한다. 모든 머신에서 같은 값이 나온다 */
 	float ComputeSweepYawOffset() const;
