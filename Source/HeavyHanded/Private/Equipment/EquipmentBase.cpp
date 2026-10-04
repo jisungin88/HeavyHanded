@@ -73,6 +73,17 @@ void AEquipmentBase::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 클라이언트는 예측하지 않고 서버 스냅샷을 향해 속도 보간만 한다.
+	// ALootBase·AHandCart 가 같은 호출을 하고 있고 **장비만 빠져 있었다** —
+	// UE 5.4 에는 전역 ini 키가 없어서 물리 액터마다 직접 불러야 한다.
+	//
+	// 없으면 이렇게 어긋난다: 던질 때 ApplyCarryState 가 모든 머신에서 물리를 켜는데
+	// 발사 임펄스(HHThrow::Launch)는 서버에서만 돈다. 클라이언트 사본은 추진력 없이
+	// 제자리에 떨어지고, 보정이 없으니 그대로 남는다 — 2026-10-02 측정으로 4.75m 차이였다.
+	//
+	// (토글은 ALootBase 의 hh.Loot.PhysicsRepMode 에 있다. 그쪽은 노획물 전용이다)
+	SetPhysicsReplicationMode(EPhysicsReplicationMode::PredictiveInterpolation);
+
 	if (HasAuthority())
 	{
 		// 태그가 없으면 산 물건과 스폰된 물건을 이을 수 없다. 조용히 두면
@@ -488,6 +499,30 @@ void AEquipmentBase::FinishEffectEarly()
 	Finish();
 }
 
+void AEquipmentBase::Multicast_SpentEffect_Implementation(FVector_NetQuantize Location)
+{
+	UWorld* World = GetWorld();
+
+	// 데디케이티드 서버는 화면도 스피커도 없다 (ApplyStateEffects 와 같은 사유)
+	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 액터에 붙이지 않는다. 붙였다가는 SpentDestroyDelay 뒤에 함께 사라진다.
+	if (IsValid(SpentEffect))
+	{
+		ConfigureEffect(UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, SpentEffect,
+			Location, GetActorRotation(), FVector(1.f), /*bAutoDestroy=*/true),
+			EEquipmentState::Spent);
+	}
+
+	if (IsValid(SpentSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(World, SpentSound, Location);
+	}
+}
+
 void AEquipmentBase::Finish()
 {
 	if (!HasAuthority() || State != EEquipmentState::Active)
@@ -506,6 +541,10 @@ void AEquipmentBase::Finish()
 	{
 		return;
 	}
+
+	// 끝나는 연출은 지금 전원에게 보낸다. 위치를 실어 보내는 것이 핵심이다 —
+	// 클라이언트의 이 액터는 서버보다 뒤처져 있어서, 각자 자기 위치에 띄우면 어긋난다.
+	Multicast_SpentEffect(GetActorLocation());
 
 	// 바로 Destroy 하면 액터가 복제보다 먼저 사라져 클라이언트에서는 연출 없이 증발한다.
 	if (SpentDestroyDelay > 0.f)
@@ -627,9 +666,9 @@ void AEquipmentBase::ApplyStateEffects(EEquipmentState OldState)
 	case EEquipmentState::Deployed:
 		if (IsValid(DeployEffect))
 		{
-			UNiagaraFunctionLibrary::SpawnSystemAttached(DeployEffect, EquipmentMesh, NAME_None,
-				FVector::ZeroVector, FRotator::ZeroRotator,
-				EAttachLocation::SnapToTarget, /*bAutoDestroy=*/true);
+			ConfigureEffect(UNiagaraFunctionLibrary::SpawnSystemAttached(DeployEffect, EquipmentMesh,
+				NAME_None, FVector::ZeroVector, FRotator::ZeroRotator,
+				EAttachLocation::SnapToTarget, /*bAutoDestroy=*/true), State);
 		}
 		if (IsValid(DeploySound))
 		{
@@ -656,6 +695,7 @@ void AEquipmentBase::ApplyStateEffects(EEquipmentState OldState)
 				ActiveEffect, EquipmentMesh, NAME_None,
 				FVector::ZeroVector, FRotator::ZeroRotator,
 				EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
+			ConfigureEffect(ActiveEffectComponent, State);
 		}
 		break;
 
@@ -671,17 +711,9 @@ void AEquipmentBase::ApplyStateEffects(EEquipmentState OldState)
 		}
 
 
-		// 액터는 곧 사라지므로 붙이지 않고 월드에 스폰한다.
-		// 붙였다가는 SpentDestroyDelay 뒤에 폭발 이펙트가 함께 사라진다.
-		if (IsValid(SpentEffect))
-		{
-			UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, SpentEffect,
-				GetActorLocation(), GetActorRotation(), FVector(1.f), /*bAutoDestroy=*/true);
-		}
-		if (IsValid(SpentSound))
-		{
-			UGameplayStatics::PlaySoundAtLocation(World, SpentSound, GetActorLocation());
-		}
+		// 끝나는 순간의 연출은 여기서 띄우지 않는다 — Finish() 가 Multicast 로 내려보낸다.
+		// 이 액터는 곧 자기를 파괴해서, 상태 복제를 기다리면 클라이언트가 놓친다
+		// (Multicast_SpentEffect 주석에 측정값과 함께 적어 두었다).
 		break;
 
 	default:

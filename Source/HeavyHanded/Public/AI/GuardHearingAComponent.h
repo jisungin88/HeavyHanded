@@ -80,7 +80,7 @@ private:
 	// 무소음 타이머의 남은 시간을 1초마다 디버그 출력한다.
 	FTimerHandle WorldAlertSilenceDebugTimerHandle;
 
-	bool bDrawHearingDebug = true;
+	bool bDrawHearingDebug = false;
 
 
 	UPROPERTY()

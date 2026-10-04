@@ -71,6 +71,30 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/**
+	 * 이 구역이 담당하는 진입점(Entry.*). 플레이어가 그곳으로 들어왔을 때만 스폰한다.
+	 *
+	 * [왜 구역을 진입점마다 두는가]
+	 *   저택의 세 진입점은 성격이 다르다 — 정문은 노출이 심하고, 뒷골목은 통로가 좁고,
+	 *   지하 주차장은 동선이 길다. 장비를 쌓아 둘 자리도 그에 맞게 달라야 해서,
+	 *   구역 하나가 확정된 진입점을 찾아가는 방식보다 **각 자리에 하나씩 놓는 편**이 낫다.
+	 *   진입점 바로 앞이 벽이나 계단인 경우를 코드가 알 방법이 없다.
+	 *
+	 * **비워 두면 진입점과 무관하게 항상 스폰한다.** 진입점이 없는 레벨과,
+	 * 구역을 하나만 두던 기존 배치가 그대로 동작하라고 그렇게 두었다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Equipment|Spawn")
+	FGameplayTag EntryTag;
+
+	/**
+	 * 이 구역이 이번 판의 진입점을 담당하는가. (서버 전용)
+	 *
+	 * 게임모드의 폴백과 판단을 맞춘다 — 고른 진입점이 이 레벨에 없으면 게임모드는
+	 * 기본/첫 번째 진입점으로 떨어뜨리는데, 구역이 '고른 값' 만 보면 플레이어는 1번에서
+	 * 시작했는데 장비는 아무 데도 안 나오는 상태가 된다.
+	 */
+	bool IsEntryMatched() const;
+
 	/** 액터의 기준점. 앵커를 하나도 지정하지 않았을 때 이 위치에 원형으로 놓는다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment|Spawn")
 	TObjectPtr<USceneComponent> ZoneRoot;

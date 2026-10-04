@@ -20,6 +20,5 @@ EBTNodeResult::Type UBTTask_SelectNextPatrolPoint::ExecuteTask(UBehaviorTreeComp
 	}
 
 	//GuardController->SelectNextPatrolPoint();
-	GuardController->SelectNextAction(EGuardAIState::Patrol);
-	return EBTNodeResult::Succeeded;
+	return GuardController->SelectNextAction(EGuardAIState::Patrol) ? EBTNodeResult::Succeeded : EBTNodeResult::Failed;
 }

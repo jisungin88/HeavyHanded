@@ -1,13 +1,19 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "AI/GuardPatrolAComponent.h"
 #include "AI/GuardAIController.h"
 #include "AI/GuardBlackboardKeys.h"
 
 #include "Character/GuardCharacter.h"
+#include "Components/CapsuleComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "NavigationPath.h"
+#include "NavFilters/NavigationQueryFilter.h"
 #include "EngineUtils.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "AITypes.h"
 
 
@@ -25,155 +31,202 @@ void UGuardPatrolAComponent::SetPatrolStats(float InArrivalRadius, int32 InSweep
 	SearchSweepRadius = InSweepRadius;
 }
 
-
-void UGuardPatrolAComponent::SelectNextPatrolPoint2()
+float UGuardPatrolAComponent::GetEffectiveSearchSweepRadius() const
 {
-	//const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(GetPawn());
-	//UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	return IsValid(Controller) && Controller->IsWorldAlarmActive() ? SearchSweepRadius * FMath::Max(1.f, AlarmSearchRadiusMultiplier) : SearchSweepRadius;
+}
 
 
+bool UGuardPatrolAComponent::SelectNextPatrolPoint2()
+{
 	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
-	if (!IsValid(Controller))
+	if (!IsValid(Controller) || !Controller->HasAuthority())
 	{
-		return;
+		return false;
 	}
 
 	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(Controller->GetPawn());
 	UBlackboardComponent* BlackboardComp = Controller->GetBlackboardComponent();
-
-
-
-	if (!IsValid(GuardPawn))
+	if (!IsValid(GuardPawn) || !IsValid(BlackboardComp))
 	{
-		// 수정 필요
-		// UE_LOG(LogGuardAI, Warning,
-		// 	TEXT("[%s] AGuardCharacter 가 아니라 순찰 지점을 읽을 수 없다 (현재 폰: %s)."),
-		// 	*GetName(), *GetNameSafe(GetPawn()));
-		return;
-	}
-
-	if (!IsValid(BlackboardComp))
-	{
-		// 수정 필요
-		// UE_LOG(LogGuardAI, Warning, TEXT("[%s] Blackboard 가 없어 PatrolLocation 을 쓸 수 없다."), *GetName());
-		return;
+		return false;
 	}
 
 	const int32 PointCount = GuardPawn->GetPatrolPointCount();
-	if (PointCount == 0)
+	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	if (PointCount <= 0 || !IsValid(NavSys))
 	{
-		// 수정 필요
-		//UE_LOG(LogGuardAI, Warning,
-		//	TEXT("[%s] PatrolPoints 가 비어 있다. EditInstanceOnly 라 레벨에 '배치된' 액터에만 값이 붙는다 "
-		//		"— 스폰된 경비라면 여기서 항상 비어 있다."),
-		//	*GetNameSafe(GuardPawn));
-		return;
+		DisplayPatrolFailure(TEXT("순찰 지점 또는 NavigationSystem이 없어 순찰 지점을 선택할 수 없습니다."));
+		BlackboardComp->ClearValue(GuardAIKeys::PatrolLocation);
+		return false;
 	}
 
-	// 아직 현재 목표에 도착하지 않았다면 지점을 넘기지 않는다.
-	//
-	// 이 함수는 순찰 브랜치에 진입할 때마다 호출되는데, 시야 획득으로 순찰이
-	// abort 되고 상실 후 재개되는 것도 "새 진입"이다. 진입마다 전진시키면A
-	// 경비가 플레이어를 한 번 볼 때마다 순찰 지점을 하나씩 건너뛴다.
-	if (CurrentPatrolIndex >= 0)
+	const ANavigationData* NavData = NavSys->GetNavDataForProps(Controller->GetNavAgentPropertiesRef(), Controller->GetNavAgentLocation());
+	if (!IsValid(NavData))
 	{
-		FVector CurrentTarget;
-		if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, CurrentTarget))
+		DisplayPatrolFailure(TEXT("경비에 맞는 NavMesh가 없어 순찰 지점을 선택할 수 없습니다."));
+		BlackboardComp->ClearValue(GuardAIKeys::PatrolLocation);
+		return false;
+	}
+
+	const auto FindReachableLocation = [&](int32 Index, FVector& OutLocation)
+	{
+		FVector PointLocation;
+		if (!GuardPawn->GetPatrolLocation(Index, PointLocation))
 		{
-			// Z 는 무시한다 - 지점 액터가 바닥에서 떠 있어도 도착 판정이 되도록.
-			const float DistToCurrent = FVector::Dist2D(GuardPawn->GetActorLocation(), CurrentTarget);
-			if (DistToCurrent > PatrolArrivalRadius)
-			{
-				// 가던 길을 계속 간다. Blackboard 값은 다시 써준다 —
-				// 조사 브랜치를 거치는 동안 다른 값으로 덮였을 수 있다.
-				BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, CurrentTarget);
-				return;
-			}
+			DisplayPatrolFailure(FString::Printf(TEXT("순찰 지점 %d 위치가 유효하지 않음 → 다음 지점 탐색"), Index));
+			return false;
+		}
+
+		FNavLocation ProjectedLocation;
+		if (!NavSys->ProjectPointToNavigation(PointLocation, ProjectedLocation, NavData->GetDefaultQueryExtent(), NavData))
+		{
+			DisplayPatrolFailure(FString::Printf(TEXT("순찰 지점 %d NavMesh 밖 → 다음 지점 탐색"), Index));
+			return false;
+		}
+
+		const FSharedConstNavQueryFilter Filter = UNavigationQueryFilter::GetQueryFilter(*NavData, Controller, Controller->GetDefaultNavigationFilterClass());
+		FPathFindingQuery Query(Controller, *NavData, Controller->GetNavAgentLocation(), ProjectedLocation.Location, Filter);
+		Query.SetAllowPartialPaths(false);
+		const FPathFindingResult Result = NavSys->FindPathSync(Controller->GetNavAgentPropertiesRef(), Query);
+		if (!Result.IsSuccessful() || !Result.Path.IsValid() || Result.Path->IsPartial())
+		{
+			DisplayPatrolFailure(FString::Printf(TEXT("순찰 지점 %d 도달 불가 → 다음 지점 탐색"), Index));
+			return false;
+		}
+
+		OutLocation = ProjectedLocation.Location;
+		return true;
+	};
+
+	// 추격으로 중단된 경우에는 도달 가능한 기존 순찰 지점을 유지한다.
+	FVector CurrentLocation;
+	if (!bSkipCurrentPatrolPoint && CurrentPatrolIndex >= 0 && CurrentPatrolIndex < PointCount && FindReachableLocation(CurrentPatrolIndex, CurrentLocation))
+	{
+		if (FVector::Dist2D(GuardPawn->GetActorLocation(), CurrentLocation) > PatrolArrivalRadius)
+		{
+			BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, CurrentLocation);
+			return true;
 		}
 	}
+	const int32 FailedIndex = bSkipCurrentPatrolPoint ? CurrentPatrolIndex : INDEX_NONE;
+	bSkipCurrentPatrolPoint = false;
 
-	// 첫 호출(-1). 근처에 다른 경비가 있으면 그 경비에게서 가장 먼 지점에서, 없으면 0번에서 시작.
-	if (CurrentPatrolIndex < 0)
+	TArray<int32> Candidates;
+	TArray<bool> CandidateDirections;
+	if (CurrentPatrolIndex < 0 || CurrentPatrolIndex >= PointCount)
 	{
-		// 수정필요(함수명)
 		CurrentPatrolIndex = SelectInitialPatrolIndex2(GuardPawn);
+		Candidates.Add(CurrentPatrolIndex);
+		CandidateDirections.Add(bPatrolMovingForward);
 	}
-	else if (PointCount == 1)
+
+	if (GuardPawn->PatrolPattern == EPatrolPattern::Random)
 	{
-		CurrentPatrolIndex = 0;
+		TArray<int32> RemainingIndices;
+		for (int32 Index = 0; Index < PointCount; ++Index)
+		{
+			if (Index != CurrentPatrolIndex)
+			{
+				RemainingIndices.Add(Index);
+			}
+		}
+		while (!RemainingIndices.IsEmpty())
+		{
+			const int32 RandomIndex = FMath::RandRange(0, RemainingIndices.Num() - 1);
+			Candidates.Add(RemainingIndices[RandomIndex]);
+			CandidateDirections.Add(bPatrolMovingForward);
+			RemainingIndices.RemoveAtSwap(RandomIndex);
+		}
+		if (!Candidates.Contains(CurrentPatrolIndex))
+		{
+			Candidates.Add(CurrentPatrolIndex);
+			CandidateDirections.Add(bPatrolMovingForward);
+		}
 	}
 	else
 	{
-		switch (GuardPawn->PatrolPattern)
+		// 왕복은 반대편 끝까지 검사해야 하므로 최대 두 배의 인덱스를 진행한다.
+		const int32 MaxSteps = GuardPawn->PatrolPattern == EPatrolPattern::PingPong ? PointCount * 2 : PointCount;
+		for (int32 Step = 0; Step < MaxSteps; ++Step)
 		{
-		case EPatrolPattern::Loop:
-			CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PointCount;
-			break;
-
-		case EPatrolPattern::PingPong:
-			if (bPatrolMovingForward)
+			if (PointCount == 1)
 			{
-				CurrentPatrolIndex++;
-				if (CurrentPatrolIndex >= PointCount - 1)
+				CurrentPatrolIndex = 0;
+			}
+			else if (GuardPawn->PatrolPattern == EPatrolPattern::PingPong)
+			{
+				if (CurrentPatrolIndex == PointCount - 1)
 				{
-					CurrentPatrolIndex = PointCount - 1;
-					bPatrolMovingForward = false; // 끝에 도달 -> 역방향으로 전환
+					bPatrolMovingForward = false;
 				}
+				else if (CurrentPatrolIndex == 0)
+				{
+					bPatrolMovingForward = true;
+				}
+				CurrentPatrolIndex += bPatrolMovingForward ? 1 : -1;
 			}
 			else
 			{
-				CurrentPatrolIndex--;
-				if (CurrentPatrolIndex <= 0)
-				{
-					CurrentPatrolIndex = 0;
-					bPatrolMovingForward = true; // 처음으로 복귀 -> 정방향으로 전환
-				}
+				CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PointCount;
 			}
-			break;
-
-		case EPatrolPattern::Random:
-		{
-			// 직전 지점을 제외하고 뽑아서, 같은 자리에 멈춰있는 것처럼 보이는 걸 방지.
-			int32 NextIndex = CurrentPatrolIndex;
-			while (NextIndex == CurrentPatrolIndex)
+			if (!Candidates.Contains(CurrentPatrolIndex))
 			{
-				NextIndex = FMath::RandRange(0, PointCount - 1);
+				Candidates.Add(CurrentPatrolIndex);
+				CandidateDirections.Add(bPatrolMovingForward);
 			}
-			CurrentPatrolIndex = NextIndex;
-		}
-		break;
 		}
 	}
 
-	FVector NextLocation;
-	if (GuardPawn->GetPatrolLocation(CurrentPatrolIndex, NextLocation))
+	for (int32 Index : Candidates)
 	{
+		if (Index == FailedIndex)
+		{
+			continue;
+		}
+		FVector NextLocation;
+		if (!FindReachableLocation(Index, NextLocation))
+		{
+			continue;
+		}
+		CurrentPatrolIndex = Index;
+		if (GuardPawn->PatrolPattern == EPatrolPattern::PingPong)
+		{
+			bPatrolMovingForward = CandidateDirections[Candidates.IndexOfByKey(Index)];
+		}
 		BlackboardComp->SetValueAsVector(GuardAIKeys::PatrolLocation, NextLocation);
-
-		// 정상 동작이면 순찰 지점에 도착할 때마다 한 번씩만 찍힌다.
-		// 호출 간격(dt)이 프레임 단위이고 폰이 제자리면 브랜치가 abort/restart 를
-		// 반복하는 것이고, dt 가 수 초 단위면 실제로 걸어서 도착하고 있는 것이다.
-		const float Now = GetWorld()->GetTimeSeconds();
-		const float DeltaSinceLast = (LastPatrolSelectTime < 0.f) ? -1.f : (Now - LastPatrolSelectTime);
-		LastPatrolSelectTime = Now;
-
-		const FVector PawnLocation = GuardPawn->GetActorLocation();
-
-		// UE_LOG(LogGuardAI, Log,
-		// 	TEXT("[%s] 순찰 지점 %d 선택: %s | dt=%.3fs | 폰 위치 %s | 남은 거리 %.0f"),
-		// 	*GetNameSafe(GuardPawn), CurrentPatrolIndex, *NextLocation.ToCompactString(),
-		// 	DeltaSinceLast, *PawnLocation.ToCompactString(),
-		// 	FVector::Dist(PawnLocation, NextLocation));
+		LastPatrolSelectTime = GetWorld()->GetTimeSeconds();
+		return true;
 	}
-	else
+
+	BlackboardComp->ClearValue(GuardAIKeys::PatrolLocation);
+	UE_LOG(LogGuardAI, Warning, TEXT("[%s] 도달 가능한 순찰 지점이 없습니다."), *GetNameSafe(GuardPawn));
+	DisplayPatrolFailure(TEXT("도달 가능한 순찰 지점이 없습니다."));
+	return false;
+}
+
+void UGuardPatrolAComponent::SkipCurrentPatrolPoint()
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (IsValid(Controller) && Controller->HasAuthority())
 	{
-		// 수정 필요
-		//UE_LOG(LogGuardAI, Warning,
-		//	TEXT("[%s] 순찰 지점 %d 의 위치를 얻지 못했다 (배열 항목이 비어 있는지 확인)."),
-		//	*GetNameSafe(GuardPawn), CurrentPatrolIndex);
+		bSkipCurrentPatrolPoint = true;
+		DisplayPatrolFailure(FString::Printf(TEXT("순찰 지점 %d 이동 실패 → 다음 지점 탐색"), CurrentPatrolIndex));
 	}
 }
 
+void UGuardPatrolAComponent::DisplayPatrolFailure(const FString& Message) const
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(GEngine))
+	{
+		return;
+	}
+
+	// 경비별 고정 키를 사용해 반복 실패 메시지가 화면에 계속 쌓이지 않도록 한다.
+	GEngine->AddOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()), 5.0f, FColor::Red, FString::Printf(TEXT("[%s] %s"), *GetNameSafe(Controller->GetPawn()), *Message));
+}
 
 int32 UGuardPatrolAComponent::SelectInitialPatrolIndex2(const AGuardCharacter* GuardPawn)
 {
@@ -233,13 +286,292 @@ int32 UGuardPatrolAComponent::SelectInitialPatrolIndex2(const AGuardCharacter* G
 	return StartIndex;
 }
 
+void UGuardPatrolAComponent::UpdateLastChaseDirection(const FVector& TargetLocation)
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(Controller->GetPawn()))
+	{
+		return;
+	}
+	const FVector Direction = (TargetLocation - Controller->GetPawn()->GetActorLocation()).GetSafeNormal2D();
+	if (!Direction.IsNearlyZero())
+	{
+		LastChaseDirection = Direction;
+	}
+}
+
+void UGuardPatrolAComponent::ResetSearchSession(float SessionStart)
+{
+	if (!FMath::IsNearlyEqual(SessionStart, HandledSearchStartTime))
+	{
+		HandledSearchStartTime = SessionStart;
+		CurrentSearchStep = 0;
+		FailedSearchLocations.Reset();
+		ConsecutiveQuickFailures = 0;
+		bSearchExtensionGranted = false;
+		bPendingSearchCompletion = false;
+		LastSearchAttemptTime = -1.f;
+		LastSearchAttemptInterval = TNumericLimits<float>::Max();
+		LastAlarmSearchRecoveryTime = -1.f;
+	}
+}
+
+void UGuardPatrolAComponent::ConfigureSearchRetryPolicy(float SessionStart, float Timeout, float QuickThreshold, float Extension)
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority())
+	{
+		return;
+	}
+	ResetSearchSession(SessionStart);
+	RetryPolicySessionStart = SessionStart;
+	SearchTimeout = FMath::Max(0.f, Timeout);
+	QuickRetryThreshold = FMath::Max(0.f, QuickThreshold);
+	QuickRetryExtension = FMath::Max(0.f, Extension);
+}
+
+bool UGuardPatrolAComponent::IsSearchTimeRemaining(float SessionStart, float FallbackTimeout)
+{
+	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(GetWorld()) || SessionStart < 0.f)
+	{
+		return false;
+	}
+	// 경보의 무제한 수색만 허용한다. LastSeenTime 추격 유예 판정은 이 함수를 사용하지 않는다.
+	if (Controller->IsWorldAlarmActive())
+	{
+		return true;
+	}
+	const float Elapsed = GetWorld()->GetTimeSeconds() - SessionStart;
+	if (!FMath::IsNearlyEqual(SessionStart, RetryPolicySessionStart))
+	{
+		return Elapsed < FallbackTimeout;
+	}
+	if (Elapsed >= SearchTimeout && !bSearchExtensionGranted && ConsecutiveQuickFailures >= 2 && QuickRetryExtension > 0.f)
+	{
+		bSearchExtensionGranted = true;
+		Controller->LogSearchTransitionDebug(TEXT("SearchRetryExtension"), FString::Printf(TEXT("빠른 실패 %d회 연속: 수색 제한에 %.1f초 추가(이번 수색 1회만)"), ConsecutiveQuickFailures, QuickRetryExtension));
+	}
+	return Elapsed < SearchTimeout + (bSearchExtensionGranted ? QuickRetryExtension : 0.f);
+}
+
+bool UGuardPatrolAComponent::IsSearchSweepExhausted() const
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	return CurrentSearchStep > SearchSweepCount && !(IsValid(Controller) && Controller->IsWorldAlarmActive());
+}
+
+void UGuardPatrolAComponent::BeginSearchAttempt()
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !IsValid(GetWorld()))
+	{
+		return;
+	}
+	const float Now = GetWorld()->GetTimeSeconds();
+	LastSearchAttemptInterval = LastSearchAttemptTime >= 0.f ? Now - LastSearchAttemptTime : TNumericLimits<float>::Max();
+	LastSearchAttemptTime = Now;
+}
+
+void UGuardPatrolAComponent::ObserveSearchAttemptDuration(float AttemptDuration)
+{
+	const AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (IsValid(Controller) && Controller->HasAuthority() && AttemptDuration >= QuickRetryThreshold)
+	{
+		ConsecutiveQuickFailures = 0;
+	}
+}
+
+void UGuardPatrolAComponent::ReportSearchAttempt(bool bSucceeded, float AttemptDuration, const FVector& Goal)
+{
+	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority())
+	{
+		return;
+	}
+	if (bSucceeded)
+	{
+		ConsecutiveQuickFailures = 0;
+		// 다음 선택은 BT의 도착 후 Wait가 끝난 뒤 호출된다. 그때 횟수를 확정한다.
+		bPendingSearchCompletion = true;
+		return;
+	}
+	bPendingSearchCompletion = false;
+	const bool bAlarm = Controller->IsWorldAlarmActive();
+	ConsecutiveQuickFailures = !bAlarm && AttemptDuration < QuickRetryThreshold && LastSearchAttemptInterval < QuickRetryThreshold ? ConsecutiveQuickFailures + 1 : 0;
+	if (FAISystem::IsValidLocation(Goal))
+	{
+		// 경보 수색은 끝나지 않으므로 실패 이력을 무한히 쌓지 않는다.
+		constexpr int32 MaxAlarmFailedLocations = 32;
+		if (bAlarm && FailedSearchLocations.Num() >= MaxAlarmFailedLocations)
+		{
+			FailedSearchLocations.RemoveAt(0, FailedSearchLocations.Num() - MaxAlarmFailedLocations + 1);
+		}
+		FailedSearchLocations.Add(Goal);
+	}
+	Controller->LogSearchTransitionDebug(TEXT("SearchRetryFailed"), FString::Printf(TEXT("수색 실패: 소요=%.2f초 재시도간격=%.2f초 빠른실패=%d회 완료횟수 유지"), AttemptDuration, LastSearchAttemptInterval == TNumericLimits<float>::Max() ? -1.f : LastSearchAttemptInterval, ConsecutiveQuickFailures));
+}
+
+bool UGuardPatrolAComponent::FindReachableSearchLocation(const FVector& DesiredLocation, FVector& OutLocation, bool bPreferExactLocation)
+{
+	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
+	if (!IsValid(Controller) || !Controller->HasAuthority() || !FAISystem::IsValidLocation(DesiredLocation))
+	{
+		return false;
+	}
+
+	const AGuardCharacter* GuardPawn = Cast<AGuardCharacter>(Controller->GetPawn());
+	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	if (!IsValid(GuardPawn) || !IsValid(NavSys))
+	{
+		Controller->LogSearchTransitionDebug(TEXT("SearchNavigationMissing"), TEXT("경비 Pawn 또는 NavigationSystem 없음"));
+		return false;
+	}
+
+	ANavigationData* NavData = NavSys->GetNavDataForProps(Controller->GetNavAgentPropertiesRef(), Controller->GetNavAgentLocation());
+	if (!IsValid(NavData))
+	{
+		Controller->LogSearchTransitionDebug(TEXT("SearchNavigationMissing"), TEXT("경비에 맞는 NavMesh 없음"));
+		return false;
+	}
+
+	const FSharedConstNavQueryFilter Filter = UNavigationQueryFilter::GetQueryFilter(*NavData, Controller, Controller->GetDefaultNavigationFilterClass());
+	const float EffectiveSearchRadius = GetEffectiveSearchSweepRadius();
+	const auto HasCompletePath = [&](const FVector& Location)
+	{
+		if (FailedSearchLocations.ContainsByPredicate([&](const FVector& Failed) { return FVector::DistSquared2D(Failed, Location) < FMath::Square(120.f); }))
+		{
+			return false;
+		}
+		FPathFindingQuery Query(Controller, *NavData, Controller->GetNavAgentLocation(), Location, Filter);
+		Query.SetAllowPartialPaths(false);
+		const FPathFindingResult Result = NavSys->FindPathSync(Controller->GetNavAgentPropertiesRef(), Query);
+		return Result.IsSuccessful() && Result.Path.IsValid() && !Result.Path->IsPartial();
+	};
+
+	// 목격 좌표는 캐릭터 중심 높이일 수 있으므로 캡슐 높이까지 바닥 보정을 허용한다.
+	FVector ProjectionExtent = NavData->GetDefaultQueryExtent();
+	const UCapsuleComponent* Capsule = GuardPawn->GetCapsuleComponent();
+	if (IsValid(Capsule))
+	{
+		ProjectionExtent.Z = FMath::Max(ProjectionExtent.Z, static_cast<FVector::FReal>(Capsule->GetScaledCapsuleHalfHeight() * 2.0f));
+	}
+	FNavLocation ProjectedLocation;
+	const bool bProjected = NavSys->ProjectPointToNavigation(DesiredLocation, ProjectedLocation, ProjectionExtent, NavData, Filter);
+	if (bPreferExactLocation && bProjected && HasCompletePath(ProjectedLocation.Location))
+	{
+		OutLocation = ProjectedLocation.Location;
+		if (!OutLocation.Equals(DesiredLocation, 1.0f))
+		{
+			Controller->LogSearchTransitionDebug(TEXT("SearchGoalProjected"), FString::Printf(TEXT("NavMesh 보정: Original=%s Goal=%s"), *DesiredLocation.ToCompactString(), *OutLocation.ToCompactString()));
+		}
+		return true;
+	}
+
+	// 후보가 NavMesh 위에 있어도 경비와 다른 섬일 수 있으므로 경비 출발점에서 다시 검사한다.
+	const FVector Anchor = bProjected ? ProjectedLocation.Location : DesiredLocation;
+	const FVector GuardLocation = Controller->GetNavAgentLocation();
+	FVector SearchDirection = LastChaseDirection;
+	if (SearchDirection.IsNearlyZero())
+	{
+		SearchDirection = (Anchor - GuardLocation).GetSafeNormal2D();
+		if (SearchDirection.IsNearlyZero())
+		{
+			SearchDirection = GuardPawn->GetActorForwardVector().GetSafeNormal2D();
+		}
+	}
+
+	TArray<FVector> Candidates;
+	const auto AddCandidate = [&](const FVector& Location)
+	{
+		if (FVector::DistSquared2D(GuardLocation, Location) < FMath::Square(100.f))
+		{
+			return;
+		}
+		if (!Candidates.ContainsByPredicate([&](const FVector& Existing) { return Existing.Equals(Location, 10.0f); }))
+		{
+			Candidates.Add(Location);
+		}
+	};
+	// 무작위 표본에 전방 후보가 빠지는 것을 막기 위해 방향별 후보를 먼저 만든다.
+	constexpr float Angles[] = { 0.0f, 45.0f, -45.0f, 90.0f, -90.0f, 135.0f, -135.0f, 180.0f };
+	constexpr float RadiusScales[] = { 0.35f, 0.7f };
+	for (float RadiusScale : RadiusScales)
+	{
+		for (float Angle : Angles)
+		{
+			const FVector Seed = Anchor + SearchDirection.RotateAngleAxis(Angle, FVector::UpVector) * EffectiveSearchRadius * RadiusScale;
+			FNavLocation Candidate;
+			if (NavSys->ProjectPointToNavigation(Seed, Candidate, ProjectionExtent, NavData, Filter) && FVector::Dist2D(Anchor, Candidate.Location) <= EffectiveSearchRadius)
+			{
+				AddCandidate(Candidate.Location);
+			}
+		}
+	}
+	constexpr int32 MaxCandidateAttempts = 8;
+	for (int32 Attempt = 0; Attempt < MaxCandidateAttempts; ++Attempt)
+	{
+		FNavLocation Candidate;
+		if (NavSys->GetRandomPointInNavigableRadius(Anchor, EffectiveSearchRadius, Candidate, NavData, Filter))
+		{
+			AddCandidate(Candidate.Location);
+		}
+	}
+
+	const auto GetDirectionPriority = [&](const FVector& Location)
+	{
+		const float Dot = FVector::DotProduct((Location - GuardLocation).GetSafeNormal2D(), SearchDirection);
+		return Dot >= 0.5f ? 0 : (Dot >= -0.5f ? 1 : 2);
+	};
+	Candidates.Sort([&](const FVector& A, const FVector& B)
+	{
+		const int32 PriorityA = GetDirectionPriority(A);
+		const int32 PriorityB = GetDirectionPriority(B);
+		return PriorityA != PriorityB ? PriorityA < PriorityB : FVector::DistSquared2D(A, Anchor) < FVector::DistSquared2D(B, Anchor);
+	});
+	for (const FVector& Candidate : Candidates)
+	{
+		if (HasCompletePath(Candidate))
+		{
+			OutLocation = Candidate;
+			const TCHAR* DirectionName = GetDirectionPriority(Candidate) == 0 ? TEXT("Forward") : (GetDirectionPriority(Candidate) == 1 ? TEXT("Side") : TEXT("Back"));
+			Controller->LogSearchTransitionDebug(TEXT("SearchAlternativeGoal"), FString::Printf(TEXT("방향 우선 대체 지점: Sector=%s Original=%s Goal=%s ChaseDirection=%s Guard=%s"), DirectionName, *DesiredLocation.ToCompactString(), *OutLocation.ToCompactString(), *SearchDirection.ToCompactString(), *GuardLocation.ToCompactString()));
+			return true;
+		}
+	}
+
+	if (Controller->IsWorldAlarmActive())
+	{
+		// 마지막 단서가 다른 NavMesh 섬에 있어도 자기 주변에서 수색을 계속한다.
+		for (int32 Attempt = 0; Attempt < MaxCandidateAttempts; ++Attempt)
+		{
+			FNavLocation Candidate;
+			if (NavSys->GetRandomReachablePointInRadius(GuardLocation, EffectiveSearchRadius, Candidate, NavData, Filter) && FVector::DistSquared2D(GuardLocation, Candidate.Location) >= FMath::Square(100.f) && HasCompletePath(Candidate.Location))
+			{
+				OutLocation = Candidate.Location;
+				Controller->LogSearchTransitionDebug(TEXT("AlarmSearchNearbyGoal"), TEXT("단서 지점 접근 불가: 경비 주변의 도달 가능한 지점으로 수색 계속"));
+				return true;
+			}
+		}
+		const float Now = GetWorld()->GetTimeSeconds();
+		if (LastAlarmSearchRecoveryTime < 0.f || Now - LastAlarmSearchRecoveryTime >= 2.f)
+		{
+			// 주변이 모두 제외된 경우 일정 간격을 두고 다시 검사한다.
+			FailedSearchLocations.Reset();
+			LastAlarmSearchRecoveryTime = Now;
+		}
+	}
+	Controller->LogSearchTransitionDebug(TEXT("SearchNoReachableGoal"), FString::Printf(TEXT("원래 지점과 주변 후보 %d개에서 완전한 경로를 찾지 못함: Original=%s Radius=%.1f"), Candidates.Num(), *DesiredLocation.ToCompactString(), EffectiveSearchRadius));
+	return false;
+}
+
 bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 {
 	//UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
 	//const APawn* GuardPawn = GetPawn();
 
 	AGuardAIController* Controller = Cast<AGuardAIController>(GetOwner());
-	if (!IsValid(Controller))
+	if (!IsValid(Controller) || !Controller->HasAuthority())
 	{
 		return false;
 	}
@@ -265,6 +597,7 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 	const FVector SearchAnchor = BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation);
 	if (!FAISystem::IsValidLocation(SearchAnchor))
 	{
+		Controller->LogSearchTransitionDebug(TEXT("SearchSelectFailed"), TEXT("조사 위치가 유효하지 않음"));
 		UE_LOG(LogGuardAI, Warning,
 			TEXT("[%s] 조사 지점이 없어 수색을 시작할 수 없다."), *GetNameSafe(GuardPawn));
 		return false;
@@ -272,28 +605,39 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 
 	// SearchStartTime 이 바뀌었으면 새 조사다. 훑기 진행도를 초기화한다.
 	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
-	if (!FMath::IsNearlyEqual(SearchStartTime, HandledSearchStartTime))
+	ResetSearchSession(SearchStartTime);
+	if (bPendingSearchCompletion)
 	{
-		HandledSearchStartTime = SearchStartTime;
-		CurrentSearchStep = -1;
+		++CurrentSearchStep;
+		bPendingSearchCompletion = false;
 	}
-
-	++CurrentSearchStep;
+	const bool bAlarm = Controller->IsWorldAlarmActive();
+	if (bAlarm && CurrentSearchStep > FMath::Max(1, SearchSweepCount))
+	{
+		// 세션 시각을 다시 쓰지 않고 현재 지점 주변에서 다음 훑기 묶음을 시작한다.
+		CurrentSearchStep = 1;
+		FailedSearchLocations.Reset();
+		Controller->LogSearchTransitionDebug(TEXT("AlarmSearchRepeat"), TEXT("경보 중 훑기 완료: 주변 수색 반복"));
+	}
 
 	// 0번째는 조사 지점 자체(마지막 목격 지점 또는 소리 지점). 여기부터 확인하는 게 자연스럽다.
 	if (CurrentSearchStep == 0)
 	{
-		// 이미 InvestigateLocation에 들어있는 값과 같지만, Blackboard 갱신 시점을
-		// 명시적으로 남겨 다른 리스너(위젯 등)가 "조사 0단계 진입"을 관찰할 수 있게 한다.
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SearchAnchor);
+		FVector ReachableLocation;
+		if (!FindReachableSearchLocation(SearchAnchor, ReachableLocation))
+		{
+			return false;
+		}
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, ReachableLocation);
 
 		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 시작 - 조사 지점 %s"),
-			*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString());
+			*GetNameSafe(GuardPawn), *ReachableLocation.ToCompactString());
 		return true;
 	}
 
-	if (CurrentSearchStep > SearchSweepCount)
+	if (!bAlarm && CurrentSearchStep > SearchSweepCount)
 	{
+		Controller->LogSearchTransitionDebug(TEXT("SearchExhausted"), TEXT("수색 횟수 소진: 선택 태스크 Failed"));
 		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 종료 - %d개 지점을 훑었다. 순찰로 복귀."),
 			*GetNameSafe(GuardPawn), SearchSweepCount);
 		return false;
@@ -301,22 +645,22 @@ bool UGuardPatrolAComponent::SelectNextSearchPoint2()
 
 	// 조사 지점 주변에서 실제로 도달 가능한 지점만 고른다.
 	// 무작위 오프셋을 그냥 더하면 벽 너머나 NavMesh 밖이 나와 Move To 가 실패한다.
-	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
-	FNavLocation SweepPoint;
+	FVector SweepLocation;
 
-	if (IsValid(NavSys) && NavSys->GetRandomReachablePointInRadius(SearchAnchor, SearchSweepRadius, SweepPoint))
+	if (FindReachableSearchLocation(SearchAnchor, SweepLocation, false))
 	{
-		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SweepPoint.Location);
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SweepLocation);
 
 		UE_LOG(LogGuardAI, Log, TEXT("[%s] 수색 %d/%d - %s"),
 			*GetNameSafe(GuardPawn), CurrentSearchStep, SearchSweepCount,
-			*SweepPoint.Location.ToCompactString());
+			*SweepLocation.ToCompactString());
 		return true;
 	}
 
+	Controller->LogSearchTransitionDebug(TEXT("SearchPointFailed"), TEXT("주변 도달 가능한 수색 지점 추출 실패"));
 	UE_LOG(LogGuardAI, Warning,
 		TEXT("[%s] 조사 지점 %s 반경 %.0f 안에서 도달 가능한 수색 지점을 찾지 못했다."),
-		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), SearchSweepRadius);
+		*GetNameSafe(GuardPawn), *SearchAnchor.ToCompactString(), GetEffectiveSearchSweepRadius());
 	return false;
 }
 

@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DataTable.h"         // FTableRowBase — FLootIconRow 의 부모라 전방 선언 불가
 #include "Engine/DeveloperSettings.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Noise/NoiseTypes.h"          // EAlertLevel — UFUNCTION 파라미터라 전방 선언 불가
@@ -48,6 +49,30 @@ enum class EUIFontToken : uint8
 	Value  UMETA(DisplayName = "수치"),        // 18 — 체력 %, 가격, 노획물 가치
 	Label  UMETA(DisplayName = "라벨"),        // 12 — 라벨, 부제
 	Title  UMETA(DisplayName = "제목")         // 44 Bold — 로딩 · 결과 화면의 큰 제목
+};
+
+/**
+ * DT_LootIcon 의 한 줄 — 노획물 하나의 소지 슬롯 그림.
+ *
+ * **행 이름이 키다.** DT_LootCatalog 의 행 이름(예: Loot_maCandlestick)을 글자 그대로 적는다.
+ * 노획물은 ALootBase::GetLootRowName() 으로 자기 카탈로그 행 이름을 알려 주고,
+ * HUD 는 그 이름으로 이 표를 찾는다.
+ *
+ * [카탈로그에 칸을 늘리지 않고 표를 따로 둔 이유] FLootDefinitionRow 는 물리 · 아이템 파트
+ *   소유다. DT_LootStability · DT_LootDurability 도 같은 방식(카탈로그 행 이름을 조인 키로 쓰는
+ *   별도 표)으로 붙어 있다.
+ *
+ * [한계] 카탈로그 행 하나를 BP 여럿이 같이 쓰면 그림도 하나다.
+ *   maartifact1~5 가 전부 Loot_maartifact 라 지금은 유물 그림이 한 장이다.
+ */
+USTRUCT(BlueprintType)
+struct HEAVYHANDED_API FLootIconRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	/** 소지 슬롯(Img_Held)에 띄울 그림. 비워 두면 특성 그림 → 폴백 그림 순서로 넘어간다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot Icon")
+	TSoftObjectPtr<UTexture2D> Icon;
 };
 
 /**
@@ -110,6 +135,15 @@ public:
 	 * BP 에 열지 않는다. 읽는 곳은 UHeistHUDWidget 하나뿐이다
 	 */
 	TSoftObjectPtr<UTexture2D> GetHeldSlotIcon(const FGameplayTagContainer& TypeTags) const;
+
+	/**
+	 * 노획물별 소지 슬롯 아이콘. LootIconTable 에서 카탈로그 행 이름으로 찾는다.
+	 *
+	 * 못 찾으면 null 이다 — 그때 GetHeldSlotIcon() 으로 넘어가는 것은 부르는 쪽이 한다.
+	 * bOutRowMissing 은 "표는 있는데 그 이름의 행이 없다" 일 때만 true 다.
+	 * 행 이름 오타는 화면에 폴백 그림으로만 드러나서, 부르는 쪽이 이걸 보고 경고를 남긴다
+	 */
+	TSoftObjectPtr<UTexture2D> FindLootIcon(FName LootRow, bool& bOutRowMissing) const;
 
 	/**
 	 * 스킬 칸에 쓸 아이콘. 쿨다운 태그 여러 개 중 표에 있는 첫 번째를 돌려준다.
@@ -246,15 +280,24 @@ public:
 	// 장비를 들면 노획물을 못 들고 반대도 마찬가지인 것이 코드에서 이미 보장된다.
 
 	/**
+	 * 노획물별 소지 슬롯 그림 표 (DT_LootIcon, 행 구조 FLootIconRow).
+	 *
+	 * 소지 슬롯은 이 표를 **먼저** 본다. 행이 없거나 그림이 비었으면 아래 HeldSlotIcons
+	 * (특성별) → HeldSlotFallbackIcon 순서로 넘어간다. 비워 두면 표 단계를 건너뛴다.
+	 *
+	 * 조회는 FindLootIcon() 으로 한다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Held Slot",
+			  meta = (RequiredAssetDataTags = "RowStructure=/Script/HeavyHanded.LootIconRow"))
+	TSoftObjectPtr<UDataTable> LootIconTable;
+
+	/**
 	 * 소지 슬롯 아이콘. 노획물 특성 태그(Loot.Type.*) → 그림.
 	 *
-	 * [왜 카탈로그가 아니라 여기인가] DT_LootCatalog 의 행 구조(FLootDefinitionRow)에는
-	 *   아이콘 칸이 없다. 그쪽은 물리 · 아이템 파트 소유라 UI 사정으로 늘리지 않는다.
-	 *   지금 노획물 BP 가 특성당 하나씩(BP_Loot_Fragile / Heavy / Unstable)이라
-	 *   특성별 그림이 곧 아이템별 그림과 같다.
-	 *
-	 *   한 특성에 아이템이 여럿 생기면 그때 카탈로그에 아이콘 칸을 요청하고,
-	 *   이 표는 행을 못 찾았을 때의 폴백으로 남긴다.
+	 * LootIconTable 에서 못 찾았을 때의 폴백이다 (2026-10-01 부터).
+	 * 처음에는 노획물 BP 가 특성당 하나씩이라 이 표만으로 충분했지만,
+	 * 은촛대 · 와인잔 · 유물이 전부 파손형처럼 한 특성에 아이템이 여럿 생겨서
+	 * 노획물별 표(LootIconTable)를 앞에 세웠다.
 	 *
 	 * 조회는 GetHeldSlotIcon() 으로 한다.
 	 */

@@ -112,8 +112,6 @@ void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIP
 
 
 	SetHearingEnabled(GuardCharacter->IsHearingEnabled());
-	bDrawHearingDebug = GuardCharacter->IsHearingEnabled();
-	//SetSightDebugEnabled(GuardCharacter->IsDrawSightDebugEnabled());
 }
 
 
@@ -171,13 +169,24 @@ void UGuardHearingAComponent::SetHearingEnabled(bool bEnabled)
 {
 	PerceptionComp->SetSenseEnabled(UAISense_Hearing::StaticClass(), bEnabled);
 	PrimaryComponentTick.bCanEverTick = bEnabled;
-	bDrawHearingDebug = bEnabled; // 이미 tick을 끄고 있어서 안해도 상관없음
+	// 청각 감지와 디버그 표시는 별개다. 생성 시 저장한 공통 옵션을 따른다.
+	bDrawHearingDebug = bEnabled && IsValid(GuardCharacter) && GuardCharacter->IsDrawSightDebugEnabled();
+	SetComponentTickEnabled(bDrawHearingDebug);
 }
 
 void UGuardHearingAComponent::HandleWorldAlertSilenceTimeout()
 {
 	if (!HasServerAuthority(this))
 	{
+		return;
+	}
+	if (!IsValid(GuardAIController))
+	{
+		return;
+	}
+	if (GuardAIController->IsWorldAlarmActive())
+	{
+		ClearWorldAlertSilenceTimer();
 		return;
 	}
 
@@ -226,6 +235,15 @@ void UGuardHearingAComponent::StartWorldAlertSilenceTimer()
 {
 	if (!HasServerAuthority(this))
 	{
+		return;
+	}
+	if (!IsValid(GuardAIController))
+	{
+		return;
+	}
+	if (GuardAIController->IsWorldAlarmActive())
+	{
+		ClearWorldAlertSilenceTimer();
 		return;
 	}
 
@@ -327,4 +345,3 @@ void UGuardHearingAComponent::ClearHearingDebug()
 	bHasHearingLocation = false;
 	LastHearingLocation = FVector::ZeroVector;
 }
-

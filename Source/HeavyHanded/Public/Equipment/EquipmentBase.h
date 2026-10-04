@@ -417,6 +417,40 @@ private:
 	/** 상태에 맞는 연출을 켜고 끈다. 모든 머신에서 실행된다 */
 	void ApplyStateEffects(EEquipmentState OldState);
 
+	/**
+	 * 끝나는 순간의 연출(SpentEffect · SpentSound)을 전원에게 내려보낸다. 위치는 서버 값이다.
+	 *
+	 * [왜 복제 상태에 맡기지 않는가] — 2026-10-02 실측으로 바꿨다
+	 *   원래는 State 가 Spent 로 복제되면 각 머신이 ApplyStateEffects 에서 띄웠다. 그런데
+	 *   이 장비는 Spent 가 되고 SpentDestroyDelay 뒤에 자기를 파괴한다 — 그 사이에 상태가
+	 *   못 나가면 클라이언트는 연출을 영영 못 본다. 실제로 복제가 1.8초씩 밀리던 상황에서
+	 *   **호스트가 던지면 보이고 클라이언트가 던지면 안 보이는** 증상으로 나타났다.
+	 *
+	 *   위치를 인자로 싣는 이유도 같은 측정에서 나왔다. 클라이언트의 액터 위치가 서버보다
+	 *   4.75m 뒤처져 있어서, 각자 자기 위치에 띄우면 **엉뚱한 자리에서 터진다.**
+	 *
+	 *   Reliable 인 것은 장비 하나당 한 번만 나가는 이벤트이기 때문이다. 놓치면 플레이어가
+	 *   $10,000 짜리 물건이 작동했는지 알 방법이 없다 — 연출이지만 버려도 되는 연출은 아니다.
+	 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_SpentEffect(FVector_NetQuantize Location);
+
+	/**
+	 * 방금 스폰한 나이아가라에 값을 넘긴다. 서브클래스가 덮어쓴다.
+	 * **모든 머신에서 불린다** — ApplyStateEffects 안이라 서버 전용이 아니다.
+	 *
+	 * [왜 필요한가]
+	 *   이펙트의 크기가 게임 수치와 같아야 하는 장비가 있다. EMP 의 펄스 구가 그렇다 —
+	 *   나이아가라에 반경을 숫자로 박아 두면, 나중에 PulseRadius 를 바꿨을 때
+	 *   **보이는 구와 실제로 꺼지는 범위가 조용히 어긋난다.** 그때 "분명 닿았는데 안 꺼진다"
+	 *   로 나타나고, 원인을 찾기 어렵다.
+	 *   ASecurityCamera 가 VisionCone 을 DetectionRange 로 강제 동기화하는 것과 같은 이유다.
+	 *
+	 *   값은 나이아가라의 User 파라미터로 넘긴다 (Effect->SetFloatParameter("Radius", ...)).
+	 *   복제하지 않아도 되는 것은 이 값들이 BP 기본값이라 모든 머신이 같은 값을 갖기 때문이다.
+	 */
+	virtual void ConfigureEffect(class UNiagaraComponent* Effect, EEquipmentState ForState) {}
+
 	UFUNCTION()
 	void OnRep_State(EEquipmentState OldState);
 

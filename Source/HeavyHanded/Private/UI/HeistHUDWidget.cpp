@@ -67,6 +67,7 @@ namespace
 		int32 Value = 0;
 		bool  bHasValue = false;
 		FGameplayTagContainer TypeTags;
+		FName LootRow;   // DT_LootCatalog 행 이름. DT_LootIcon 을 찾는 키다
 	};
 
 	/**
@@ -97,6 +98,7 @@ namespace
 			Out.Value     = Loot->GetCurrentValue();
 			Out.bHasValue = true;
 			Loot->GetOwnedGameplayTags(Out.TypeTags);
+			Out.LootRow   = Loot->GetLootRowName();
 
 			// 카탈로그 행을 지정하지 않은 노획물은 이름이 비어 있다. 여기서 GetName() 으로
 			// 때우면 "BP_Loot_Fragile_C_0" 이 화면에 그대로 뜬다 (LootBase.h GetDisplayName 주석)
@@ -130,18 +132,19 @@ void UHeistHUDWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
 
-	// PreConstruct 는 디자이너에서도 실행된다. 토큰을 여기서 적용해야 편집 중에도
-	// 실제 색 · 폰트가 보이고, UMG 에 색이 구워지는 것을 막는다 (UISettings.h 주석)
+	// PreConstruct 는 디자이너에서도 실행된다. 폰트 토큰을 여기서 적용해야 편집 중에도
+	// 실제 폰트가 보인다 (UISettings.h 주석).
+	//
+	// [글자 색은 칠하지 않는다] HUD 글자 색은 WBP 디테일 패널에서 정한다 (2026-10-01).
+	// 여기서 칠하면 디자이너에서 바꾼 색이 컴파일할 때마다 되돌아간다
 	if (Txt_Timer)
 	{
 		Txt_Timer->SetFont(UUISettings::GetUIFont(EUIFontToken::Timer));
-		Txt_Timer->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_Phase)
 	{
 		Txt_Phase->SetFont(UUISettings::GetUIFont(EUIFontToken::Label));
-		Txt_Phase->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
 	}
 
 	if (Txt_PrepCenterValue)
@@ -151,25 +154,21 @@ void UHeistHUDWidget::NativePreConstruct()
 		BigFont.Size *= PrepCenterFontScale;
 
 		Txt_PrepCenterValue->SetFont(BigFont);
-		Txt_PrepCenterValue->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_PrepCenterLabel)
 	{
 		Txt_PrepCenterLabel->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
-		Txt_PrepCenterLabel->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_PrepMini)
 	{
 		Txt_PrepMini->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
-		Txt_PrepMini->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_Objective)
 	{
 		Txt_Objective->SetFont(UUISettings::GetUIFont(EUIFontToken::Value));
-		Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::Money)));
 	}
 
 	if (Txt_HeldName)
@@ -180,7 +179,6 @@ void UHeistHUDWidget::NativePreConstruct()
 		NameFont.Size *= UUISettings::Get()->HeldSlotFontScale;
 
 		Txt_HeldName->SetFont(NameFont);
-		Txt_HeldName->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
 	}
 
 	if (Txt_HeldInfo)
@@ -189,7 +187,6 @@ void UHeistHUDWidget::NativePreConstruct()
 		InfoFont.Size *= UUISettings::Get()->HeldSlotFontScale;
 
 		Txt_HeldInfo->SetFont(InfoFont);
-		Txt_HeldInfo->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(EUIColorToken::TextSecondary)));
 	}
 
 	if (Bar_HeldWeight)
@@ -226,6 +223,8 @@ void UHeistHUDWidget::NativeConstruct()
 	// 위급이 풀릴 때 되돌아갈 색. SetUrgent 가 한 번이라도 돌기 전에 읽어야 한다
 	if (Img_Plate)       { PlateNormalColor       = Img_Plate->GetColorAndOpacity(); }
 	if (Img_PlateShadow) { PlateShadowNormalColor = Img_PlateShadow->GetColorAndOpacity(); }
+	if (Txt_Timer)       { TimerNormalColor       = Txt_Timer->GetColorAndOpacity(); }
+	if (Txt_Objective)   { ObjectiveNormalColor   = Txt_Objective->GetColorAndOpacity(); }
 
 	// 붙기 전까지는 숨겨 둔다. 빈 "텍스트 블록" 이 화면에 남는 것보다 낫다
 	SetHeistWidgetsVisible(false);
@@ -516,10 +515,12 @@ void UHeistHUDWidget::DrawObjective()
 	// 기준을 실제 값이 아니라 표시값으로 잡은 것은 의도다. 숫자가 목표에 닿는
 	// 그 순간에 색이 같이 바뀌어야 한다 — 실제 값 기준으로 하면 아직 $30,000 이
 	// 찍혀 있는데 글자만 금색이 된다
-	const EUIColorToken Token = (TargetGoal > 0 && Shown >= TargetGoal)
-		? EUIColorToken::Gold
-		: EUIColorToken::Money;
-	Txt_Objective->SetColorAndOpacity(FSlateColor(UUISettings::GetUIColor(Token)));
+	//
+	// 금색만 토큰이다. 평소 색은 WBP 에 찍은 색이다 (ObjectiveNormalColor)
+	const bool bGoalMet = TargetGoal > 0 && Shown >= TargetGoal;
+	Txt_Objective->SetColorAndOpacity(bGoalMet
+		? FSlateColor(UUISettings::GetUIColor(EUIColorToken::Gold))
+		: ObjectiveNormalColor);
 }
 
 void UHeistHUDWidget::StartMoneyInterp()
@@ -607,9 +608,7 @@ void UHeistHUDWidget::SetUrgent(bool bNewUrgent, const TCHAR* Cause)
 	else if (Txt_Timer)
 	{
 		// 판 없이 글자만 쓰는 WBP — 글자 색으로만 알린다
-		Txt_Timer->SetColorAndOpacity(FSlateColor(bUrgent
-			? AlarmColor
-			: UUISettings::GetUIColor(EUIColorToken::TextPrimary)));
+		Txt_Timer->SetColorAndOpacity(bUrgent ? FSlateColor(AlarmColor) : TimerNormalColor);
 	}
 
 	if (UrgentPulse && !IsDesignTime())
@@ -862,7 +861,7 @@ void UHeistHUDWidget::ApplyHeldSlot(AActor* Held)
 
 	if (Img_Held)
 	{
-		UTexture2D* Icon = ResolveHeldIcon(Display.TypeTags);
+		UTexture2D* Icon = ResolveHeldIcon(Display.LootRow, Display.TypeTags);
 
 		// 그림이 없으면 빈 흰 사각형이 남는다. 아이콘 자리가 아예 없는 편이 낫다
 		Img_Held->SetVisibility(Icon ? ESlateVisibility::SelfHitTestInvisible
@@ -884,9 +883,29 @@ void UHeistHUDWidget::ApplyHeldSlot(AActor* Held)
 		   *GetName(), *Display.Name.ToString(), Display.MassKg, *ValuePart);
 }
 
-UTexture2D* UHeistHUDWidget::ResolveHeldIcon(const FGameplayTagContainer& TypeTags)
+UTexture2D* UHeistHUDWidget::ResolveHeldIcon(FName LootRow, const FGameplayTagContainer& TypeTags)
 {
-	const TSoftObjectPtr<UTexture2D> Soft = UUISettings::Get()->GetHeldSlotIcon(TypeTags);
+	const UUISettings* Settings = UUISettings::Get();
+
+	// ① 노획물별 그림 (DT_LootIcon) → ② 특성별 그림 → ③ 폴백 그림
+	bool bRowMissing = false;
+	TSoftObjectPtr<UTexture2D> Soft = Settings->FindLootIcon(LootRow, bRowMissing);
+
+	if (bRowMissing && !WarnedLootRows.Contains(LootRow))
+	{
+		// 행 이름 오타는 에러 없이 폴백 그림으로만 드러난다. 같은 이름은 한 번만 찍는다
+		WarnedLootRows.Add(LootRow);
+		UE_LOG(LogHeavyUI, Warning,
+			   TEXT("%s: DT_LootIcon 에 \"%s\" 행이 없다 — 특성 그림으로 대신한다. "
+					"행 이름을 DT_LootCatalog 와 똑같이 적었는지 확인할 것"),
+			   *GetName(), *LootRow.ToString());
+	}
+
+	if (Soft.IsNull())
+	{
+		Soft = Settings->GetHeldSlotIcon(TypeTags);
+	}
+
 	if (Soft.IsNull())
 	{
 		return nullptr;

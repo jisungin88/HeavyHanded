@@ -4,6 +4,7 @@
 #include "AI/GuardAIController.h"
 #include "AI/GuardBlackboardKeys.h"
 #include "AI/GuardSettings.h"
+#include "Engine/Engine.h"
 
 #include "AI/GuardSightAComponent.h"
 #include "AI/GuardHearingAComponent.h"
@@ -15,6 +16,7 @@
 
 // Behavior Tree / Blackboard
 #include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BrainComponent.h"
 
@@ -24,6 +26,8 @@
 
 // Navigation
 #include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "Navigation/PathFollowingComponent.h"
 
 // Gameplay / Game State
 #include "Core/GameStates/HeistGameState.h"
@@ -38,11 +42,13 @@
 
 // Character / Movement
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 
 // World / Actor
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "EngineUtils.h"
+#include "DrawDebugHelpers.h"
 
 // UI
 //#include "Components/WidgetComponent.h"
@@ -60,6 +66,9 @@ DEFINE_LOG_CATEGORY(LogGuardAI);
 // 1. 생성자
 AGuardAIController::AGuardAIController()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
 	SetPerceptionComponent(*PerceptionComp);
 
@@ -75,6 +84,228 @@ AGuardAIController::AGuardAIController()
 	// 그 값만 채운다. 모든 경비를 같은 팀으로 묶어 서로 "우호"로 판정되게 한다.
 	SetGenericTeamId(FGenericTeamId(1));
 
+}
+
+void AGuardAIController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+#if ENABLE_DRAW_DEBUG
+	if (!HasAuthority() || !IsValid(PossessGuardPawn) || !PossessGuardPawn->IsDrawSightDebugEnabled() || !PossessGuardPawn->bDrawMoveTargetDebug)
+	{
+		return;
+	}
+
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	UWorld* World = GetWorld();
+	if (!IsValid(BlackboardComp) || !IsValid(World) || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 표시 위치만 올리고 전경에 그려 시야 메시와 바닥에 가려지지 않도록 한다.
+	const FVector DebugHeightOffset(0.0f, 0.0f, 200.0f);
+	const FVector GuardLocation = PossessGuardPawn->GetActorLocation() + DebugHeightOffset;
+	const AActor* AggroTarget = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	if (IsValid(AggroTarget))
+	{
+		// 어그로 대상은 시야 여부와 이동 목적지에 관계없이 현재 위치를 표시한다.
+		const FVector AggroTargetLocation = AggroTarget->GetActorLocation() + DebugHeightOffset;
+		DrawDebugLine(World, GuardLocation, AggroTargetLocation, FColor::White, false, -1.0f, SDPG_Foreground, 4.0f);
+		DrawDebugSphere(World, AggroTargetLocation, 30.0f, 12, FColor::Magenta, false, -1.0f, SDPG_Foreground, 2.0f);
+	}
+
+	FName TargetKey;
+	FColor LineColor;
+	FVector TargetLocation;
+	switch (AIState)
+	{
+	case EGuardAIState::Patrol:
+		TargetKey = GuardAIKeys::PatrolLocation;
+		LineColor = FColor::Green;
+		break;
+	case EGuardAIState::Search:
+		TargetKey = GuardAIKeys::InvestigateLocation;
+		LineColor = FColor::Yellow;
+		break;
+	case EGuardAIState::Chase:
+		LineColor = FColor::Red;
+		if (BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
+		{
+			const AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+			if (IsValid(TargetActor))
+			{
+				TargetLocation = TargetActor->GetActorLocation();
+				break;
+			}
+		}
+		TargetKey = GuardAIKeys::LastKnownLocation;
+		break;
+	default:
+		return;
+	}
+
+	if (!TargetKey.IsNone())
+	{
+		if (!BlackboardComp->IsVectorValueSet(TargetKey))
+		{
+			return;
+		}
+		TargetLocation = BlackboardComp->GetValueAsVector(TargetKey);
+	}
+
+	if (!FAISystem::IsValidLocation(TargetLocation))
+	{
+		return;
+	}
+
+	// 매 프레임 다시 그려 목표 이동과 옵션 해제가 즉시 표시되도록 한다.
+	const FVector DebugTargetLocation = TargetLocation + DebugHeightOffset;
+	DrawDebugLine(World, GuardLocation, DebugTargetLocation, FColor::White, false, -1.0f, SDPG_Foreground, 2.0f);
+	// 어그로 대상 마커와 겹쳐도 구분할 수 있도록 이동 목표 구체를 더 크게 표시한다.
+	DrawDebugSphere(World, DebugTargetLocation, 45.0f, 16, LineColor, false, -1.0f, SDPG_Foreground, 3.0f);
+#endif
+}
+
+bool AGuardAIController::IsVisibleChaseMove(const FAIMoveRequest& MoveRequest) const
+{
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	return MoveRequest.IsMoveToActorRequest() && MoveRequest.IsUsingPathfinding() && IsValid(MoveRequest.GetGoalActor()) && IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f && BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) == MoveRequest.GetGoalActor();
+}
+
+FPathFollowingRequestResult AGuardAIController::MoveTo(const FAIMoveRequest& MoveRequest, FNavPathSharedPtr* OutPath)
+{
+	if (!HasAuthority())
+	{
+		return FPathFollowingRequestResult();
+	}
+
+	// 완료 콜백에서 BT가 다른 분기로 이동할 수 있으므로 요청 당시 조건을 보관한다.
+	const bool bVisibleChaseMove = IsVisibleChaseMove(MoveRequest);
+	if (bVisibleChaseMove)
+	{
+		LastChaseMoveRequestDebug = FString::Printf(TEXT("이동허용거리=%.1fcm 경비반경포함=%s 타겟반경포함=%s"), MoveRequest.GetAcceptanceRadius(), MoveRequest.IsReachTestIncludingAgentRadius() ? TEXT("예") : TEXT("아니오"), MoveRequest.IsReachTestIncludingGoalRadius() ? TEXT("예") : TEXT("아니오"));
+		LastChasePathDebug = TEXT("최근경로=미확인");
+	}
+	const FPathFollowingRequestResult Result = Super::MoveTo(MoveRequest, OutPath);
+	if (bVisibleChaseMove && Result.Code == EPathFollowingRequestResult::Failed)
+	{
+		const UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+		LogSearchTransitionDebug(TEXT("ChaseMoveRequestFailed"), FString::Printf(TEXT("추격 이동 요청 실패: Request=%u Pawn=%s PathFollowing=%s Navigation=%s Start=%s %s"), Result.MoveId.GetID(), *GetNameSafe(GetPawn()), *GetNameSafe(GetPathFollowingComponent()), *GetNameSafe(NavSys), *GetNavAgentLocation().ToCompactString(), *MoveRequest.ToString()));
+	}
+	return Result;
+}
+
+void AGuardAIController::FindPathForMoveRequest(const FAIMoveRequest& MoveRequest, FPathFindingQuery& Query, FNavPathSharedPtr& OutPath) const
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (!IsVisibleChaseMove(MoveRequest))
+	{
+		Super::FindPathForMoveRequest(MoveRequest, Query, OutPath);
+		return;
+	}
+
+	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	const ANavigationData* NavData = Query.NavData.Get();
+	if (!IsValid(NavSys) || !IsValid(NavData))
+	{
+		LogSearchTransitionDebug(TEXT("ChaseNavigationMissing"), TEXT("추격 경로의 NavigationSystem 또는 NavData 없음"));
+		return;
+	}
+
+	// Actor 요청에는 엔진 MoveTo의 위치 목표 투영이 적용되지 않는다. 목표 Actor는 그대로 두고 경로의 끝점만 보정한다.
+	const FVector OriginalGoal = Query.EndLocation;
+	FVector ProjectionExtent = NavData->GetDefaultQueryExtent();
+	const UCapsuleComponent* Capsule = IsValid(PossessGuardPawn) ? PossessGuardPawn->GetCapsuleComponent() : nullptr;
+	if (IsValid(Capsule))
+	{
+		ProjectionExtent.Z = FMath::Max(ProjectionExtent.Z, static_cast<FVector::FReal>(Capsule->GetScaledCapsuleHalfHeight() * 2.0f));
+	}
+	FNavLocation ProjectedGoal;
+	const bool bProjected = MoveRequest.IsProjectingGoal() && NavSys->ProjectPointToNavigation(OriginalGoal, ProjectedGoal, ProjectionExtent, NavData, Query.QueryFilter);
+	if (bProjected)
+	{
+		Query.EndLocation = ProjectedGoal.Location;
+	}
+
+	// 이 값은 Path의 QueryData에도 저장된다. Actor 이동에 따른 엔진 재탐색에서도 NavMesh 밖 목표를 즉시 실패시키지 않는다.
+	// BT/AITask가 원래 허용한 부분 경로만 사용한다. Allow Partial Path가 꺼져 있으면 완전 경로 요구를 보존한다.
+	if (MoveRequest.IsUsingPartialPaths())
+	{
+		Query.SetRequireNavigableEndLocation(false);
+	}
+
+	FPathFindingResult PathResult = NavSys->FindPathSync(Query);
+	if (!PathResult.IsSuccessful() || !PathResult.Path.IsValid())
+	{
+		LogSearchTransitionDebug(TEXT("ChasePathFailed"), FString::Printf(TEXT("추격 경로 생성 실패: Result=%d NavData=%s Start=%s Original=%s QueryGoal=%s Projected=%d Extent=%s AllowPartial=%d"), static_cast<int32>(PathResult.Result), *GetNameSafe(NavData), *Query.StartLocation.ToCompactString(), *OriginalGoal.ToCompactString(), *Query.EndLocation.ToCompactString(), bProjected, *ProjectionExtent.ToCompactString(), MoveRequest.IsUsingPartialPaths()));
+		return;
+	}
+
+	// 수평 보정으로 목표와 다른 지점에 도착하는 경로는 부분 경로다. 마지막 구간에서 Actor 원위치로 직진하는 것을 막는다.
+	if (bProjected && MoveRequest.IsUsingPartialPaths() && FVector::DistSquared2D(OriginalGoal, ProjectedGoal.Location) > FMath::Square(1.0f))
+	{
+		PathResult.Path->SetIsPartial(true);
+	}
+	PathResult.Path->SetGoalActorObservation(*MoveRequest.GetGoalActor(), 100.0f);
+	PathResult.Path->EnableRecalculationOnInvalidation(true);
+	// 엔진의 Actor 재탐색은 이 함수를 거치지 않는다. 재탐색 뒤에도 보정된 끝점과 Actor가 다르면 부분 경로로 유지한다.
+	PathResult.Path->AddObserver(FNavigationPath::FPathObserverDelegate::FDelegate::CreateUObject(this, &AGuardAIController::HandleChasePathUpdated));
+	OutPath = PathResult.Path;
+	LastChasePathDebug = FString::Printf(TEXT("최근경로부분=%s 경로끝=%s"), OutPath->IsPartial() ? TEXT("예") : TEXT("아니오"), *OutPath->GetEndLocation().ToCompactString());
+	LogSearchTransitionDebug(TEXT("ChasePathReady"), FString::Printf(TEXT("추격 Actor 추적 유지: NavData=%s Start=%s Original=%s QueryGoal=%s PathEnd=%s Projected=%d Partial=%d AllowPartial=%d"), *GetNameSafe(NavData), *Query.StartLocation.ToCompactString(), *OriginalGoal.ToCompactString(), *Query.EndLocation.ToCompactString(), *OutPath->GetEndLocation().ToCompactString(), bProjected, OutPath->IsPartial(), MoveRequest.IsUsingPartialPaths()));
+}
+
+void AGuardAIController::HandleChasePathUpdated(FNavigationPath* UpdatedPath, ENavPathEvent::Type Event) const
+{
+	if (!HasAuthority() || !UpdatedPath || (Event != ENavPathEvent::UpdatedDueToGoalMoved && Event != ENavPathEvent::UpdatedDueToNavigationChanged))
+	{
+		return;
+	}
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const AActor* GoalActor = UpdatedPath->GetGoalActor();
+	if (!IsValid(GoalActor) || !IsValid(BlackboardComp) || !BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) || BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) != GoalActor || !UpdatedPath->GetQueryData().bAllowPartialPaths)
+	{
+		return;
+	}
+	// 저장된 QueryData의 끝점은 최초 요청 값일 수 있으므로 현재 관찰 중인 Actor의 목표를 비교한다.
+	const FVector ActorGoal = UpdatedPath->GetGoalLocation();
+	const FVector PathEnd = UpdatedPath->GetEndLocation();
+	if (FVector::DistSquared2D(ActorGoal, PathEnd) > FMath::Square(1.0f))
+	{
+		UpdatedPath->SetIsPartial(true);
+	}
+	LastChasePathDebug = FString::Printf(TEXT("최근경로부분=%s 경로끝=%s"), UpdatedPath->IsPartial() ? TEXT("예") : TEXT("아니오"), *PathEnd.ToCompactString());
+	LogSearchTransitionDebug(TEXT("ChasePathUpdated"), FString::Printf(TEXT("추격 경로 재탐색: ActorGoal=%s PathEnd=%s Partial=%d"), *ActorGoal.ToCompactString(), *PathEnd.ToCompactString(), UpdatedPath->IsPartial()));
+}
+
+void AGuardAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
+{
+	if (HasAuthority())
+	{
+		const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+		const bool bHasFullTarget = IsValid(BlackboardComp) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f && IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+		if (AIState == EGuardAIState::Chase || bHasFullTarget)
+		{
+			// 정상 완료, 경로 실패, 다른 요청에 의한 중단을 구분한다. 상태값만으로 실제 BT 분기를 단정하지 않는다.
+			const FName Event(*FString::Printf(TEXT("ChaseMoveCompleted_%d_%u"), static_cast<int32>(Result.Code.GetValue()), static_cast<uint32>(Result.Flags)));
+			LogSearchTransitionDebug(Event, FString::Printf(TEXT("Request=%u Result=%s Code=%d Flags=%u Success=%d Interrupted=%d LastKnown=%s"), RequestID.GetID(), *Result.ToString(), static_cast<int32>(Result.Code.GetValue()), static_cast<uint32>(Result.Flags), Result.IsSuccess(), Result.IsInterrupted(), IsValid(BlackboardComp) ? *BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation).ToCompactString() : TEXT("NoBlackboard")));
+			if (Result.IsSuccess())
+			{
+				LogArrestRangeDebug(LastArrestRangeDebug, true);
+			}
+		}
+	}
+
+	// BT의 완료 통지 전에 실패를 기록해 다음 지점 선택에 반영한다.
+	if (HasAuthority() && AIState == EGuardAIState::Patrol && IsValid(GuardPatrolComp) && Result.IsFailure() && !Result.IsInterrupted())
+	{
+		GuardPatrolComp->SkipCurrentPatrolPoint();
+	}
+	Super::OnMoveCompleted(RequestID, Result);
 }
 
 // 2. 초기화
@@ -97,6 +328,10 @@ void AGuardAIController::BeginPlay()
 void AGuardAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
+	if (!HasAuthority() || bMatchEnded)
+	{
+		return;
+	}
 
 	PossessGuardPawn = Cast<AGuardCharacter>(InPawn);
 	if (!IsValid(PossessGuardPawn))
@@ -107,11 +342,6 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	}
 
 	// --------------------------------------------------------------------------------------------
-
-	if (UAlertComponent* Alert = UAlertComponent::Get(this))
-	{
-		Alert->OnAlertGaugeChanged.AddDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
-	}
 
 	GuardSightComp->Initialize(PossessGuardPawn, PerceptionComp);
 	GuardHearingComp->Initialize(PossessGuardPawn, PerceptionComp);
@@ -189,7 +419,16 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// 첫 순찰 지점 선택 : 시작 시 첫 순찰 지점을 미리 채워둔다
 	// -------------------------------------------------------------------------------------------------------
 	// SelectNextPatrolPoint();-> 아래 함수로 변경했음
-	SelectNextAction(EGuardAIState::Patrol);
+	bWorldAlarmBehaviorActive = false;
+	BindToWorldAlert();
+	if (IsWorldAlarmActive())
+	{
+		UpdateWorldAlarmBehavior();
+	}
+	else
+	{
+		SelectNextAction(EGuardAIState::Patrol);
+	}
 
 
 	// Behavior Tree 시작
@@ -198,11 +437,18 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 	// bStartAILogicOnPossess 도 BrainComponent 가 있어야 의미가 있다(그 컴포넌트를
 	// 만들어주는 게 바로 이 호출이다). 여기서 부르지 않으면 BT 가 아예 시작되지 않는다.
 	RunBehaviorTree(BehaviorTreeAsset);
+	UpdateMoveSpeedByWorldAlert(GetWorldAlertLevel() / 100.f);
 }
 
 void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindFromGameState();
+	if (IsValid(BoundAlertComponent))
+	{
+		BoundAlertComponent->OnAlertGaugeChanged.RemoveDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		BoundAlertComponent->OnAlertLevelChanged.RemoveDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+		BoundAlertComponent = nullptr;
+	}
 
 	if (UWorld* World = GetWorld())
 	{
@@ -221,6 +467,7 @@ void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AGuardAIController::BindToGameState(AGameStateBase* GameState)
 {
+	BindToWorldAlert();
 	AHeistGameState* HeistState = Cast<AHeistGameState>(GameState);
 
 	// 작업 레벨이 아니면(GuardTest · L_NoiseTest 등) 아무것도 하지 않는다 —
@@ -262,8 +509,13 @@ void AGuardAIController::UnbindFromGameState()
 
 void AGuardAIController::ResetMoveSpeed()
 {
-	if (!PossessGuardPawn)
+	if (!HasAuthority() || !IsValid(PossessGuardPawn))
 	{
+		return;
+	}
+	if (IsWorldAlarmActive())
+	{
+		ApplyCurrentMoveSpeed();
 		return;
 	}
 
@@ -283,6 +535,11 @@ void AGuardAIController::HandleHeistPhaseChanged(
 
 void AGuardAIController::StopForMatchEnd()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bMatchEnded = true;
 	UE_LOG(LogGuardAI, Log, TEXT("[%s] 판이 끝나 순찰을 멈춘다."), *GetNameSafe(GetPawn()));
 
 	// BT 를 먼저 세운다. 이동 정지보다 나중에 하면 정지 직후 태스크가 한 번 더 돌아
@@ -344,17 +601,28 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 	{
 		return;
 	}
+	UPerceptionMeterComponent* PerceptionMeter = IsValid(PossessGuardPawn) ? PossessGuardPawn->GetPerceptionMeterComponent() : nullptr;
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const bool bVisibleChaseTarget = IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && IsValid(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)) && GetDetectionGaugePercent() >= 100.f;
+	if (!IsValid(BlackboardComp) || AIState == EGuardAIState::Chase || bVisibleChaseTarget)
+	{
+		if (IsValid(PerceptionMeter))
+		{
+			PerceptionMeter->ResetPerception();
+		}
+		return;
+	}
 
 	//+ 0910 디버그용
 	UE_LOG(LogTemp, Warning, TEXT("[GuardAI] PerceptionFull RECEIVED | Location=%s"), *LastNoiseLocation.ToString());
 
 	RequestInvestigate(LastNoiseLocation);
 
-	// 청각 게이지가 소음원이므로, 이 경로에서만 게이지를 비운다 — 카메라 등 다른
-	// 감지 수단으로 들어온 RequestInvestigate 호출은 이 게이지와 무관하다.
-	if (PossessGuardPawn)
+	// 평온에서는 기존처럼 즉시 비운다. 의심 이상에서 강제로 채운 게이지는
+	// 조사 중 유지하고 순찰 복귀·추격 전환 때 해제한다.
+	if (IsValid(PerceptionMeter) && !PerceptionMeter->IsHoldingAlertInvestigationGauge())
 	{
-		PossessGuardPawn->GetPerceptionMeterComponent()->ResetPerception();
+		PerceptionMeter->ResetPerception();
 	}
 }
 
@@ -475,25 +743,184 @@ void AGuardAIController::SetSightDebugEnabled(bool bInEnabled)
 
 void AGuardAIController::SetAIState(EGuardAIState NewState)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// 경보 중에는 다른 호출 경로에서도 순찰 상태로 되돌릴 수 없다.
+	if (NewState == EGuardAIState::Patrol && IsWorldAlarmActive())
+	{
+		NewState = EGuardAIState::Search;
+	}
 	if (AIState == NewState)
 	{
 		return;
 	}
 
 	AGuardCharacter* GuardPawn = PossessGuardPawn.Get();
+	// 의심 단계에서 채운 청각 게이지는 조사 종료 또는 추격 전환 때 해제한다.
+	if (HasAuthority() && IsValid(GuardPawn) && NewState != EGuardAIState::Search)
+	{
+		UPerceptionMeterComponent* PerceptionMeter = GuardPawn->GetPerceptionMeterComponent();
+		if (IsValid(PerceptionMeter) && PerceptionMeter->IsHoldingAlertInvestigationGauge())
+		{
+			PerceptionMeter->ResetPerception();
+		}
+	}
 	const FString PawnName = IsValid(GuardPawn) ? GuardPawn->GetName() : TEXT("InvalidPawn");
 
 	const UEnum* GuardAIStateEnum = StaticEnum<EGuardAIState>();
-	const FString PreviousStateName = GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(AIState));
-	const FString NewStateName = GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(NewState));
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] AI State 변경: %s -> %s"),
+	const FString PreviousStateName = AIState == EGuardAIState::Patrol ? TEXT("순찰") : AIState == EGuardAIState::Search ? TEXT("수색") : AIState == EGuardAIState::Chase ? TEXT("추격") : GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(AIState));
+	const FString NewStateName = NewState == EGuardAIState::Patrol ? TEXT("순찰") : NewState == EGuardAIState::Search ? TEXT("수색") : NewState == EGuardAIState::Chase ? TEXT("추격") : GuardAIStateEnum->GetNameStringByValue(static_cast<int64>(NewState));
+	UE_LOG(LogGuardAI, Log, TEXT("[AI][%s] %s → %s"),
 		*PawnName, *PreviousStateName, *NewStateName);
 
 	AIState = NewState;
 }
 
+void AGuardAIController::LogArrestRangeDebug(float ArrestRange, bool bMoveCompleted) const
+{
+	if (!HasAuthority() || !IsValid(GetWorld()) || !IsValid(GetPawn()) || !IsValid(GetBlackboardComponent()))
+	{
+		return;
+	}
+	const AActor* TargetActor = Cast<AActor>(GetBlackboardComponent()->GetValueAsObject(GuardAIKeys::TargetActor));
+	if (!IsValid(TargetActor))
+	{
+		return;
+	}
+	if (ArrestRange >= 0.f)
+	{
+		LastArrestRangeDebug = ArrestRange;
+	}
+	const FName Event = bMoveCompleted ? TEXT("ArrestDebugMoveCompleted") : TEXT("ArrestDebugCheck");
+	const float Now = GetWorld()->GetTimeSeconds();
+	const float* LastLogTime = SearchDebugLastLogTimes.Find(Event);
+	if (LastLogTime && Now - *LastLogTime < 1.f)
+	{
+		return;
+	}
+	SearchDebugLastLogTimes.Add(Event, Now);
+	const FVector GuardLocation = GetPawn()->GetActorLocation();
+	const FVector TargetLocation = TargetActor->GetActorLocation();
+	const float Distance = FVector::Dist(GuardLocation, TargetLocation);
+	const float HorizontalDistance = FVector::Dist2D(GuardLocation, TargetLocation);
+	float GuardRadius = 0.f;
+	float GuardHalfHeight = 0.f;
+	float TargetRadius = 0.f;
+	float TargetHalfHeight = 0.f;
+	GetPawn()->GetSimpleCollisionCylinder(GuardRadius, GuardHalfHeight);
+	TargetActor->GetSimpleCollisionCylinder(TargetRadius, TargetHalfHeight);
+	const FString Message = FString::Printf(TEXT("[체포 거리][%s][%s] 대상=%s 중심거리=%.1fcm 수평=%.1fcm 높이차=%.1fcm 체포범위=%.1fcm 판정=%s 반경(경비/타겟)=%.1f/%.1fcm | %s | %s"), *GetNameSafe(GetPawn()), bMoveCompleted ? TEXT("이동 성공 직후") : TEXT("조건 검사"), *GetNameSafe(TargetActor), Distance, HorizontalDistance, FMath::Abs(GuardLocation.Z - TargetLocation.Z), LastArrestRangeDebug, LastArrestRangeDebug < 0.f ? TEXT("범위 미확인") : Distance <= LastArrestRangeDebug ? TEXT("범위 안") : TEXT("범위 밖"), GuardRadius, TargetRadius, LastChaseMoveRequestDebug.IsEmpty() ? TEXT("최근 이동 요청 없음") : *LastChaseMoveRequestDebug, LastChasePathDebug.IsEmpty() ? TEXT("최근 경로 없음") : *LastChasePathDebug);
+	UE_LOG(LogGuardAI, Warning, TEXT("%s"), *Message);
+	if (IsValid(GEngine) && GetNetMode() != NM_DedicatedServer)
+	{
+		const uint64 MessageKey = (static_cast<uint64>(GetUniqueID()) << 32) | 2;
+		GEngine->AddOnScreenDebugMessage(MessageKey, 2.f, Distance <= LastArrestRangeDebug ? FColor::Green : FColor::Red, Message);
+	}
+}
+
+void AGuardAIController::LogSearchTransitionDebug(FName Event, const FString& Detail) const
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	const UWorld* World = GetWorld();
+	if (!IsValid(BlackboardComp) || !IsValid(World))
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	const FString EventName = Event.ToString();
+	if (!bDetailedSightSearchLogs && (EventName == TEXT("SightGaugeSnapshot") || EventName.StartsWith(TEXT("Timeout_")) || EventName == TEXT("FinishRejected") || EventName == TEXT("ChasePathReady") || EventName == TEXT("ChasePathUpdated")))
+	{
+		return;
+	}
+	const float* LastLogTime = SearchDebugLastLogTimes.Find(Event);
+	if (LastLogTime && Now - *LastLogTime < 1.0f)
+	{
+		return;
+	}
+	SearchDebugLastLogTimes.Add(Event, Now);
+
+	const float SearchStartTime = BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime);
+	const int32 SearchStep = IsValid(GuardPatrolComp) ? GuardPatrolComp->GetCurrentSearchStep() : INDEX_NONE;
+	const int32 SweepCount = IsValid(GuardPatrolComp) ? GuardPatrolComp->SearchSweepCount : 0;
+	if (!bDetailedSightSearchLogs)
+	{
+		static const TMap<FName, FString> EventLabels = {
+			{TEXT("PatrolEntry"), TEXT("순찰 시작")},
+			{TEXT("SearchEntry"), TEXT("수색 시작")},
+			{TEXT("PatrolWhileTargetVisible"), TEXT("경고: 타겟이 보이는데 순찰 진입")},
+			{TEXT("FinishStarted"), TEXT("마무리 수색 시작")},
+			{TEXT("FinishMoveRequest"), TEXT("마무리 이동 요청")},
+			{TEXT("FinishMoveRetry"), TEXT("마무리 이동 실패·재시도")},
+			{TEXT("FinishInterrupted"), TEXT("재발견·새 수색으로 마무리 중단")},
+			{TEXT("FinishCompleted"), TEXT("마무리 대기 완료")},
+			{TEXT("FinishAbort"), TEXT("마무리 수색 중단")},
+			{TEXT("SearchNavigationMissing"), TEXT("수색 경로 정보 없음")},
+			{TEXT("SearchGoalProjected"), TEXT("수색 목적지 보정")},
+			{TEXT("SearchAlternativeGoal"), TEXT("수색 대체 목적지 선택")},
+			{TEXT("SearchNoReachableGoal"), TEXT("도달 가능한 수색 지점 없음")},
+			{TEXT("SearchSelectFailed"), TEXT("수색 위치 무효")},
+			{TEXT("SearchExhausted"), TEXT("수색 횟수 소진")},
+			{TEXT("SearchPointFailed"), TEXT("수색 지점 선택 실패")},
+			{TEXT("ChaseMoveRequestFailed"), TEXT("추격 이동 요청 실패")},
+			{TEXT("ChaseNavigationMissing"), TEXT("추격 경로 정보 없음")},
+			{TEXT("ChasePathFailed"), TEXT("추격 경로 생성 실패")},
+			{TEXT("InvestigateInvalidGoal"), TEXT("수색 이동 목적지 무효")},
+			{TEXT("InvestigateMoveRequest"), TEXT("수색 이동 요청")},
+			{TEXT("InvestigateMoveRetry"), TEXT("수색 이동 실패·재시도")},
+			{TEXT("InvestigateIdle"), TEXT("수색 이동 종료")},
+			{TEXT("InvestigateAbort"), TEXT("수색 이동 중단")}
+		};
+		const FString* EventLabel = EventLabels.Find(Event);
+		FString Summary = EventLabel ? *EventLabel : Detail;
+		if (EventName.StartsWith(TEXT("ChaseMoveCompleted_")))
+		{
+			Summary = TEXT("추격 이동 종료");
+			TArray<FString> Parts;
+			EventName.ParseIntoArray(Parts, TEXT("_"));
+			if (Parts.Num() >= 2)
+			{
+				const int32 ResultCode = FCString::Atoi(*Parts[1]);
+				const TCHAR* ResultLabel = ResultCode == 0 ? TEXT("성공") : ResultCode == 1 ? TEXT("막힘") : ResultCode == 2 ? TEXT("경로 이탈") : ResultCode == 3 ? TEXT("중단") : ResultCode == 5 ? TEXT("무효") : TEXT("기타");
+				Summary += FString::Printf(TEXT("(%s)"), ResultLabel);
+			}
+		}
+		const TCHAR* StateLabel = AIState == EGuardAIState::Patrol ? TEXT("순찰") : AIState == EGuardAIState::Search ? TEXT("수색") : TEXT("추격");
+		const float SearchElapsed = SearchStartTime >= 0.f ? FMath::Max(0.f, Now - SearchStartTime) : 0.f;
+		const FString SearchInfo = AIState == EGuardAIState::Search ? FString::Printf(TEXT(" 경과=%.1f초 단계=%d/%d"), SearchElapsed, SearchStep, SweepCount) : TEXT("");
+		const int32 GoalStart = Detail.Find(TEXT("Goal=V("));
+		if (GoalStart != INDEX_NONE)
+		{
+			const int32 GoalEnd = Detail.Find(TEXT(")"), ESearchCase::CaseSensitive, ESearchDir::FromStart, GoalStart);
+			if (GoalEnd != INDEX_NONE)
+			{
+				Summary += TEXT(" 목적지=") + Detail.Mid(GoalStart + 5, GoalEnd - GoalStart - 4);
+			}
+		}
+		const int32 RequestStart = Detail.Find(TEXT("MoveRequest="));
+		if (RequestStart != INDEX_NONE)
+		{
+			const int32 RequestResult = FCString::Atoi(*Detail.Mid(RequestStart + 12));
+			Summary += RequestResult == 0 ? TEXT("(실패)") : RequestResult == 1 ? TEXT("(이미 도착)") : TEXT("(접수)");
+		}
+		UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][%s] 상태=%s 시야=%s 게이지=%.0f 대상=%s%s"), *GetNameSafe(GetPawn()), *Summary, StateLabel, BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) ? TEXT("보임") : TEXT("놓침"), BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge), *GetNameSafe(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)), *SearchInfo);
+		return;
+	}
+	UE_LOG(LogGuardAI, Warning, TEXT("[SearchDebug][%s][%s] %s | Now=%.3f State=%d See=%d Gauge=%.1f Start=%.3f Elapsed=%.3f LastSeenAge=%.3f Step=%d/%d MoveStatus=%d Target=%s Investigate=%s"), *GetNameSafe(GetPawn()), *Event.ToString(), *Detail, Now, static_cast<int32>(AIState), BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget), BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge), SearchStartTime, Now - SearchStartTime, Now - BlackboardComp->GetValueAsFloat(GuardAIKeys::LastSeenTime), SearchStep, SweepCount, static_cast<int32>(GetMoveStatus()), *GetNameSafe(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor)), *BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation).ToCompactString());
+}
+
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 
 	if (!IsValid(GuardPatrolComp))
 	{
@@ -503,32 +930,54 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 		return false;
 	}
 
+	if (State == EGuardAIState::Patrol && IsWorldAlarmActive())
+	{
+		EnsureAlarmSearchSession();
+		SetAIState(EGuardAIState::Search);
+		LogSearchTransitionDebug(TEXT("AlarmPatrolBlocked"), TEXT("경보 중 순찰 요청 차단: 경보 수색 분기 설정 확인"));
+		return false;
+	}
+
 	//if (AIState == State)
 	//{
 	//	return false;
 	//}
 
 
-	UE_LOG(LogGuardAI, Warning, TEXT("[%s] SelectNextAction: 요청 State = %d"),
-		*GetNameSafe(PossessGuardPawn), static_cast<int32>(State));
+	if (bDetailedSightSearchLogs)
+	{
+		const TCHAR* StateLabel = State == EGuardAIState::Patrol ? TEXT("순찰") : State == EGuardAIState::Search ? TEXT("수색") : TEXT("추격");
+		UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][행동 요청] %s"), *GetNameSafe(PossessGuardPawn), StateLabel);
+	}
 
+	if (State == EGuardAIState::Patrol)
+	{
+		const UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+		if (IsValid(BlackboardComp) && BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget) && BlackboardComp->GetValueAsFloat(GuardAIKeys::DetectionGauge) >= 100.0f)
+		{
+			LogSearchTransitionDebug(TEXT("PatrolWhileTargetVisible"), FString::Printf(TEXT("대상이 보이고 게이지 100인데 순찰 태스크 실행: PreviousState=%d"), static_cast<int32>(AIState)));
+		}
+	}
 	SetAIState(State);
 
 	switch (State)
 	{
 	case EGuardAIState::Patrol:
+		LogSearchTransitionDebug(TEXT("PatrolEntry"), TEXT("순찰 선택 태스크 실행"));
 
 		if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
 		{
-			// 정찰 상태로 진입했으므로 이전 추격 대상을 해제한다.
-			// 수색 중에는 기존 TargetActor를 유지하고, 실제 Patrol 복귀 시에만 초기화한다.
-			BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+			// 실제로 시야를 잃은 대상만 해제한다. 보이는 대상을 지우면 재감지 콜백 없이 UI가 0에 머물 수 있다.
+			if (!BlackboardComp->GetValueAsBool(GuardAIKeys::CanSeeTarget))
+			{
+				BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+			}
 		}
 
-		GuardPatrolComp->SelectNextPatrolPoint2();
-		return true;
+		return IsValid(GuardPatrolComp) && GuardPatrolComp->SelectNextPatrolPoint2();
 
 	case EGuardAIState::Search:
+		LogSearchTransitionDebug(TEXT("SearchEntry"), TEXT("수색 선택 태스크 실행"));
 		return GuardPatrolComp->SelectNextSearchPoint2();
 
 	//case EGuardAIState::Chase:
@@ -542,6 +991,10 @@ bool AGuardAIController::SelectNextAction(EGuardAIState State)
 
 void AGuardAIController::ApplyCurrentMoveSpeed()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	// 현재 경비의 이동 상태를 기준으로 최종 이동 속도를 계산하고 적용한다.
 	// 월드 경계도에 의해 속도가 증가된 상태라면 WorldAlertMoveSpeedMultiplier를 추가로 적용한다.
 	// 추격 상태와 월드 경계도 상태가 변경될 때만 호출한다.
@@ -558,11 +1011,12 @@ void AGuardAIController::ApplyCurrentMoveSpeed()
 		return;
 	}
 
-	// 추격 중이면 추격 속도를 사용하고, 추격 중이 아니면 일반 이동 속도를 사용한다.
-	float NewMoveSpeed = WorldAlertSet.bIsChasing ? WorldAlertSet.ChaseMoveSpeed : WorldAlertSet.NormalMoveSpeed;
+	// 경보 중에는 수색도 추격 속도로 이동한다.
+	const bool bAlarm = IsWorldAlarmActive();
+	float NewMoveSpeed = (bAlarm || WorldAlertSet.bIsChasing) ? WorldAlertSet.ChaseMoveSpeed : WorldAlertSet.NormalMoveSpeed;
 
 	// 월드 경계도에 의해 속도가 증가된 상태라면 현재 선택된 이동 속도에 경계도 배율을 적용한다.
-	if (WorldAlertSet.bWorldAlertSpeedUp)
+	if (bAlarm || WorldAlertSet.bWorldAlertSpeedUp)
 	{
 		NewMoveSpeed *= WorldAlertSet.WorldAlertMoveSpeedMultiplier;
 	}
@@ -591,9 +1045,126 @@ float AGuardAIController::GetWorldAlertLevel() const
 	return 0.f;
 }
 
+bool AGuardAIController::IsWorldAlarmActive() const
+{
+	const UAlertComponent* Alert = UAlertComponent::Get(this);
+	return IsValid(Alert) && Alert->IsAlarmed();
+}
+
+void AGuardAIController::BindToWorldAlert()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	UAlertComponent* Alert = UAlertComponent::Get(this);
+	if (Alert == BoundAlertComponent.Get())
+	{
+		return;
+	}
+	if (IsValid(BoundAlertComponent))
+	{
+		BoundAlertComponent->OnAlertGaugeChanged.RemoveDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		BoundAlertComponent->OnAlertLevelChanged.RemoveDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+	}
+	BoundAlertComponent = Alert;
+	if (IsValid(Alert))
+	{
+		Alert->OnAlertGaugeChanged.AddUniqueDynamic(this, &AGuardAIController::UpdateMoveSpeedByWorldAlert);
+		// 게이지 복제의 양자화 값이 이미 255여도 실제 경보 단계 진입은 별도로 받는다.
+		Alert->OnAlertLevelChanged.AddUniqueDynamic(this, &AGuardAIController::HandleWorldAlertLevelChanged);
+	}
+}
+
+void AGuardAIController::HandleWorldAlertLevelChanged(EAlertLevel NewLevel, EAlertLevel OldLevel)
+{
+	if (!HasAuthority() || (NewLevel != EAlertLevel::Alarm && OldLevel != EAlertLevel::Alarm))
+	{
+		return;
+	}
+	UpdateMoveSpeedByWorldAlert(GetWorldAlertLevel() / 100.f);
+}
+
+void AGuardAIController::EnsureAlarmSearchSession()
+{
+	if (!HasAuthority() || bMatchEnded || !IsWorldAlarmActive() || !IsValid(GetWorld()) || !IsValid(PossessGuardPawn))
+	{
+		return;
+	}
+	UBlackboardComponent* BlackboardComp = GetBlackboardComponent();
+	if (!IsValid(BlackboardComp))
+	{
+		return;
+	}
+	const bool bHasSearchLocation = BlackboardComp->IsVectorValueSet(GuardAIKeys::InvestigateLocation) && FAISystem::IsValidLocation(BlackboardComp->GetValueAsVector(GuardAIKeys::InvestigateLocation));
+	if (!bHasSearchLocation)
+	{
+		FVector SearchLocation = PossessGuardPawn->GetActorLocation();
+		if (BlackboardComp->IsVectorValueSet(GuardAIKeys::LastKnownLocation))
+		{
+			const FVector LastKnownLocation = BlackboardComp->GetValueAsVector(GuardAIKeys::LastKnownLocation);
+			if (FAISystem::IsValidLocation(LastKnownLocation))
+			{
+				SearchLocation = LastKnownLocation;
+			}
+		}
+		BlackboardComp->SetValueAsVector(GuardAIKeys::InvestigateLocation, SearchLocation);
+	}
+	if (!bHasSearchLocation || BlackboardComp->GetValueAsFloat(GuardAIKeys::SearchStartTime) < 0.f)
+	{
+		// 새 소음 감지로 집계하지 않고 경보에 필요한 수색 세션만 만든다.
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, GetWorld()->GetTimeSeconds());
+	}
+}
+
+void AGuardAIController::UpdateWorldAlarmBehavior()
+{
+	if (!HasAuthority() || bMatchEnded || !IsValid(PossessGuardPawn) || !IsValid(GetBlackboardComponent()))
+	{
+		return;
+	}
+	BindToWorldAlert();
+	const bool bAlarm = IsWorldAlarmActive();
+	const bool bAlarmChanged = bAlarm != bWorldAlarmBehaviorActive;
+	bWorldAlarmBehaviorActive = bAlarm;
+	if (bAlarm)
+	{
+		EnsureAlarmSearchSession();
+	}
+	if (!bAlarmChanged)
+	{
+		return;
+	}
+	if (IsValid(GuardHearingComp))
+	{
+		GuardHearingComp->ClearWorldAlertSilenceTimer();
+	}
+	WorldAlertSet.bWorldAlertSpeedTriggered = bAlarm;
+	SetWorldAlertSpeedUp(bAlarm);
+	ApplyCurrentMoveSpeed();
+	UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][경보] %s"), *GetNameSafe(PossessGuardPawn), bAlarm ? TEXT("최대 속도·무제한 수색 시작") : TEXT("경보 초기화: 일반 수색 규칙 복구"));
+	// 추격·체포가 진행 중이면 그대로 유지한다. 나머지는 순찰/마무리 대기를 끊고 루트부터 판단한다.
+	if (bAlarm && AIState != EGuardAIState::Chase)
+	{
+		SetAIState(EGuardAIState::Search);
+		if (UBehaviorTreeComponent* BehaviorTreeComp = Cast<UBehaviorTreeComponent>(GetBrainComponent()))
+		{
+			if (BehaviorTreeComp->IsRunning() && !BehaviorTreeComp->IsPaused())
+			{
+				BehaviorTreeComp->RestartTree(EBTRestartMode::ForceReevaluateRootNode);
+			}
+		}
+	}
+}
+
 void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 {
-	if (!PossessGuardPawn)
+	if (!HasAuthority() || bMatchEnded || !IsValid(PossessGuardPawn))
+	{
+		return;
+	}
+	UpdateWorldAlarmBehavior();
+	if (IsWorldAlarmActive())
 	{
 		return;
 	}
@@ -663,6 +1234,10 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 void AGuardAIController::SetChasing(bool bChasing)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (WorldAlertSet.bIsChasing == bChasing)
 	{
 		return;

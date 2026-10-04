@@ -1,19 +1,13 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "AI/BTService_PlayAggravationMontage.h"
-
 #include "AIController.h"
 #include "Animation/AnimMontage.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/Character.h"
-
-#include "AI/GuardAnimInstance.h"
+#include "Character/GuardCharacter.h"
 
 UBTService_PlayAggravationMontage::UBTService_PlayAggravationMontage()
 {
 	NodeName = TEXT("Play Aggravation Montage");
+	bCreateNodeInstance = true;
 	bNotifyBecomeRelevant = true;
 	bNotifyCeaseRelevant = true;
 }
@@ -21,48 +15,33 @@ UBTService_PlayAggravationMontage::UBTService_PlayAggravationMontage()
 void UBTService_PlayAggravationMontage::OnBecomeRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
 	Super::OnBecomeRelevant(OwnerComp, NodeMemory);
-
-	if (!IsValid(AggravationMontage))
+	ActiveMontage = nullptr;
+	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter) && GuardCharacter->HasAuthority())
 	{
-		return;
-	}
-
-	if (UGuardAnimInstance* AnimInstance = GetGuardAnimInstance(OwnerComp))
-	{
-		AnimInstance->Montage_Play(AggravationMontage);
+		ActiveMontage = GuardCharacter->GetAggravationMontage();
+		if (!IsValid(ActiveMontage) && GuardCharacter->GuardType != EGuardType::Dog)
+		{
+			ActiveMontage = AggravationMontage;
+		}
+		if (IsValid(ActiveMontage))
+		{
+			GuardCharacter->SetAggravationMontage(ActiveMontage, true, MontageBlendOutTime);
+		}
 	}
 }
 
 void UBTService_PlayAggravationMontage::OnCeaseRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
 	Super::OnCeaseRelevant(OwnerComp, NodeMemory);
-
-	if (!IsValid(AggravationMontage))
+	if (AGuardCharacter* GuardCharacter = GetGuardCharacter(OwnerComp); IsValid(GuardCharacter) && GuardCharacter->HasAuthority() && IsValid(ActiveMontage))
 	{
-		return;
+		GuardCharacter->SetAggravationMontage(ActiveMontage, false, MontageBlendOutTime);
 	}
-
-	if (UGuardAnimInstance* AnimInstance = GetGuardAnimInstance(OwnerComp);
-		IsValid(AnimInstance) && AnimInstance->Montage_IsPlaying(AggravationMontage))
-	{
-		AnimInstance->Montage_Stop(MontageBlendOutTime, AggravationMontage);
-	}
+	ActiveMontage = nullptr;
 }
 
-UGuardAnimInstance* UBTService_PlayAggravationMontage::GetGuardAnimInstance(UBehaviorTreeComponent& OwnerComp) const
+AGuardCharacter* UBTService_PlayAggravationMontage::GetGuardCharacter(UBehaviorTreeComponent& OwnerComp) const
 {
 	AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!IsValid(AIController))
-	{
-		return nullptr;
-	}
-
-	ACharacter* GuardCharacter = Cast<ACharacter>(AIController->GetPawn());
-	if (!IsValid(GuardCharacter) || !IsValid(GuardCharacter->GetMesh()))
-	{
-		return nullptr;
-	}
-
-	return Cast<UGuardAnimInstance>(GuardCharacter->GetMesh()->GetAnimInstance());
+	return IsValid(AIController) ? Cast<AGuardCharacter>(AIController->GetPawn()) : nullptr;
 }
-

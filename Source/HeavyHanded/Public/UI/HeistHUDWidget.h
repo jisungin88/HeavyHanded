@@ -363,11 +363,15 @@ private:
 	void ApplyHeldSlot(AActor* Held);
 
 	/**
-	 * 특성 태그에 맞는 아이콘을 로드해 돌려준다.
+	 * 노획물에 맞는 아이콘을 로드해 돌려준다.
+	 * 카탈로그 행 이름(DT_LootIcon) → 특성 태그 → 폴백 순서로 찾는다.
 	 *
 	 * 로드 실패도 null 로 캐시에 넣는다 — 안 그러면 못 찾는 그림을 0.1초마다 다시 찾는다
 	 */
-	UTexture2D* ResolveHeldIcon(const FGameplayTagContainer& TypeTags);
+	UTexture2D* ResolveHeldIcon(FName LootRow, const FGameplayTagContainer& TypeTags);
+
+	/** DT_LootIcon 에 없다고 이미 경고한 행 이름. 같은 노획물을 집을 때마다 찍지 않으려고 둔다 */
+	TSet<FName> WarnedLootRows;
 
 	UPROPERTY()
 	TObjectPtr<AHeistGameState> BoundState;
@@ -430,6 +434,15 @@ private:
 	 */
 	FLinearColor PlateNormalColor = FLinearColor::White;
 	FLinearColor PlateShadowNormalColor = FLinearColor::White;
+
+	/**
+	 * WBP 에 찍어 둔 타이머 · 목표 금액 글자의 평소 색. 판과 같은 이유로 C++ 에 박지 않는다.
+	 *
+	 * HUD 글자 색은 토큰이 아니라 WBP 가 정한다 (2026-10-01). 위급 · 목표 달성처럼
+	 * 상태가 바뀌는 순간만 C++ 이 칠하고, 끝나면 이 색으로 돌려놓는다
+	 */
+	FSlateColor TimerNormalColor = FSlateColor(FLinearColor::White);
+	FSlateColor ObjectiveNormalColor = FSlateColor(FLinearColor::White);
 
 	/** 받침은 경보 색을 이 비율로 어둡게 쓴다. 판과 받침의 명도 차가 입체감이다 */
 	static constexpr float UrgentShadowScale = 0.3f;

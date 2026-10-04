@@ -173,7 +173,7 @@ void USkillSlotWidget::TryBind()
 		return;
 	}
 
-	const UGameplayAbility* Ability = FindCooldownAbility(*ASC);
+	const UGameplayAbility* Ability = FindCooldownAbility(*ASC, SlotIndex);
 	if (!Ability)
 	{
 		// 폰이 아직 스폰 · 빙의 전이면 어빌리티가 부여되지 않았다.
@@ -182,9 +182,9 @@ void USkillSlotWidget::TryBind()
 		{
 			bWarnedNoSkill = true;
 			UE_LOG(LogHeavyUI, Warning,
-				   TEXT("%s: ASC 는 있는데 %.0f초 동안 쿨다운 있는 스킬이 없다. 계속 찾는다 "
-					    "(캐릭터 BP 의 AbilityInputBindings · 스킬 GA 의 Cooldown Gameplay Effect Class 확인)"),
-				   *GetName(), BindGiveUpSeconds);
+				   TEXT("%s: ASC 는 있는데 %.0f초 동안 %d번째 쿨다운 스킬이 없다. 계속 찾는다 "
+					    "(캐릭터 BP 의 AbilityInputBindings · 스킬 GA 의 Cooldown Gameplay Effect Class · 칸의 Slot Index 확인)"),
+				   *GetName(), BindGiveUpSeconds, SlotIndex + 1);
 		}
 
 		World->GetTimerManager().SetTimer(
@@ -213,16 +213,18 @@ void USkillSlotWidget::TryBind()
 		CooldownTagHandles.Emplace(Tag, Handle);
 	}
 
-	UE_LOG(LogHeavyUI, Log, TEXT("%s: 스킬 칸 바인딩 — %s (%s, 쿨다운 태그 %s)"),
-		   *GetName(), *SkillName.ToString(), *Ability->GetClass()->GetName(), *CooldownTags.ToStringSimple());
+	UE_LOG(LogHeavyUI, Log, TEXT("%s: 스킬 칸 %d 바인딩 — %s (%s, 쿨다운 태그 %s)"),
+		   *GetName(), SlotIndex, *SkillName.ToString(), *Ability->GetClass()->GetName(), *CooldownTags.ToStringSimple());
 
 	// 붙는 순간의 상태로 맞춘다. 이미 쿨다운 중이어도 시작 훅은 쏘지 않는다 (헤더 OnCooldownStarted 주석)
 	RefreshCooldown(false);
 	OnSkillBound(SkillName);
 }
 
-const UGameplayAbility* USkillSlotWidget::FindCooldownAbility(const UAbilitySystemComponent& ASC)
+const UGameplayAbility* USkillSlotWidget::FindCooldownAbility(const UAbilitySystemComponent& ASC, int32 Index)
 {
+	TArray<TPair<int32, const UGameplayAbility*>> Candidates;
+
 	for (const FGameplayAbilitySpec& Spec : ASC.GetActivatableAbilities())
 	{
 		const UGameplayAbility* Ability = Spec.Ability;
@@ -234,10 +236,24 @@ const UGameplayAbility* USkillSlotWidget::FindCooldownAbility(const UAbilitySyst
 		const FGameplayTagContainer* Tags = Ability->GetCooldownTags();
 		if (Tags && Tags->Num() > 0)
 		{
-			return Ability;
+			Candidates.Emplace(Spec.InputID, Ability);
 		}
 	}
-	return nullptr;
+
+	// 입력 없이 부여된 어빌리티(InputID 음수)는 뒤로 보낸다. 칸 순번은 누르는 스킬 기준이다.
+	// StableSort — 같은 InputID 끼리는 부여 순서를 지킨다
+	Candidates.StableSort([](const TPair<int32, const UGameplayAbility*>& A, const TPair<int32, const UGameplayAbility*>& B)
+	{
+		const bool bAHasInput = A.Key >= 0;
+		const bool bBHasInput = B.Key >= 0;
+		if (bAHasInput != bBHasInput)
+		{
+			return bAHasInput;
+		}
+		return A.Key < B.Key;
+	});
+
+	return Candidates.IsValidIndex(Index) ? Candidates[Index].Value : nullptr;
 }
 
 void USkillSlotWidget::Unbind()
