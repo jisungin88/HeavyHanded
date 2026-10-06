@@ -1,4 +1,5 @@
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 #include "AI/GuardAnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimInstance.h"
@@ -143,6 +144,7 @@ void AGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AGuardCharacter, ReplicatedSightDebugRotation);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedDetectionGaugePercent);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedAggroTarget);
+	DOREPLIFETIME(AGuardCharacter, bReplicatedIsInCustody);
 	DOREPLIFETIME(AGuardCharacter, ReplicatedLookAroundType);
 	DOREPLIFETIME(AGuardCharacter, bReplicatedIsArresting);
 	DOREPLIFETIME(AGuardCharacter, SightDebugUpdateInterval);
@@ -726,7 +728,8 @@ void AGuardCharacter::UpdatePerceptionWidgets()
 
 	if (IsValid(DetectionGaugeWidgetComponent))
 	{
-		const bool bEnablePerception = bEnableSight || bEnableHearing;
+		// [체포 UI] 감각이 비활성화돼도 담당 경비의 감시 위젯은 유지한다.
+		const bool bEnablePerception = bEnableSight || bEnableHearing || bReplicatedIsInCustody;
 		DetectionGaugeWidgetComponent->SetVisibility(bEnablePerception);
 		bEnablePerception ? DetectionGaugeWidgetComponent->Activate() : DetectionGaugeWidgetComponent->Deactivate();
 	}
@@ -781,6 +784,7 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 	if (HasAuthority())
 	{
 		ReplicatedAggroTarget = nullptr;
+		bReplicatedIsInCustody = false;
 		AGuardAIController* GuardAIController = Cast<AGuardAIController>(GetController());
 		if (!IsValid(GuardAIController))
 		{
@@ -792,6 +796,13 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 			AActor* TargetActor = IsValid(BlackboardComp)
 				? Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor))
 				: nullptr;
+			if (GuardAIController->IsInCustody())
+			{
+				TargetActor = GuardAIController->GetCustodyTarget();
+			}
+			// [체포 UI] 감시는 추격이 아니므로 게이지를 강제로 채우지 않는다.
+			// 대상만 CustodyTarget에서 전달하고, 별도 감시 상태로 빈 게이지의 숨김 조건을 우회한다.
+			bReplicatedIsInCustody = GuardAIController->IsInCustody() && IsValid(TargetActor);
 			const float GaugePercent = IsValid(TargetActor) ? GuardAIController->GetDetectionGaugePercent() : 0.0f;
 			SetReplicatedDetectionGauge(GaugePercent);
 			ReplicatedAggroTarget = IsValid(TargetActor) ? TargetActor : nullptr;
@@ -802,6 +813,12 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 	{
 		DrawWidgetDebug(TEXT("실패: 시야 위젯 컴포넌트 없음"), FColor::Red);
 		return;
+	}
+	// [체포 UI] 클라이언트에서도 복제된 상태로 컴포넌트 표시를 갱신한다.
+	// 실제 표시 조건이 달라질 때만 활성화 상태를 변경하며 기존 갱신 타이머를 재사용한다.
+	if (DetectionGaugeWidgetComponent->IsVisible() != (bEnableSight || bEnableHearing || bReplicatedIsInCustody))
+	{
+		UpdatePerceptionWidgets();
 	}
 
 	UDetectionGaugeWidget* GaugeWidget = Cast<UDetectionGaugeWidget>(DetectionGaugeWidgetComponent->GetUserWidgetObject());
@@ -820,8 +837,8 @@ void AGuardCharacter::UpdateHeadGaugeWidget()
 		const float FullThreshold = PerceptionMeterComponent->GetPerceptionFullThreshold();
 		HearingPercent = FullThreshold > 0.f ? FMath::Clamp(PerceptionMeterComponent->GetPerception01() / FullThreshold, 0.f, 1.f) * 100.f : 0.f;
 	}
-	GaugeWidget->SetPerceptionGaugePercents(ReplicatedDetectionGaugePercent, HearingPercent, bEnableSight, bEnableHearing);
 	GaugeWidget->SetAggroTarget(ReplicatedAggroTarget);
+	GaugeWidget->SetPerceptionGaugePercents(ReplicatedDetectionGaugePercent, HearingPercent, bEnableSight, bEnableHearing, bReplicatedIsInCustody);
 	if (!bDrawPerceptionWidgetDebug)
 	{
 		return;

@@ -13,6 +13,7 @@
 
 // Guard Character
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 
 // Behavior Tree / Blackboard
 #include "BehaviorTree/BehaviorTree.h"
@@ -89,6 +90,29 @@ AGuardAIController::AGuardAIController()
 void AGuardAIController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// [체포 추가] 기존 디버그 옵션과 무관하게 서버에서 감시 관계를 점검한다.
+	// 체포가 풀리거나 대상·담당 경비가 없어지면 감시를 정리하고 기존 행동으로 복귀한다.
+	if (HasAuthority() && IsInCustody() && !bMatchEnded)
+	{
+		if (!IsValid(CustodyTarget) || !CustodyTarget->IsRestrained() || !IsValid(PossessGuardPawn) || CustodyTarget->GetRestrainingGuard() != PossessGuardPawn)
+		{
+			EndCustody();
+		}
+		else
+		{
+			// 다른 플레이어·소음·경보보다 체포 대상 감시를 우선한다.
+			SetFocus(CustodyTarget, EAIFocusPriority::Gameplay);
+			// 외부 힘이나 운반으로 대상이 이동해도 곁을 지킨다. 경로 재요청은 초당 한 번만 한다.
+			const float Now = GetWorld()->GetTimeSeconds();
+			if (FVector::DistSquared2D(PossessGuardPawn->GetActorLocation(), CustodyTarget->GetActorLocation()) > FMath::Square(CustodyFollowDistance) && Now >= NextCustodyMoveTime)
+			{
+				NextCustodyMoveTime = Now + 1.f;
+				// [체포 추가] 감시 재접근은 체포 거리 재판정이나 추가 체포 애니메이션을 수행하지 않는다.
+				// 도달 불가능한 부분 경로는 허용하지 않고, 실패해도 감시 상태는 유지한 채 다음 요청을 기다린다.
+				MoveToActor(CustodyTarget, CustodyFollowDistance * 0.5f, true, true, true, nullptr, false);
+			}
+		}
+	}
 
 #if ENABLE_DRAW_DEBUG
 	if (!HasAuthority() || !IsValid(PossessGuardPawn) || !PossessGuardPawn->IsDrawSightDebugEnabled() || !PossessGuardPawn->bDrawMoveTargetDebug)
@@ -442,6 +466,10 @@ void AGuardAIController::OnPossess(APawn* InPawn)
 
 void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// [체포 추가] 경비 컨트롤러가 종료될 때 담당 플레이어의 체포를 해제한다.
+	// 종료 중에는 EndCustody가 BT를 재시작하지 않도록 bMatchEnded를 먼저 설정한다.
+	bMatchEnded = true;
+	if (HasAuthority()) EndCustody();
 	UnbindFromGameState();
 	if (IsValid(BoundAlertComponent))
 	{
@@ -460,6 +488,89 @@ void AGuardAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void AGuardAIController::OnUnPossess()
+{
+	// [체포 추가] 경비 Pawn만 제거되거나 교체되는 경우도 감시 관계를 정리한다.
+	// 부모의 빙의 해제 전에 처리하며, 임시 종료 플래그는 정리 후 원래 값으로 복원한다.
+	if (HasAuthority())
+	{
+		// 경비가 사라지거나 빙의가 해제되면 플레이어를 영구히 묶어두지 않는다.
+		const bool bWasMatchEnded = bMatchEnded;
+		bMatchEnded = true;
+		EndCustody();
+		bMatchEnded = bWasMatchEnded;
+	}
+	Super::OnUnPossess();
+}
+
+void AGuardAIController::BeginCustody(ABaseCharacter* Target)
+{
+	// [체포 추가] TryRestrain으로 이 경비가 먼저 체포를 등록한 대상만 감시할 수 있다.
+	// 다른 경비가 담당하는 대상의 감시를 가로채거나, 판 종료 후 새 감시를 시작하지 않는다.
+	if (!HasAuthority() || bMatchEnded || !IsValid(Target) || !IsValid(PossessGuardPawn) || !Target->IsRestrained() || Target->GetRestrainingGuard() != PossessGuardPawn)
+	{
+		return;
+	}
+	CustodyTarget = Target;
+	NextCustodyMoveTime = 0.f;
+	SetAIState(EGuardAIState::Custody);
+	// 체포 태스크 종료 후 호출한다. BT를 정지해 반복 체포와 순찰 전환을 막는다.
+	if (UBrainComponent* Brain = GetBrainComponent(); IsValid(Brain))
+	{
+		Brain->StopLogic(TEXT("체포 대상 감시"));
+	}
+	StopMovement();
+	SetChasing(false);
+	// [체포 추가] 감시는 추격 또는 체포 시도 중이 아니므로 추격 속도·체포·두리번 연출을 종료한다.
+	PossessGuardPawn->SetArresting(false);
+	PossessGuardPawn->SetLookAroundType(EGuardLookAroundType::None);
+	if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent(); IsValid(BlackboardComp))
+	{
+		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, false);
+		// [체포 추가] 감시 대상은 CustodyTarget에 남겨두고 일반 추격·수색 정보만 비운다.
+		// 해제 후 과거 목격 시각이나 수색 위치로 재진입하지 않도록 세션 시각도 무효화한다.
+		BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::DetectionGauge, 0.f);
+		BlackboardComp->ClearValue(GuardAIKeys::LastKnownLocation);
+		BlackboardComp->ClearValue(GuardAIKeys::InvestigateLocation);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, -100000.f);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, -100000.f);
+	}
+	SetFocus(Target, EAIFocusPriority::Gameplay);
+	UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][체포 감시 시작] 대상=%s"), *GetNameSafe(PossessGuardPawn), *GetNameSafe(Target));
+}
+
+void AGuardAIController::EndCustody(ABaseCharacter* ReleasedTarget)
+{
+	// [체포 추가] 서버에서만 종료하며, 다른 플레이어의 해제 알림으로 현재 감시가 풀리지 않게 한다.
+	if (!HasAuthority() || (ReleasedTarget && CustodyTarget != ReleasedTarget))
+	{
+		return;
+	}
+	if (!IsInCustody() && !IsValid(CustodyTarget)) return;
+	ABaseCharacter* PreviousTarget = CustodyTarget;
+	CustodyTarget = nullptr;
+	// [체포 추가] 플레이어 쪽 ReleaseRestraint도 이 함수를 호출하므로 관계를 먼저 비운다.
+	// 경비 쪽에서 종료한 경우에만 자신이 담당하던 플레이어를 함께 해제한다.
+	StopMovement();
+	ClearFocus(EAIFocusPriority::Gameplay);
+	if (IsValid(PreviousTarget) && PreviousTarget->IsRestrained() && PreviousTarget->GetRestrainingGuard() == PossessGuardPawn)
+	{
+		PreviousTarget->ReleaseRestraint();
+	}
+	SetAIState(IsWorldAlarmActive() ? EGuardAIState::Search : EGuardAIState::Patrol);
+	// [체포 추가] 감시 해제 후에도 기존 경보 정책을 따른다. 경보 100%면 순찰 대신 수색으로 복귀한다.
+	UE_LOG(LogGuardAI, Log, TEXT("[AI][%s][체포 감시 종료]"), *GetNameSafe(PossessGuardPawn));
+	if (!bMatchEnded && IsValid(GetPawn()))
+	{
+		// [체포 추가] 정상 해제 때는 현재 시야를 다시 확인하고 중지했던 기존 BT를 재시작한다.
+		// 판 종료·경비 빙의 해제 중에는 재시작하지 않는다.
+		if (IsValid(GuardSightComp)) GuardSightComp->RefreshSightTarget(GetBlackboardComponent());
+		UpdateWorldAlarmBehavior();
+		if (UBrainComponent* Brain = GetBrainComponent(); IsValid(Brain)) Brain->RestartLogic();
+	}
 }
 
 
@@ -573,9 +684,10 @@ void AGuardAIController::StopForMatchEnd()
 
 void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
+	// [체포 추가] 감시 중에는 새 시야·청각 콜백으로 일반 추격 대상을 등록하지 않는다.
 	// 클라이언트를 신뢰하지 않는다: 지각 판정 자체가 서버 시뮬레이션 결과이므로
 	// 이 콜백은 서버에서만 의미 있는 Blackboard 갱신을 수행해야 한다.
-	if (!HasAuthority())
+	if (!HasAuthority() || IsInCustody() || bMatchEnded)
 	{
 		return;
 	}
@@ -596,8 +708,9 @@ void AGuardAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus St
 
 void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 {
+	// [체포 추가] 청각 게이지 완료가 체포 감시를 소음 수색으로 덮어쓰지 않도록 차단한다.
 	// 인지 게이지 판정은 서버 권위이므로 이 콜백도 서버에서만 의미가 있다 (OnTargetPerceptionUpdated와 동일한 이유)
-	if (!HasAuthority())
+	if (!HasAuthority() || IsInCustody() || bMatchEnded)
 	{
 		return;
 	}
@@ -628,9 +741,10 @@ void AGuardAIController::HandlePerceptionFull(FVector LastNoiseLocation)
 
 void AGuardAIController::RequestInvestigate(FVector Location)
 {
+	// [체포 추가] 소음 외의 외부 조사 요청도 감시 중 또는 판 종료 후에는 반영하지 않는다.
 	// 여러 시스템(청각 게이지, 카메라 등)이 부를 수 있는 공개 API 라 게이트를 안에 둔다
 	// (CLAUDE.md 3절 "여러 사람이 호출하는 API 는 게이트를 API 안에 둔다" 규칙)
-	if (!HasAuthority())
+	if (!HasAuthority() || IsInCustody() || bMatchEnded)
 	{
 		return;
 	}
@@ -747,6 +861,9 @@ void AGuardAIController::SetAIState(EGuardAIState NewState)
 	{
 		return;
 	}
+	// [체포 추가] BT 서비스나 다른 호출부가 상태 변경을 요청해도 담당 대상이 있는 동안 감시를 유지한다.
+	// EndCustody는 CustodyTarget을 먼저 비워 정상적인 상태 복귀가 가능하게 한다.
+	if (IsValid(CustodyTarget) && NewState != EGuardAIState::Custody) return;
 	// 경보 중에는 다른 호출 경로에서도 순찰 상태로 되돌릴 수 없다.
 	if (NewState == EGuardAIState::Patrol && IsWorldAlarmActive())
 	{
@@ -917,7 +1034,8 @@ void AGuardAIController::LogSearchTransitionDebug(FName Event, const FString& De
 
 bool AGuardAIController::SelectNextAction(EGuardAIState State)
 {
-	if (!HasAuthority())
+	// [체포 추가] 남아 있는 BT 실행 요청이 새 순찰·수색 목적지를 잡지 못하도록 진입점에서 차단한다.
+	if (!HasAuthority() || IsInCustody() || bMatchEnded)
 	{
 		return false;
 	}
@@ -1119,7 +1237,9 @@ void AGuardAIController::EnsureAlarmSearchSession()
 
 void AGuardAIController::UpdateWorldAlarmBehavior()
 {
-	if (!HasAuthority() || bMatchEnded || !IsValid(PossessGuardPawn) || !IsValid(GetBlackboardComponent()))
+	// [체포 추가] 경보 100%의 무제한 수색·BT 재평가도 체포 감시보다 우선하지 않는다.
+	// 감시 해제 시 이 함수를 다시 호출해 당시 경보 상태를 적용한다.
+	if (!HasAuthority() || bMatchEnded || IsInCustody() || !IsValid(PossessGuardPawn) || !IsValid(GetBlackboardComponent()))
 	{
 		return;
 	}
@@ -1234,7 +1354,8 @@ void AGuardAIController::UpdateMoveSpeedByWorldAlert(float NewGauge01)
 
 void AGuardAIController::SetChasing(bool bChasing)
 {
-	if (!HasAuthority())
+	// [체포 추가] 감시 중 추격 시작만 거부하고 false 요청은 허용해 기존 추격 상태를 정리할 수 있게 한다.
+	if (!HasAuthority() || (bChasing && IsInCustody()))
 	{
 		return;
 	}

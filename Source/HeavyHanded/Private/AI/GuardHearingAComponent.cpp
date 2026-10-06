@@ -23,6 +23,7 @@
 #include "Shared/NetAuthority.h"
 
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 
 
 // Sets default values for this component's properties
@@ -117,6 +118,10 @@ void UGuardHearingAComponent::Initialize(AGuardCharacter* InGuardCharacter, UAIP
 
 void UGuardHearingAComponent::OnTargetPerceptionUpdatedHearing(AActor* Actor, FAIStimulus Stimulus, UBlackboardComponent* BlackboardComp)
 {
+	// [체포 추가] 담당 경비는 청각 콜백으로 감시를 이탈하지 않는다.
+	// 다른 경비도 체포된 플레이어의 직접 청각 자극은 기록하지 않으며, 기존 위장·청각 조건은 유지한다.
+	if (!HasServerAuthority(this) || !IsValid(Actor) || !IsValid(GuardAIController) || GuardAIController->IsInCustody()) return;
+	if (const ABaseCharacter* Player = Cast<ABaseCharacter>(Actor); IsValid(Player) && Player->IsRestrained()) return;
 
 	UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
 

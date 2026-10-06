@@ -6,6 +6,8 @@
 #include "BehaviorTree/Tasks/BTTask_BlackboardBase.h"
 #include "BTTask_AttemptArrest.generated.h"
 
+class ABaseCharacter;
+
 /**
  * 
  */
@@ -34,7 +36,13 @@ private:
 	// 체포 시도 완료까지 기다리는 타이머.
 	FTimerHandle ArrestTimerHandle;
 
+	// [체포 추가] 시도 시작 당시 플레이어를 보관한다. 타이머 종료 시 Blackboard에서
+	// 새 대상을 가져오면 중간에 변경된 다른 플레이어를 체포할 수 있으므로 같은 대상인지 확인한다.
+	UPROPERTY(Transient, VisibleInstanceOnly, Category = "Arrest")
+	TObjectPtr<ABaseCharacter> ArrestTarget;
+
 	// 체포 시도 시간이 끝났을 때 최종 체포 판정을 수행한다.
-	void FinishArrest(UBehaviorTreeComponent* OwnerComp);
+	// [체포 추가] BT 컴포넌트는 약한 참조로 전달한다. 타이머 전에 BT 소유자가 사라지면 판정을 중단한다.
+	void FinishArrest(TWeakObjectPtr<UBehaviorTreeComponent> OwnerCompPtr);
 
 };

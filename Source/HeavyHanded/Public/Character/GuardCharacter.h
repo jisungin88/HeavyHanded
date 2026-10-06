@@ -102,6 +102,10 @@ private:
 	// 서버의 현재 어그로 대상을 클라이언트 UI에 전달한다.
 	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Perception", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AActor> ReplicatedAggroTarget;
+	// [체포 UI] AIController는 클라이언트에 없으므로 감시 상태를 경비 Pawn으로 전달한다.
+	// 기존 위젯 갱신 타이머가 이 값과 감시 대상 Portrait를 함께 반영한다.
+	UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Guard|Custody", meta = (AllowPrivateAccess = "true"))
+	bool bReplicatedIsInCustody = false;
 
 	UFUNCTION()
 	void OnRep_SightDebugState();

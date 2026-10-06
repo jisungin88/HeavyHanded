@@ -13,6 +13,7 @@
 #include "AI/GuardBlackboardKeys.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 #include "Alert/AlertComponent.h"
 
 UPerceptionMeterComponent::UPerceptionMeterComponent()
@@ -125,6 +126,11 @@ void UPerceptionMeterComponent::OnNoiseHeard_Implementation(const FNoiseStimulus
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	AGuardAIController* GuardController = IsValid(OwnerPawn) ? Cast<AGuardAIController>(OwnerPawn->GetController()) : nullptr;
+	// [체포 추가] 이 경로는 엔진 Hearing 콜백과 별개인 소음 게이지 처리이므로 여기서도 제외한다.
+	// 감시 경비는 새 소음을 무시하고, 다른 경비는 발생 주체가 체포된 플레이어인 소음만 제외한다.
+	// 환경 액터가 발생 주체인 소음까지 일괄 차단하지 않으며, 기존 감쇠·경보 단계 판정은 유지한다.
+	if (IsValid(GuardController) && GuardController->IsInCustody()) return;
+	if (const ABaseCharacter* SourcePlayer = Cast<ABaseCharacter>(Stimulus.InstigatorActor.Get()); IsValid(SourcePlayer) && SourcePlayer->IsRestrained()) return;
 	const AGuardCharacter* GuardCharacter = Cast<AGuardCharacter>(OwnerPawn);
 	if (IsValid(GuardCharacter) && !GuardCharacter->IsHearingEnabled())
 	{

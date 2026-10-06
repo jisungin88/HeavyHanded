@@ -2,6 +2,8 @@
 
 
 #include "Character/BaseCharacter.h"
+#include "Character/GuardCharacter.h"
+#include "AI/GuardAIController.h"
 #include "Character/PlayerSessionState.h"
 #include "Character/BaseAttributeSet.h"
 #include "AbilitySystemComponent.h"
@@ -9,6 +11,8 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
+#include "Components/InputComponent.h"
+#include "InputCoreTypes.h"
 #include "EnhancedInputSubsystems.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Net/UnrealNetwork.h"
@@ -28,6 +32,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogCarry, Log, All);
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
+	// [체포 추가] 체포 상태·담당 경비·이동 잠금이 서버에서 클라이언트로 전달되도록 한다.
+	bReplicates = true;
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
@@ -69,6 +75,168 @@ void ABaseCharacter::NotifyControllerChanged()
 	// 빙의가 BeginPlay 뒤에 오는 경로(진입점 스폰)를 여기서 받는다.
 	// 빙의 해제 때도 불리지만, 그때는 컨트롤러가 없어 아래에서 조용히 되돌아간다
 	SetupLocalPlayerInput();
+}
+
+void ABaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// [체포 추가] 플레이어가 제거되거나 레벨을 나가면 경비가 사라진 대상을 계속 감시하지 않게 한다.
+	// 기존 부모 EndPlay는 아래에서 그대로 호출한다.
+	if (HasAuthority())
+	{
+		ReleaseRestraint();
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+bool ABaseCharacter::TryRestrain(AGuardCharacter* Guard)
+{
+	// [체포 추가] 상태 변경은 서버 전용이다. 이미 체포된 대상을 다시 등록하지 않으므로
+	// 여러 경비의 체포 타이머가 같은 틱에 끝나도 처음 성공한 경비만 담당할 수 있다.
+	if (!HasAuthority() || bIsRestrained || !IsValid(Guard))
+	{
+		return false;
+	}
+	const AGuardAIController* GuardController = Cast<AGuardAIController>(Guard->GetController());
+	if (!IsValid(GuardController) || GuardController->IsInCustody())
+	{
+		return false;
+	}
+	RestrainingGuard = Guard;
+	// [체포 추가] 담당 경비와 체포 여부를 먼저 확정한 뒤 실제 이동 차단을 적용한다.
+	// 진행 중인 점프·달리기도 종료해 체포 이후 달리기 효과나 스태미나 소모가 남지 않게 한다.
+	bIsRestrained = true;
+	StopJumping();
+	Server_ApplyGameplayEffect_Implementation(SprintGameplayEffectClass, false);
+	RefreshMovementLock();
+	ForceNetUpdate();
+	return true;
+}
+
+void ABaseCharacter::ReleaseRestraint()
+{
+	// [체포 추가] 서버 구출 판정 또는 생명주기 정리에서 호출한다. 클라이언트 호출은 무시한다.
+	if (!HasAuthority() || !bIsRestrained)
+	{
+		return;
+	}
+	AGuardAIController* GuardController = IsValid(RestrainingGuard) ? Cast<AGuardAIController>(RestrainingGuard->GetController()) : nullptr;
+	bIsRestrained = false;
+	// [체포 추가] 경비에게 종료를 알리기 전에 양쪽 관계 중 플레이어 쪽을 먼저 해제한다.
+	// EndCustody가 다시 해제를 요청해도 이미 false이므로 체포 해제가 반복되지 않는다.
+	RestrainingGuard = nullptr;
+	RefreshMovementLock();
+	ForceNetUpdate();
+	if (IsValid(GuardController))
+	{
+		GuardController->EndCustody(this);
+	}
+}
+
+void ABaseCharacter::DebugReleaseRestraint()
+{
+	// [체포 테스트 치트] 이동 입력 잠금과 별개의 키 입력이므로 체포된 상태에서도 요청할 수 있다.
+	// 로컬 플레이어의 캐릭터만 요청하고, 해제 판정은 리슨 호스트·원격 클라이언트 모두 서버가 수행한다.
+	if (!IsLocallyControlled() || !bEnableRestraintEscapeCheat) return;
+	Server_DebugReleaseRestraint();
+}
+
+void ABaseCharacter::Server_DebugReleaseRestraint_Implementation()
+{
+	if (!HasAuthority() || !bEnableRestraintEscapeCheat || !bIsRestrained) return;
+	// [체포 테스트 치트] 기존 해제 경로를 사용해 이동 복구와 담당 경비의 감시 종료를 함께 처리한다.
+	ReleaseRestraint();
+	UE_LOG(LogGuardAI, Log, TEXT("[체포 치트][%s] L 키로 체포 해제"), *GetName());
+}
+
+void ABaseCharacter::SetTemporaryMovementLock(AActor* Source, bool bLocked)
+{
+	// [체포 추가 / 현재 미연결] 같은 원인은 한 번만 등록하고, 해제할 때 해당 원인만 제거한다.
+	// 덫·구역·밴의 호출부는 원복했으므로 현재 그 기능들의 이동 제한은 여기서 관리하지 않는다.
+	if (!HasAuthority() || !IsValid(Source))
+	{
+		return;
+	}
+	TemporaryMovementLocks.RemoveAll([](const TWeakObjectPtr<AActor>& Lock) { return !Lock.IsValid(); });
+	const TWeakObjectPtr<AActor> SourcePtr(Source);
+	if (bLocked)
+	{
+		TemporaryMovementLocks.AddUnique(SourcePtr);
+		Source->OnEndPlay.AddUniqueDynamic(this, &ABaseCharacter::HandleMovementLockSourceEndPlay);
+		// [체포 추가] API로 등록한 원인이 파괴되어 정상 해제 호출을 못 해도 잠금이 영구히 남지 않게 한다.
+	}
+	else
+	{
+		TemporaryMovementLocks.Remove(SourcePtr);
+		Source->OnEndPlay.RemoveDynamic(this, &ABaseCharacter::HandleMovementLockSourceEndPlay);
+	}
+	RefreshMovementLock();
+}
+
+void ABaseCharacter::HandleMovementLockSourceEndPlay(AActor* Actor, EEndPlayReason::Type EndPlayReason)
+{
+	// [체포 추가] 등록된 잠금 원인이 사라지면 그 원인과 무효한 참조를 정리한 뒤 잠금을 재판정한다.
+	if (!HasAuthority()) return;
+	TemporaryMovementLocks.Remove(TWeakObjectPtr<AActor>(Actor));
+	TemporaryMovementLocks.RemoveAll([](const TWeakObjectPtr<AActor>& Lock) { return !Lock.IsValid(); });
+	RefreshMovementLock();
+}
+
+void ABaseCharacter::RefreshMovementLock()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!IsValid(Movement))
+	{
+		return;
+	}
+	const bool bShouldLock = bIsRestrained || !TemporaryMovementLocks.IsEmpty();
+	// [체포 추가] 잠금 여부가 실제로 바뀔 때만 이동 모드와 복제 값을 갱신한다.
+	// 체포된 상태에서 임시 잠금 하나가 풀려도 bShouldLock이 true면 체포는 유지된다.
+	// 단, 이 API 밖에서 직접 변경한 이동 모드는 감시하거나 강제로 재적용하지 않는다.
+	if (bShouldLock == bMovementLocked)
+	{
+		return;
+	}
+	if (bShouldLock)
+	{
+		// [체포 추가] 최초 잠금 직전의 모드만 저장한다. 기존 모드가 이미 MOVE_None이면
+		// 해제 후에도 MOVE_None으로 돌아갈 수 있으므로, 외부 이동 제한과의 조정은 별도 문제다.
+		MovementModeBeforeLock = Movement->MovementMode;
+		CustomMovementModeBeforeLock = Movement->CustomMovementMode;
+	}
+	bMovementLocked = bShouldLock;
+	// [체포 추가] 서버에서는 RepNotify가 자동 실행되지 않으므로 직접 호출해 즉시 멈춘다.
+	// ForceNetUpdate로 클라이언트의 입력 차단 상태도 다음 복제 기회에 전달한다.
+	OnRep_MovementLocked();
+	ForceNetUpdate();
+}
+
+void ABaseCharacter::OnRep_MovementLocked()
+{
+	// [체포 추가] 서버의 직접 호출과 클라이언트의 복제 수신이 같은 이동 차단 처리를 사용한다.
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!IsValid(Movement))
+	{
+		return;
+	}
+	if (bMovementLocked)
+	{
+		// [체포 추가] 남은 이동 입력·속도·점프를 지우고 MOVE_None으로 고정한다.
+		// MOVE_None은 중력도 멈춘다. 시점 회전이나 다른 어빌리티 입력 전체를 막는 처리는 아니다.
+		StopJumping();
+		ConsumeMovementInputVector();
+		Movement->StopMovementImmediately();
+		Movement->DisableMovement();
+	}
+	else
+	{
+		// [체포 추가] 모든 등록된 잠금이 해제되면 서버가 보관한 원래 이동 모드로 복구한다.
+		// 덫 등 외부 코드가 직접 관리하는 제한은 이 목록에 없으므로 자동 보존하지 못한다.
+		Movement->SetMovementMode(MovementModeBeforeLock, CustomMovementModeBeforeLock);
+	}
 }
 
 void ABaseCharacter::SetupLocalPlayerInput()
@@ -185,6 +353,12 @@ void ABaseCharacter::Tick(float DeltaTime)
 void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
+	// [체포 테스트 치트] 새 IA/IMC 에셋 없이 L을 직접 바인딩한다. 기존 액션·스킬 바인딩은 유지한다.
+	// 키를 한 번 누를 때만 요청하며, 패키징 빌드에서도 동일하게 동작한다.
+	if (IsValid(PlayerInputComponent) && bEnableRestraintEscapeCheat)
+	{
+		PlayerInputComponent->BindKey(EKeys::L, IE_Pressed, this, &ABaseCharacter::DebugReleaseRestraint);
+	}
 
     if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
@@ -270,6 +444,8 @@ UAbilitySystemComponent* ABaseCharacter::GetAbilitySystemComponent() const
 // 2. 전진/후진 처리 함수 (Axis 1D 값 활용)
 void ABaseCharacter::MoveForward(const FInputActionValue& Value)
 {
+    // [체포 추가] 잠금 중 전후 이동 입력만 차단한다. 아래 기존 이동 계산은 그대로 유지한다.
+    if (bMovementLocked) return;
     const float DirectionValue = Value.Get<float>();
 
     if (Controller != nullptr && DirectionValue != 0.0f)
@@ -285,6 +461,8 @@ void ABaseCharacter::MoveForward(const FInputActionValue& Value)
 // 3. 좌우 이동 처리 함수 (Axis 1D 값 활용)
 void ABaseCharacter::MoveRight(const FInputActionValue& Value)
 {
+    // [체포 추가] 잠금 중 좌우 이동 입력만 차단한다. Turn/LookUp의 카메라 입력은 막지 않는다.
+    if (bMovementLocked) return;
     const float DirectionValue = Value.Get<float>();
 
     if (Controller != nullptr && DirectionValue != 0.0f)
@@ -500,6 +678,8 @@ void ABaseCharacter::StopCrouch(const FInputActionValue& Value)
 
 void ABaseCharacter::StartSprint(const FInputActionValue& Value)
 {
+	// [체포 추가] 체포·등록된 이동 잠금 중 달리기 시작을 막는다. 기존 운반·다운 상태 조건은 유지한다.
+	if (bMovementLocked) return;
 	if (IsCarryingHeavyItem())
 	{
 		return;
@@ -528,6 +708,10 @@ void ABaseCharacter::StopSprint(const FInputActionValue& Value)
 // --- 서버 RPC 실제 동작 구현 ---
 void ABaseCharacter::Server_ApplyGameplayEffect_Implementation(TSubclassOf<UGameplayEffect> EffectClass, bool bApply)
 {
+    // [체포 추가] 로컬 입력 차단만으로는 충분하지 않으므로 서버에서도 달리기 적용 요청을 거부한다.
+    // 달리기 효과의 제거 요청과 다른 종류의 효과는 아래 기존 경로를 그대로 사용한다.
+    if (!HasAuthority()) return;
+    if (bApply && EffectClass == SprintGameplayEffectClass && bMovementLocked) return;
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
     if (!ASC || !EffectClass) return;
 
@@ -644,6 +828,12 @@ void ABaseCharacter::AbilityInputReleased(int32 InputID)
 void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	// [체포 추가] 기존 운반·부활 복제 등록은 유지하고, 체포 판정과 이동 차단·복구에 필요한 값만 추가한다.
+	DOREPLIFETIME(ABaseCharacter, bIsRestrained);
+	DOREPLIFETIME(ABaseCharacter, RestrainingGuard);
+	DOREPLIFETIME(ABaseCharacter, bMovementLocked);
+	DOREPLIFETIME(ABaseCharacter, MovementModeBeforeLock);
+	DOREPLIFETIME(ABaseCharacter, CustomMovementModeBeforeLock);
 
     DOREPLIFETIME(ABaseCharacter, HeldActor);
 	// 08.18 start
@@ -1014,6 +1204,8 @@ void ABaseCharacter::OnRep_CarrierAlly()
 
 void ABaseCharacter::TryJump()
 {
+	// [체포 추가] 잠금 중 새 점프 입력을 막는다. 기존 운반·다운 상태 검사와 Jump 호출은 유지한다.
+	if (bMovementLocked) return;
 	if (IsCarryingHeavyItem())
 	{
 		return;

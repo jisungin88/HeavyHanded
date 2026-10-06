@@ -79,8 +79,10 @@ void UDetectionGaugeWidget::SetAggroTarget(AActor* TargetActor)
 	AggroTargetImage->SetVisibility(IsValid(Icon) ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
 }
 
-void UDetectionGaugeWidget::SetPerceptionGaugePercents(float SightPercent, float HearingPercent, bool bSightEnabled, bool bHearingEnabled)
+void UDetectionGaugeWidget::SetPerceptionGaugePercents(float SightPercent, float HearingPercent, bool bSightEnabled, bool bHearingEnabled, bool bInCustody)
 {
+	const bool bCustodyChanged = bIsInCustody != bInCustody;
+	bIsInCustody = bInCustody;
 	const float Sight01 = bSightEnabled ? FMath::Clamp(SightPercent / 100.f, 0.f, 1.f) : 0.f;
 	const float Hearing01 = bHearingEnabled ? FMath::Clamp(HearingPercent / 100.f, 0.f, 1.f) : 0.f;
 	if (IsValid(SightGaugeBar))
@@ -95,6 +97,11 @@ void UDetectionGaugeWidget::SetPerceptionGaugePercents(float SightPercent, float
 	}
 
 	// Hidden으로 슬롯 간격을 유지해 한쪽 게이지가 사라져도 다른 쪽의 위치가 변하지 않는다.
-	const bool bShouldShow = (bSightEnabled || bHearingEnabled) && (!bHideWhenEmpty || Sight01 > 0.f || Hearing01 > 0.f);
+	// [체포 UI] 감시 대상 Portrait를 유지한다. 해제 시 기존 빈 게이지 숨김 규칙으로 돌아간다.
+	const bool bShouldShow = bIsInCustody || ((bSightEnabled || bHearingEnabled) && (!bHideWhenEmpty || Sight01 > 0.f || Hearing01 > 0.f));
 	SetVisibility(bShouldShow ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+	if (bCustodyChanged)
+	{
+		OnCustodyStateChanged(bIsInCustody);
+	}
 }

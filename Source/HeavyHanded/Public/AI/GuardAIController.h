@@ -17,6 +17,7 @@ class UAIPerceptionComponent;
 class AActor;
 class AGameStateBase;
 class AGuardCharacter;
+class ABaseCharacter;
 class AHeistGameState;
 
 
@@ -36,7 +37,9 @@ enum class EGuardAIState : uint8 // GuardTypes.h로 옮기는 작업 필요
 {
 	Patrol,
 	Search,
-	Chase
+	Chase,
+	// [체포 추가] 기존 상태의 숫자를 유지하도록 마지막에 추가한다. 체포한 플레이어를 감시하는 상태다.
+	Custody
 };
 
 
@@ -105,6 +108,34 @@ private:
 public:
 	void SetAIState(EGuardAIState NewState);
 	EGuardAIState GetAIState() const { return AIState; }
+
+	// [체포 추가] 이 상태에서는 새 타겟·소음·경보 수색으로 감시를 중단하지 않는다.
+	UFUNCTION(BlueprintPure, Category = "Guard|Custody")
+	bool IsInCustody() const { return AIState == EGuardAIState::Custody; }
+	// [체포 UI] 일반 TargetActor를 비운 뒤에도 감시 대상 Portrait를 유지하기 위한 서버 조회다.
+	ABaseCharacter* GetCustodyTarget() const { return CustodyTarget; }
+
+	// [체포 추가] 체포 태스크가 성공 처리된 뒤 호출한다. BT를 정지하고 체포 대상 감시를 맡는다.
+	void BeginCustody(ABaseCharacter* Target);
+	// [체포 추가] 구출·플레이어 제거·경비 빙의 해제 시 감시를 종료한다.
+	// ReleasedTarget을 전달하면 현재 감시 대상과 일치할 때만 종료하여 잘못된 해제 요청을 막는다.
+	void EndCustody(ABaseCharacter* ReleasedTarget = nullptr);
+
+private:
+	// [체포 추가] 일반 추격 Blackboard의 TargetActor와 분리한다.
+	// 다른 경비의 체포 대상 제외 처리가 이 경비의 감시 대상까지 지우지 않도록 별도로 보관한다.
+	UPROPERTY(Transient, VisibleInstanceOnly, Category = "Guard|Custody")
+	TObjectPtr<ABaseCharacter> CustodyTarget;
+
+	// [체포 추가] 대상이 외부 힘·운반으로 이 거리보다 멀어지면 다시 접근한다.
+	// 체포 성공 거리(ArrestRange)와 별개인 감시 중 수평 거리이며, 기본값은 180cm다.
+	UPROPERTY(EditDefaultsOnly, Category = "Guard|Custody", meta = (ClampMin = "50.0", Units = "cm"))
+	float CustodyFollowDistance = 180.f;
+
+	// [체포 추가] 감시 대상에게 재접근하는 경로 요청을 초당 한 번으로 제한한다.
+	float NextCustodyMoveTime = 0.f;
+
+public:
 
 	bool SelectNextAction(EGuardAIState State);
 
@@ -300,6 +331,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnPossess(APawn* InPawn) override;
+	virtual void OnUnPossess() override;
 
 
 	// ========================================================

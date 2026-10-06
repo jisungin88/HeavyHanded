@@ -19,6 +19,7 @@
 #include "AI/GuardAIController.h"
 #include "AI/GuardHearingAComponent.h"
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 
@@ -348,6 +349,8 @@ void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardC
 	{
 		return;
 	}
+	// [체포 추가] 담당 경비는 CustodyTarget을 감시한다. 일반 시야 갱신으로 다른 타겟을 잡지 않는다.
+	if (GuardAIController->IsInCustody()) return;
 
 	TArray<AActor*> PerceivedActors;
 	if (GuardCharacter->IsSightEnabled())
@@ -357,8 +360,13 @@ void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardC
 
 	const auto CanDetectActor = [this](AActor* Actor)
 	{
-		if (!IsValid(Actor) || !IsValid(Actor->GetRootComponent()))
+		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed() || !IsValid(Actor->GetRootComponent()))
 		{
+			return false;
+		}
+		if (const ABaseCharacter* Player = Cast<ABaseCharacter>(Actor); IsValid(Player) && Player->IsRestrained())
+		{
+			// [체포 추가] 체포 상태만 감지에서 제외한다. 덫의 MOVE_None 상태를 체포로 오인하지 않는다.
 			return false;
 		}
 
@@ -372,6 +380,26 @@ void UGuardSightAComponent::RefreshSightTarget(UBlackboardComponent* BlackboardC
 	};
 
 	AActor* CurrentTarget = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	if (const ABaseCharacter* Player = Cast<ABaseCharacter>(CurrentTarget); IsValid(Player) && Player->IsRestrained())
+	{
+		// 다른 경비가 체포한 대상은 추격 유예·마지막 목격 수색에서도 제외한다.
+		// [체포 추가] 후보 목록에서 빼는 것만으로는 기존 TargetActor가 시야 상실 유예에 남는다.
+		// 현재 추격도 정리하고 목격·수색 세션을 무효화한 뒤, 아래에서 다른 보이는 대상을 선택한다.
+		// 게이지를 비워 이전 대상의 100%가 새 플레이어에게 그대로 넘어가지 않게 한다.
+		GuardAIController->StopMovement();
+		GuardAIController->ClearFocus(EAIFocusPriority::Gameplay);
+		GuardAIController->SetChasing(false);
+		BlackboardComp->SetValueAsBool(GuardAIKeys::CanSeeTarget, false);
+		BlackboardComp->ClearValue(GuardAIKeys::TargetActor);
+		BlackboardComp->ClearValue(GuardAIKeys::LastKnownLocation);
+		BlackboardComp->ClearValue(GuardAIKeys::InvestigateLocation);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::DetectionGauge, 0.f);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::LastSeenTime, -100000.f);
+		BlackboardComp->SetValueAsFloat(GuardAIKeys::SearchStartTime, -100000.f);
+		GuardAIController->SetAIState(EGuardAIState::Patrol);
+		// [체포 추가] 경보 100%라면 SetAIState가 기존 정책에 따라 Patrol 요청을 Search로 바꾼다.
+		CurrentTarget = nullptr;
+	}
 	AActor* VisibleTarget = nullptr;
 	if (PerceivedActors.Contains(CurrentTarget) && CanDetectActor(CurrentTarget))
 	{

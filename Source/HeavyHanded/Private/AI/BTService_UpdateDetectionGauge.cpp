@@ -28,6 +28,9 @@ void UBTService_UpdateDetectionGauge::TickNode(UBehaviorTreeComponent& OwnerComp
 	{
 		return;
 	}
+	// [체포 추가] 감시 시작 시 BT를 정지하지만, 정지 과정에 남은 서비스 호출도 보호한다.
+	// 시야 게이지·SearchStartTime·추격 상태·경보 수색이 체포 감시를 덮어쓰지 않도록 갱신을 건너뛴다.
+	if (const AGuardAIController* GuardController = Cast<AGuardAIController>(AIController); IsValid(GuardController) && GuardController->IsInCustody()) return;
 
 	UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
 	if (!IsValid(BlackboardComp))

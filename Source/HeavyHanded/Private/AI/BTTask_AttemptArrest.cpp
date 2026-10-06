@@ -11,6 +11,7 @@
 #include "AI/GuardAIController.h"
 #include "AI/GuardBlackboardKeys.h"
 #include "Character/GuardCharacter.h"
+#include "Character/BaseCharacter.h"
 
 
 UBTTask_AttemptArrest::UBTTask_AttemptArrest()
@@ -29,16 +30,19 @@ EBTNodeResult::Type UBTTask_AttemptArrest::ExecuteTask(UBehaviorTreeComponent& O
 	// 체포 대상이 저장된 Blackboard를 가져온다.
 	UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
 
-	if (!IsValid(GuardAIController) || !IsValid(BlackboardComp))
+	// [체포 추가] 체포 판정은 서버 전용이며, 이미 다른 대상을 감시하는 경비는 새 체포를 시작하지 않는다.
+	if (!IsValid(GuardAIController) || !GuardAIController->HasAuthority() || GuardAIController->IsInCustody() || !IsValid(BlackboardComp))
 	{
 		return EBTNodeResult::Failed;
 	}
 
 	// 경비 Pawn과 Blackboard에 저장된 체포 대상 Actor를 가져온다.
 	APawn* GuardPawn = GuardAIController->GetPawn();
-	AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	// [체포 추가] 이동 무력화 상태를 가진 플레이어 기본 클래스만 체포할 수 있도록 대상을 한정한다.
+	ABaseCharacter* TargetActor = Cast<ABaseCharacter>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
 
-	if (!IsValid(GuardPawn) || !IsValid(TargetActor))
+	// [체포 추가] 다른 경비가 먼저 완료한 플레이어에게 다시 체포 애니메이션·타이머를 시작하지 않는다.
+	if (!IsValid(GuardPawn) || !IsValid(TargetActor) || TargetActor->IsRestrained())
 	{
 		return EBTNodeResult::Failed;
 	}
@@ -70,6 +74,8 @@ EBTNodeResult::Type UBTTask_AttemptArrest::ExecuteTask(UBehaviorTreeComponent& O
 
 	// 체포 판정이 끝날 때까지 경비의 이동을 중지한다.
 	GuardAIController->StopMovement();
+	ArrestTarget = TargetActor;
+	// [체포 추가] 완료 판정은 이 시점에 저장한 대상에만 적용한다. 체포 중 타겟 교체는 완료 시 실패 처리한다.
 
 	//0928 추가
 	// 서버의 체포 애니메이션 상태를 변경하고 클라이언트에도 복제한다.
@@ -79,7 +85,9 @@ EBTNodeResult::Type UBTTask_AttemptArrest::ExecuteTask(UBehaviorTreeComponent& O
 	}
 
 	// 설정된 체포 시간만큼 기다린 뒤 최종 체포 판정을 수행한다.
-	GetWorld()->GetTimerManager().SetTimer(ArrestTimerHandle, FTimerDelegate::CreateUObject(this, &UBTTask_AttemptArrest::FinishArrest, &OwnerComp), ArrestDuration, false);
+	// [체포 추가] OwnerComp의 수명을 타이머가 보장하지 않으므로 약한 참조를 사용한다.
+	// 설정이 0초여도 타이머가 삭제되어 태스크가 영구 대기하지 않도록 최소 양수 간격을 적용한다.
+	GetWorld()->GetTimerManager().SetTimer(ArrestTimerHandle, FTimerDelegate::CreateUObject(this, &UBTTask_AttemptArrest::FinishArrest, TWeakObjectPtr<UBehaviorTreeComponent>(&OwnerComp)), FMath::Max(ArrestDuration, KINDA_SMALL_NUMBER), false);
 
 	if (GEngine)
 	{
@@ -90,8 +98,9 @@ EBTNodeResult::Type UBTTask_AttemptArrest::ExecuteTask(UBehaviorTreeComponent& O
 	return EBTNodeResult::InProgress;
 }
 
-void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
+void UBTTask_AttemptArrest::FinishArrest(TWeakObjectPtr<UBehaviorTreeComponent> OwnerCompPtr)
 {
+	UBehaviorTreeComponent* OwnerComp = OwnerCompPtr.Get();
 	// Behavior Tree가 이미 종료되었거나 유효하지 않다면 판정을 진행하지 않는다.
 	if (!IsValid(OwnerComp))
 	{
@@ -99,10 +108,10 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 	}
 
 	// 현재 AI 컨트롤러와 Blackboard를 가져온다.
-	AAIController* AIController = OwnerComp->GetAIOwner();
+	AGuardAIController* AIController = Cast<AGuardAIController>(OwnerComp->GetAIOwner());
 	UBlackboardComponent* BlackboardComp = OwnerComp->GetBlackboardComponent();
 
-	if (!IsValid(AIController) || !IsValid(BlackboardComp))
+	if (!IsValid(AIController) || !AIController->HasAuthority() || !IsValid(BlackboardComp))
 	{
 		FinishLatentTask(*OwnerComp, EBTNodeResult::Failed);
 		return;
@@ -110,7 +119,10 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 
 	// 최종 체포 판정에 사용할 경비 Pawn과 체포 대상 Actor를 가져온다.
 	APawn* GuardPawn = AIController->GetPawn();
-	AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor));
+	ABaseCharacter* TargetActor = ArrestTarget;
+	// [체포 추가] 보관한 시작 대상을 로컬로 옮긴 뒤 태스크의 참조를 비운다.
+	// 성공·실패 어느 쪽으로 끝나도 다음 실행에 이전 대상이 남지 않게 한다.
+	ArrestTarget = nullptr;
 
 
 	//0928 추가
@@ -121,7 +133,9 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 	}
 
 
-	if (!IsValid(GuardPawn) || !IsValid(TargetActor))
+	// [체포 추가] 타이머 동안 대상이 사라졌거나 다른 경비가 체포했거나 타겟이 교체되면 실패한다.
+	// 유효할 때만 아래 기존 거리 검사를 수행한다. 시작·완료 거리 검사이며 매 틱 거리 검사는 아니다.
+	if (!IsValid(GuardPawn) || !IsValid(TargetActor) || TargetActor->IsRestrained() || BlackboardComp->GetValueAsObject(GuardAIKeys::TargetActor) != TargetActor)
 	{
 		FinishLatentTask(*OwnerComp, EBTNodeResult::Failed);
 		return;
@@ -145,6 +159,14 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 		return;
 	}
 
+	// 서버에서 선점한다. 같은 틱에 여러 경비가 완료해도 한 경비만 감시를 맡는다.
+	// [체포 추가] 기존 완료 로그만 출력하던 지점에 실제 체포 상태 등록·이동 차단을 연결한다.
+	// 라운드 종료용 MarkArrested/State.Arrested는 호출하지 않는다.
+	if (!TargetActor->TryRestrain(Cast<AGuardCharacter>(GuardPawn)))
+	{
+		FinishLatentTask(*OwnerComp, EBTNodeResult::Failed);
+		return;
+	}
 	// 체포 시간 동안 대상이 범위 안에 있었다면 체포를 완료한다.
 	UE_LOG(LogGuardAI, Warning, TEXT("[%s] 체포 완료: Target=%s Distance=%.1f"),
 		*GetNameSafe(GuardPawn), *GetNameSafe(TargetActor), Distance);
@@ -156,10 +178,15 @@ void UBTTask_AttemptArrest::FinishArrest(UBehaviorTreeComponent* OwnerComp)
 
 	// 체포 Task를 성공으로 종료하고 Behavior Tree의 다음 노드로 진행한다.
 	FinishLatentTask(*OwnerComp, EBTNodeResult::Succeeded);
+	// [체포 추가] 현재 태스크를 먼저 성공으로 종료한 뒤 BT를 정지한다.
+	// 체포 완료가 BT 중단에 의해 Abort로 처리되거나 다음 루프에서 재체포되는 것을 막는다.
+	AIController->BeginCustody(TargetActor);
 }
 
 EBTNodeResult::Type UBTTask_AttemptArrest::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
+	// [체포 추가] 시도 취소는 완료 체포의 해제가 아니다. 아직 완료되지 않은 태스크 대상만 비운다.
+	ArrestTarget = nullptr;
 	// 체포 시도 중 Behavior Tree가 중단되면 대기 중인 체포 타이머를 제거한다.
 	if (UWorld* World = GetWorld())
 	{

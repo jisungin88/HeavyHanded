@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Engine/EngineTypes.h"
 #include "AbilitySystemInterface.h"
 #include "InputActionValue.h"
 #include "GameplayTagContainer.h"   // FGameplayTag — OnSprintTagChanged 시그니처에 값으로 쓴다
@@ -40,6 +41,7 @@ class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
 class UNoiseEmitterComponent;
+class AGuardCharacter;
 
 UCLASS()
 class HEAVYHANDED_API ABaseCharacter : public ACharacter, public IAbilitySystemInterface
@@ -55,9 +57,79 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	// 경비의 이동 무력화 체포. 게임 종료 시 사용하는 State.Arrested와 별개다.
+	// [체포 추가] 덫에 걸렸을 때의 MOVE_None만으로는 체포 여부를 구분할 수 없으므로
+	// 별도 상태를 둔다. 다른 경비의 감지 제외와 BP의 체포 상태 확인은 이 값을 사용한다.
+	UFUNCTION(BlueprintPure, Category = "Character|Restraint")
+	bool IsRestrained() const { return bIsRestrained; }
+
+	UFUNCTION(BlueprintPure, Category = "Character|Restraint")
+	AGuardCharacter* GetRestrainingGuard() const { return RestrainingGuard; }
+
+	// [체포 추가] 서버에서만 체포를 등록한다. 이미 체포된 플레이어 또는 다른 플레이어를
+	// 감시 중인 경비는 거부한다. 성공 후 체포 태스크가 경비의 BeginCustody를 호출한다.
+	bool TryRestrain(AGuardCharacter* Guard);
+
+	// 구출 등 서버 로직에서 호출한다. 클라이언트가 직접 체포를 해제할 수 없다.
+	// [체포 추가] 해제 시 플레이어 상태와 담당 경비의 감시 상태를 함께 정리한다.
+	// 구출 입력이나 구출 어빌리티 자체를 구현한 함수는 아니며, 서버 구출 판정에서 연결해야 한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Character|Restraint")
+	void ReleaseRestraint();
+
+	// 덫·강제 이동 구역·밴의 잠금을 각각 유지해 하나가 풀려도 다른 잠금은 보존한다.
+	// [체포 추가 / 현재 미연결] 위 설명은 이 API로 잠금을 등록한 경우에만 적용된다.
+	// 다른 담당자의 코드 수정은 원복했으므로 현재 덫·강제 이동 구역·밴은 이 함수를 호출하지 않는다.
+	// 기존 코드가 직접 MOVE_Walking으로 복구하면 체포 잠금과 충돌할 수 있으며, 아직 해결하지 않았다.
+	void SetTemporaryMovementLock(AActor* Source, bool bLocked);
+
+private:
+	// [체포 테스트 치트] L 키로 자기 체포를 해제한다. 패키징한 테스트 빌드에서도 사용하도록
+	// Shipping 제외 조건을 두지 않는다. 테스트가 끝나면 캐릭터 BP 기본값에서 끌 수 있다.
+	UPROPERTY(EditDefaultsOnly, Category = "Character|Restraint|Debug", meta = (DisplayName = "체포 탈출 테스트 치트 (L)"))
+	bool bEnableRestraintEscapeCheat = true;
+	void DebugReleaseRestraint();
+	// [체포 테스트 치트] 소유한 캐릭터에서만 요청하며, 대상 인자를 받지 않아 타인의 체포는 풀 수 없다.
+	// 실제 체포 여부와 치트 허용 여부는 서버에서 검사한다. 클라이언트가 직접 이동 모드를 바꾸지 않는다.
+	UFUNCTION(Server, Reliable, Category = "Character|Restraint|Debug")
+	void Server_DebugReleaseRestraint();
+	// [체포 추가] 게임 중 이동 무력화 여부를 서버가 결정해 복제한다.
+	// 라운드 종료 체포 명단이나 State.Arrested 태그에는 영향을 주지 않는다.
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Character|Restraint", meta = (AllowPrivateAccess = "true"))
+	bool bIsRestrained = false;
+
+	// [체포 추가] 담당 경비 한 명을 기록한다. 일반 추격 대상과 별개이며 중복 체포를 막는 데 사용한다.
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Character|Restraint", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AGuardCharacter> RestrainingGuard;
+
+	// [체포 추가] 체포 또는 이 API에 등록된 임시 잠금 중 하나라도 남아 있으면 true다.
+	// RepNotify에서 이동을 차단하고, 로컬 이동 입력도 이 값으로 막는다. 카메라 입력은 유지한다.
+	UPROPERTY(ReplicatedUsing = OnRep_MovementLocked, VisibleInstanceOnly, Category = "Character|Movement")
+	bool bMovementLocked = false;
+
+	// [체포 추가 / 현재 미연결] 잠금 원인을 약한 참조로 보관해 원인 액터의 수명을 연장하지 않는다.
+	// 등록한 원인만 관리할 수 있으며, 기존 DisableMovement 호출을 자동으로 추적하지는 않는다.
+	UPROPERTY(Transient, VisibleInstanceOnly, Category = "Character|Movement")
+	TArray<TWeakObjectPtr<AActor>> TemporaryMovementLocks;
+
+	// [체포 추가] 처음 잠글 때의 이동 모드를 보관한다. 중복 잠금으로 MOVE_None을 덮어 저장하지 않는다.
+	// 서버의 복구 기준을 클라이언트에도 전달하기 위해 기본 모드와 커스텀 모드를 함께 복제한다.
+	UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Character|Movement")
+	TEnumAsByte<EMovementMode> MovementModeBeforeLock = MOVE_Walking;
+
+	UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Character|Movement")
+	uint8 CustomMovementModeBeforeLock = 0;
+	void RefreshMovementLock();
+
+	UFUNCTION(Category = "Character|Movement")
+	void OnRep_MovementLocked();
+
+	UFUNCTION(Category = "Character|Movement")
+	void HandleMovementLockSourceEndPlay(AActor* Actor, EEndPlayReason::Type EndPlayReason);
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PossessedBy(AController* NewController) override;
 
 	/**

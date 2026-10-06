@@ -27,8 +27,16 @@ public:
 	void SetGaugePercent(float InPercent0to100);
 
 	// 두 값 모두 0~100. 감각 활성화 여부와 두 게이지 값을 함께 적용한다.
+	// [체포 UI] 감시 중에는 실제 게이지 값을 유지하면서 전체 위젯 숨김만 막는다.
+	// 마지막 인자는 기본 false로 두어 기존 네 인자 호출도 유지한다.
 	UFUNCTION(BlueprintCallable, Category = "Guard|Perception")
-	void SetPerceptionGaugePercents(float SightPercent, float HearingPercent, bool bSightEnabled, bool bHearingEnabled);
+	void SetPerceptionGaugePercents(float SightPercent, float HearingPercent, bool bSightEnabled, bool bHearingEnabled, bool bInCustody = false);
+	// [체포 UI] WBP에서 WidgetSwitcher의 일반/감시 페이지를 선택할 때 사용한다.
+	UFUNCTION(BlueprintPure, Category = "Guard|Custody")
+	bool IsInCustody() const { return bIsInCustody; }
+	// [체포 UI] 상태가 바뀔 때만 호출한다. 문구나 페이지 배치는 WBP에서 직접 결정한다.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Guard|Custody")
+	void OnCustodyStateChanged(bool bInCustody);
 
 	FString GetGaugeBindingDebugInfo() const;
 
@@ -37,6 +45,8 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	UPROPERTY(BlueprintReadOnly, Category = "Guard|Custody")
+	bool bIsInCustody = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Guard|Perception", meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> SightGaugeBar;
@@ -56,6 +66,7 @@ protected:
 	TMap<TSubclassOf<APawn>, FName> TargetPortraitRows;
 
 	// 활성화된 두 게이지가 모두 0일 때 전체 위젯을 숨길지.
+	// [체포 UI] 감시 중에는 이 옵션이 켜져 있어도 위젯을 유지한다.
 	UPROPERTY(EditAnywhere, Category = "Guard|Perception")
 	bool bHideWhenEmpty = true;
 
