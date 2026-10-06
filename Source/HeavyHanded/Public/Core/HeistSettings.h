@@ -43,31 +43,42 @@ public:
 	TSoftObjectPtr<UDataTable> SiteCatalog;
 
 private:
-	UPROPERTY(Transient)
-	TObjectPtr<UDataTable> CachedCatalog = nullptr;
-
-	bool bCatalogResolved = false;
+	/**
+	 * UPROPERTY 금지 — 이 객체는 CDO 라 DisregardForGC 풀에 있다. 여기서 하드 참조를 들면
+	 * "Disregard for GC object ... referencing ... not part of root set" 로 GC 가 단언한다.
+	 * 약한 포인터는 GC 참조가 아니라 단언 대상이 아니고, 수명은 AddToRoot 로 따로 보장한다.
+	 */
+	mutable TWeakObjectPtr<UDataTable> CachedCatalog;
 
 public:
 	const UDataTable* GetSiteCatalog() const
 	{
-		UHeistSettings* Self = const_cast<UHeistSettings*>(this);
-
-		if (!Self->bCatalogResolved)
+		if (UDataTable* Cached = CachedCatalog.Get())
 		{
-			Self->bCatalogResolved = true;
-			Self->CachedCatalog = SiteCatalog.LoadSynchronous();
-
-			UE_CLOG(!Self->CachedCatalog, LogHeist, Warning,
-				TEXT("SiteCatalog DataTable이 지정되지 않았습니다."));
+			return Cached;
 		}
 
-		if (!IsValid(Self->CachedCatalog))
+		if (SiteCatalog.IsNull())
 		{
-			Self->CachedCatalog = nullptr;
+			UE_LOG(LogHeist, Warning, TEXT("SiteCatalog DataTable이 지정되지 않았습니다."));
+			return nullptr;
 		}
 
-		return Self->CachedCatalog;
+		// 실제로 필요한 이 시점에만 로드한다
+		UDataTable* Loaded = SiteCatalog.LoadSynchronous();
+		UE_CLOG(!Loaded, LogHeist, Warning,
+			TEXT("SiteCatalog '%s' 를 불러오지 못했습니다. (패키지라면 쿠킹 대상인지 확인)"),
+			*SiteCatalog.ToString());
+
+		if (Loaded)
+		{
+			// 루트에 고정 — FindSite 가 돌려준 행 포인터가 GC 로 사라지지 않게 하고,
+			// 레벨 이동 때마다 내려갔다 다시 동기 로드되는 끊김도 막는다
+			Loaded->AddToRoot();
+			CachedCatalog = Loaded;
+		}
+
+		return Loaded;
 	}
 
 	FSoftObjectPath GetSiteLevel(const FGameplayTag& SiteTag) const
@@ -166,12 +177,16 @@ public:
 	}
 
 #if WITH_EDITOR
-	/** Settings에서 표를 바꾸면 캐시 버림 */
+	/** Settings에서 표를 바꾸면 캐시 버림 — 이전 표의 루트 고정도 풀어 준다 */
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override
 	{
 		Super::PostEditChangeProperty(Event);
-		bCatalogResolved = false;
-		CachedCatalog = nullptr;
+
+		if (UDataTable* Old = CachedCatalog.Get())
+		{
+			Old->RemoveFromRoot();
+		}
+		CachedCatalog.Reset();
 	}
 
 #endif
