@@ -1,6 +1,7 @@
 ﻿#include "Hazards/LaserTrap.h"
 
 #include "Alert/AlertComponent.h"
+#include "Alert/AlertSettings.h"
 #include "Character/BaseCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Hazards/HazardLog.h"
@@ -68,7 +69,8 @@ void ALaserTrap::OnTriggerOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 	// 열려 있는 통로다(AlertComponent.h) — 소음 태그를 새로 만들 필요가 없다.
 	if (UAlertComponent* Alert = UAlertComponent::Get(this))
 	{
-		Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + AlertGaugeIncrease, 0.f, 1.f));
+		const float Scaled = AlertGaugeIncrease * UAlertSettings::Get()->GaugeIncreaseScale;
+		Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + Scaled, 0.f, 1.f));
 	}
 
 	Multicast_PlayAlarmSound();

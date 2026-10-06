@@ -73,6 +73,17 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Reinforcement", meta = (ClampMin = "0"))
 	int32 MaxReinforcements = 4;
 
+	// ── 전체 보정 ──
+
+	/**
+	 * 소음·하자드를 막론하고 모든 경계도 증가량에 곱하는 전역 배율. 1.0이면 보정 없음.
+	 * 경계도는 GameState 하나에 붙는 월드 공용 게이지라, 인원이 많을수록 같은 시간에
+	 * 더 많은 소음/하자드 이벤트가 겹쳐 체감 상승 속도가 빨라진다 — 4인 플레이 테스트에서
+	 * 너무 빨리 찬다는 피드백을 받아 여기서 일괄 완화한다(2026-10-06).
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Balance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float GaugeIncreaseScale = 0.35f;
+
 #if WITH_EDITOR
 	/** 히스테리시스가 뒤집힌 값이 저장되지 않게 막는다 */
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

@@ -175,8 +175,10 @@ void UAlertComponent::HandleNoiseReported(const FNoiseEvent& Event, const FNoise
 	//
 	// AlertScale 은 발행측 스팸 필터가 넘겨주는 "새로운 정보량" 이다.
 	// 구르는 와인 랙은 경비에게 매번 제대로 들려야 하므로 Loudness01 을 깎으면 안 되고,
-	// 대신 이쪽만 낮춰서 한 번 굴린 것으로 경보가 차지 않게 한다
-	const float Delta = Profile.AlertDelta * Event.Loudness01 * Event.AlertScale;
+	// 대신 이쪽만 낮춰서 한 번 굴린 것으로 경보가 차지 않게 한다.
+	// GaugeIncreaseScale 은 하자드 쪽 증가량과 공유하는 전역 보정이다(다인원 보정, AlertSettings.h)
+	const float Delta = Profile.AlertDelta * Event.Loudness01 * Event.AlertScale
+			* UAlertSettings::Get()->GaugeIncreaseScale;
 
 	SilenceTimer = 0.f;   // 소음이 나면 무소음 타이머 리셋
 

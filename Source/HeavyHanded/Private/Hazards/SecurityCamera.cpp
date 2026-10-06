@@ -2,6 +2,7 @@
 
 #include "AI/GuardAIController.h"
 #include "Alert/AlertComponent.h"
+#include "Alert/AlertSettings.h"
 #include "Character/BaseCharacter.h"
 #include "Character/GuardCharacter.h"
 #include "Components/AudioComponent.h"
@@ -267,7 +268,8 @@ void ASecurityCamera::CheckDetection()
 			// Noise.ini 에 맞는 태그가 없어 SetAlertGauge01() 로 우회한다
 			if (UAlertComponent* Alert = UAlertComponent::Get(this))
 			{
-				Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + AlertGaugeIncrease, 0.f, 1.f));
+				const float Scaled = AlertGaugeIncrease * UAlertSettings::Get()->GaugeIncreaseScale;
+				Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + Scaled, 0.f, 1.f));
 			}
 
 			// GuardCallDelay 뒤에도 여전히 감지 중이면(카메라 범위를 안 벗어났으면)
@@ -284,8 +286,9 @@ void ASecurityCamera::CheckDetection()
 			// 조금씩 더 올린다(기획서 3장 "대형 금고 절단 +3%/초"와 동일한 성격의 지속 압박)
 			if (UAlertComponent* Alert = UAlertComponent::Get(this))
 			{
-				Alert->SetAlertGauge01(FMath::Clamp(
-					Alert->GetAlertGauge01() + ContinuousAlertGaugeRate * DetectionCheckInterval, 0.f, 1.f));
+				const float Scaled = ContinuousAlertGaugeRate * DetectionCheckInterval
+						* UAlertSettings::Get()->GaugeIncreaseScale;
+				Alert->SetAlertGauge01(FMath::Clamp(Alert->GetAlertGauge01() + Scaled, 0.f, 1.f));
 			}
 		}
 
