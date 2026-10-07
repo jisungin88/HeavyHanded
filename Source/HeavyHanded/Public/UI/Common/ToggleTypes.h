@@ -15,6 +15,7 @@ enum class EHHToggleVisualState : uint8
 	SelectedHovered,
 	Disabled,
 };
+
 USTRUCT(BlueprintType)
 struct FHHToggleStateColors
 {
