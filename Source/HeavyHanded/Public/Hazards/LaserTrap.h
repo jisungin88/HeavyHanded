@@ -63,7 +63,7 @@ protected:
 	/** 반응할 때 세계 경계도(0~1)에 더할 양 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|LaserTrap",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AlertGaugeIncrease = 0.25f;
+	float AlertGaugeIncrease = 0.03f;
 
 	/** 오버랩 경계에서 스치는 것만 걸러내는 디바운스 — 재무장 개념이 아니다 (다른 Hazard 클래스와 동일 사유) */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|LaserTrap",
