@@ -7,6 +7,9 @@
 class UStaticMeshComponent;
 class UBoxComponent;
 class ABaseCharacter;
+class ALootBase;
+class USoundBase;
+class UAudioComponent;
 
 /**
  * 안에 있는 동안 정해진 방향으로 강제 이동시키는 장치. (기획서 6장 — Hazard.Transport.*)
@@ -30,13 +33,24 @@ class ABaseCharacter;
  *   하려면 컨베이어 스스로 정확한 cm/s 를 갖고 있어야 해서, 캐릭터를 직접 그만큼 밀어낸다.
  *   스윕을 켜는 이유는 밀다가 벽을 뚫지 않게 하기 위해서다.
  *
- *   ⚠️ 알려진 한계 — 플레이어 자신의 WASD 이동과는 별도 경로로 밀기 때문에, 반대 방향으로
- *   걸어도 완전히 이기지 못할 수 있다(단순히 이동을 더하는 구조라 서로 상쇄되지 않는다).
- *   Base 버전에서는 이 정도로 두고, 어색하면 그때 다시 설계한다.
+ *   [점프로 빠져나가는 문제 — 속도 성분 상쇄로 해결]
+ *   AddActorWorldOffset 는 캐릭터 자신의 CharacterMovementComponent 와 별도 경로라,
+ *   자기 이동 속도(특히 점프 중 에어 컨트롤)가 ForceSpeed 보다 빠르면 단순히 더하는
+ *   구조상 상쇄되지 않고 반대 방향으로 뚫고 나갈 수 있었다. 그래서 Tick 에서 매 프레임
+ *   Velocity 중 벨트를 거스르는 성분만 0으로 되돌린 뒤 Offset 을 더한다 — 걷기든
+ *   점프든 반대 방향으로는 못 가고, 옆/정방향 이동은 그대로 자유롭다.
  *
  * [경비는 안 걸린다]
  *   OtherActor 를 ABaseCharacter 로만 캐스트해 Occupants 에 담는다. 다른 Hazard
  *   클래스들과 같은 이유로, 경비가 순찰 중 컨베이어에 실려 엉뚱한 곳으로 안 간다.
+ *
+ * [노획물도 실려 간다 — 단, 민 방식은 캐릭터와 다르다]
+ *   ABaseCharacter 로 캐스트가 안 되면 ALootBase 인지 한 번 더 확인해 LootOccupants 에
+ *   담는다. 노획물은 CharacterMovementComponent 가 없고 물리 바디(GetPhysicsRoot())로
+ *   움직이므로, AddActorWorldOffset 로 순간이동시키면 물리가 떨리거나 깨진다 —
+ *   대신 벨트 축 방향 속도만 SetPhysicsLinearVelocity 로 맞춰서 물리 시뮬레이션이
+ *   계속 자연스럽게 돌아가게 한다. 누가 들고 있는 중(GetPrimaryCarrier() != nullptr)
+ *   이면 플레이어 이동에 이미 딸려가므로 밀지 않는다.
  *
  * 서버 권위 — 미는 판정은 서버에서만 한다. 결과(캐릭터 위치)는 이동 복제로 전파된다.
  */
@@ -86,8 +100,39 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Transport")
 	bool bOverrideControl = false;
 
+	/**
+	 * 작동 중(발판 위에 누군가 있는 동안) 재생되는 루프 사운드. 루프 여부는 사운드
+	 * 에셋 쪽 설정이고, 여기서는 재생/정지 타이밍만 잡는다 — 첫 탑승자가 들어오면
+	 * 재생하고 마지막 탑승자가 나가면 멈춘다(ASecurityCamera::AlarmAudioComponent 와 동일 사유).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hazard|Visual")
+	TObjectPtr<USoundBase> RunningSound;
+
 private:
 	/** 지금 이 존 안에 있는 대상들. 매 틱 이만큼만 순회해서 민다 */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ABaseCharacter>> Occupants;
+
+	/**
+	 * 지금 이 존 안에 있는 노획물들. 캐릭터와 별도 배열인 이유 —
+	 * 노획물은 ALootBase::GetPhysicsRoot() 물리 바디로 움직이지
+	 * CharacterMovementComponent 가 없어서, Tick 에서 미는 방식 자체가 다르다
+	 * (AddActorWorldOffset 로 순간이동시키면 물리가 깨진다 — SetPhysicsLinearVelocity 를 쓴다).
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ALootBase>> LootOccupants;
+
+	/** 모든 머신에서 RunningSound 재생을 시작한다. 상태를 남기므로(계속 돌아야 함) Reliable 이다 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_StartRunningSound();
+	void Multicast_StartRunningSound_Implementation();
+
+	/** 모든 머신에서 RunningSound 재생을 멈춘다. 유실되면 소리가 영원히 안 멈추므로 Reliable 이다 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_StopRunningSound();
+	void Multicast_StopRunningSound_Implementation();
+
+	/** 재생 중인 루프 사운드 인스턴스. 재진입 시 중복 재생을 막으려고 들고 있는다 */
+	UPROPERTY()
+	TObjectPtr<UAudioComponent> RunningAudioComponent;
 };
