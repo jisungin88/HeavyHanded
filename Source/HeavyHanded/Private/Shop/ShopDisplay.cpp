@@ -62,9 +62,9 @@ void AShopDisplay::ResolvePriceFromCatalog()
 	if (!Settings->HasCatalog())
 	{
 		UE_LOG(LogShop, Warning,
-			TEXT("%s: 가격표가 지정되지 않았다. BP 가격 $%d 로 판다. "
+			TEXT("%s: 가격표가 지정되지 않았다 — 팔지 않는다. "
 				 "(Project Settings → Game → Shop → Shop Catalog)"),
-			*GetName(), Price);
+			*GetName());
 		return;
 	}
 
@@ -72,13 +72,14 @@ void AShopDisplay::ResolvePriceFromCatalog()
 	if (!Row)
 	{
 		// 표는 있는데 행이 없다 — 대개 태그를 새로 만들고 표에 넣는 것을 잊은 경우다.
-		// 조용히 BP 값으로 돌면 "왜 가격이 옛날 값이지" 로 한참 헤매게 된다.
 		UE_LOG(LogShop, Warning,
-			TEXT("%s: 가격표에 '%s' 행이 없다. BP 가격 $%d 로 판다. "
+			TEXT("%s: 가격표에 '%s' 행이 없다 — 팔지 않는다. "
 				 "(Data/ShopCatalog.csv 에 행을 넣고 DT_ShopCatalog 를 Reimport 할 것)"),
-			*GetName(), *ItemTag.ToString(), Price);
+			*GetName(), *ItemTag.ToString());
 		return;
 	}
+
+	bPriceResolved = true;
 
 	// BP 에 남아 있던 값과 다르면 어느 쪽이 이겼는지 남긴다. 같은 값이면 굳이 찍지 않는다 —
 	// 진열대가 늘어나면 정상 동작이 로그를 덮는다.
@@ -97,6 +98,16 @@ void AShopDisplay::OnInteract_Implementation(APawn* Interactor)
 	// BP 나 다른 경로에서 부를 수 있고, 클라이언트에서 통과하면 그 창에서만 잔액이 줄어든다.
 	if (!HasAuthority() || !IsValid(Interactor))
 	{
+		return;
+	}
+
+	// 가격표에서 값을 못 받았으면 팔지 않는다. 폴백으로 파는 쪽이 더 위험하다 —
+	// 옛 가격이나 공짜로 팔리고, 그건 플레이 중에 드러나지 않는다 (bPriceResolved 주석 참고).
+	if (!bPriceResolved)
+	{
+		ReportResult(EShopPurchaseResult::Unavailable, Interactor,
+			FString::Printf(TEXT("가격표에서 '%s' 가격을 못 받았다"),
+				ItemTag.IsValid() ? *ItemTag.ToString() : TEXT("(태그 없음)")));
 		return;
 	}
 
@@ -306,9 +317,13 @@ void AShopDisplay::ShowShopDebug(const FString& Message, const FColor& Color) co
 
 void AShopDisplay::WarnIfMisconfigured() const
 {
-	if (Price <= 0)
+	// 표에서 값을 받았는데 0 이하인 경우다. 표를 못 읽은 것(bPriceResolved=false)은
+	// ResolvePriceFromCatalog 가 이미 따로 찍었다.
+	if (bPriceResolved && Price <= 0)
 	{
-		UE_LOG(LogShop, Warning, TEXT("%s: 가격이 %d 다. 공짜로 팔린다."), *GetName(), Price);
+		UE_LOG(LogShop, Warning,
+			TEXT("%s: 가격표의 값이 %d 다. 공짜로 팔린다 — Data/ShopCatalog.csv 를 볼 것"),
+			*GetName(), Price);
 	}
 
 	if (!ItemTag.IsValid())
